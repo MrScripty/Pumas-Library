@@ -60,6 +60,7 @@ mod torch_alternatives;
 mod torch_inspection;
 mod torch_preview;
 mod torch_read_source;
+mod torch_verified;
 mod torch_workspace;
 
 pub use constraints::ConstraintsManager;
@@ -76,13 +77,14 @@ pub use torch_alternatives::{
     TorchReleaseOptionsStatus, TorchReleaseRecommendation,
 };
 pub use torch_inspection::{
-    TorchCapabilityProbe, TorchInstalledProbeReport, TorchInstalledRuntime,
-    TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus, TorchPythonChoice,
-    TorchRuntimeOptions, TorchRuntimeSelection,
+    TorchAdapterRequirement, TorchCapabilityProbe, TorchInstalledProbeReport,
+    TorchInstalledRuntime, TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus,
+    TorchPythonChoice, TorchRuntimeOptions,
 };
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
 };
+pub use torch_verified::{TorchVerifiedPackage, TorchVerifiedRuntime};
 
 use pumas_library::acquisition::{AcquisitionConsumer, AcquisitionService};
 use pumas_library::config::{AppId, PathsConfig};
@@ -179,26 +181,6 @@ async fn wait_for_install_cancel(cancel_flag: Arc<AtomicBool>) {
     }
 }
 
-async fn run_torch_operation_with_cancel<F, T>(
-    operation: F,
-    cancel_flag: Arc<AtomicBool>,
-    cleanup: Arc<installer::TorchCleanupTasks>,
-) -> Result<T>
-where
-    F: std::future::Future<Output = Result<T>>,
-{
-    tokio::select! {
-        biased;
-        _ = wait_for_install_cancel(cancel_flag) => {
-            cleanup.drain_residual_child_slots().await?;
-            Err(PumasError::InstallationFailed {
-                message: "Installation cancelled by user".into(),
-            })
-        }
-        result = operation => result,
-    }
-}
-
 fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
     // Preserve the established native-runtime marker; Torch must not overwrite
     // llama.cpp selection when a user activates an image runtime.
@@ -247,7 +229,6 @@ pub struct VersionManager {
     installation_shutdown: Arc<Mutex<Option<InstallationShutdown>>>,
     #[cfg(test)]
     torch_admission_pause: Option<Arc<TorchAdmissionPause>>,
-    torch_previews: torch_preview::TorchPreviews,
     torch_install_selections: torch_preview::TorchInstallSelections,
     #[cfg(test)]
     torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
@@ -407,7 +388,6 @@ impl VersionManager {
             installation_shutdown: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             torch_admission_pause: None,
-            torch_previews: Arc::new(Mutex::new(Default::default())),
             torch_install_selections: Arc::new(Mutex::new(Default::default())),
             #[cfg(test)]
             torch_publication_pause: None,
@@ -1240,19 +1220,7 @@ impl VersionManager {
                     // The tag was admitted as stable semver. Wheel availability is
                     // established by the staged pip install, not GitHub metadata.
                     let release = Self::torch_release_for_install(&tag)?;
-                    let input = match torch_selection {
-                        Some(selection) if selection.adapter == "bundled" => {
-                            let plan = run_torch_operation_with_cancel(
-                                manager.resolve_torch_install_selection(&selection),
-                                manager.cancel_flag.clone(),
-                                manager.torch_cleanup.clone(),
-                            )
-                            .await?;
-                            Some(installer::TorchInstallInput::Resolved(Box::new(plan)))
-                        }
-                        Some(selection) => Some(installer::TorchInstallInput::Selection(selection)),
-                        None => None,
-                    };
+                    let input = torch_selection;
                     (release, input)
                 } else {
                     (
@@ -5851,59 +5819,6 @@ mod tests {
         assert!(reached.load(Ordering::SeqCst));
         assert!(error.contains("stage reached without release lookup"));
         assert!(!cache.join("github-releases-pytorch-pytorch.json").exists());
-    }
-
-    #[cfg(target_os = "linux")]
-    #[tokio::test]
-    async fn cancelling_install_resolution_drains_owned_resolver_process_group() {
-        let workspace = Arc::new(tempfile::tempdir().unwrap());
-        let pid_path = workspace.path().join("install-resolver.pid");
-        let cleanup = Arc::new(installer::TorchCleanupTasks::default());
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        let mut command = tokio::process::Command::new("sh");
-        command
-            .arg("-c")
-            .arg("echo $$ > \"$1\"; sleep 30")
-            .arg("sh")
-            .arg(&pid_path);
-        let operation_workspace = workspace.clone();
-        let operation_cleanup = cleanup.clone();
-        let operation = async move {
-            let run = torch_preview::run_preview_resolver(
-                command,
-                &operation_workspace,
-                Duration::from_secs(30),
-                &operation_cleanup,
-            )
-            .await?;
-            Err::<(), _>(PumasError::Other(format!(
-                "Unexpected resolver completion: {run:?}"
-            )))
-        };
-        let cancel_for_task = cancel_flag.clone();
-        let cancel_task = tokio::spawn(async move {
-            tokio::time::timeout(Duration::from_secs(5), async {
-                while !pid_path.exists() {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-            })
-            .await
-            .unwrap();
-            cancel_for_task.store(true, Ordering::SeqCst);
-        });
-        let result = run_torch_operation_with_cancel(operation, cancel_flag, cleanup.clone()).await;
-        cancel_task.await.unwrap();
-        assert!(matches!(
-            result,
-            Err(PumasError::InstallationFailed { message }) if message.contains("cancelled")
-        ));
-        let pid: i32 = std::fs::read_to_string(workspace.path().join("install-resolver.pid"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert!(!pumas_library::platform::linux_group::group_has_live_members(pid).unwrap());
-        cleanup.drain().await.unwrap();
     }
 
     #[test]

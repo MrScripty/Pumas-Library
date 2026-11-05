@@ -401,7 +401,7 @@ fn capture_installed_with_native(
         .collect::<io::Result<Vec<_>>>()
         .map_err(PumasError::from)?;
     let expected = tempfile::tempdir().map_err(PumasError::from)?;
-    installer::write_embedded_torch_runtime(expected.path())?;
+    installer::write_embedded_torch_sidecar(expected.path())?;
     let (embedded, _) = tree_manifest(expected.path(), &[], false)?;
     let code_names: BTreeSet<_> = embedded
         .iter()
@@ -412,15 +412,7 @@ fn capture_installed_with_native(
         .iter()
         .filter(|member| member.path().ends_with(".py"))
     {
-        let installed = runtime.join(member.path());
-        // Direct/resolved installers remove this installer-only script. The
-        // bundled installer retains it. Both paths require regular owned code.
-        if member.path() == "validate_runtime.py"
-            && matches!(std::fs::symlink_metadata(&installed), Err(error) if error.kind() == io::ErrorKind::NotFound)
-        {
-            continue;
-        }
-        file_manifest(&installed, member.path().into())?;
+        file_manifest(&runtime.join(member.path()), member.path().into())?;
     }
     let (sidecar, sidecar_omissions) = tree_manifest(runtime, &["venv".into()], false)?;
     if sidecar

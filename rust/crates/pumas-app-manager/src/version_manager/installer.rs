@@ -5,30 +5,16 @@
 mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
-use super::managed_python::ManagedPythonIdentity;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use torch::validate_staged_files;
+#[cfg(test)]
+pub(crate) use torch::TorchPublicationPause;
 pub(crate) use torch::TorchVersionsLock;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use torch::{move_verified_packages, BootstrapPackages};
-pub(crate) use torch::{write_embedded_torch_runtime, StagedFilesManifest};
-pub(crate) struct TorchInstallPlan {
-    pub(crate) preview: crate::version_manager::TorchPreview,
-    pub(crate) requirements: String,
-    pub(crate) resolution: String,
-    pub(crate) report: String,
-    pub(crate) interpreter_path: PathBuf,
-    pub(crate) interpreter_hash: String,
-    pub(crate) managed_python: ManagedPythonIdentity,
-}
-pub(crate) enum TorchInstallInput {
-    Selection(super::torch_preview::TorchInstallSelection),
-    Resolved(Box<TorchInstallPlan>),
-}
-#[cfg(test)]
-pub(crate) use torch::TorchPublicationPause;
+pub(crate) use torch::{write_embedded_torch_sidecar, StagedFilesManifest};
 
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use chrono::Utc;
@@ -1753,7 +1739,7 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
-        torch_input: Option<TorchInstallInput>,
+        torch_selection: Option<super::torch_preview::TorchInstallSelection>,
     ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
@@ -1762,7 +1748,7 @@ impl VersionInstaller {
                     .await
             }
             AppId::Torch => {
-                self.install_torch_runtime(tag, release, progress_tx, torch_input)
+                self.install_torch_runtime(tag, release, progress_tx, torch_selection)
                     .await
             }
             AppId::OnnxRuntime => Err(PumasError::Other(
@@ -3602,9 +3588,7 @@ impl VersionInstaller {
             release_date: Some(release.published_at.clone()),
             release_notes: release.body.clone(),
             download_url: if self.app_id == AppId::Torch {
-                if let Some(recipe) = torch::torch_recipe_for_tag(tag) {
-                    Some(recipe.torch_wheel_url.to_string())
-                } else {
+                {
                     std::fs::read(version_dir.join("resolution.json"))
                         .ok()
                         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())

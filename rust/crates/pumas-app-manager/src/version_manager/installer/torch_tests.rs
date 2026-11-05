@@ -48,9 +48,11 @@ fn mock_runtime(staging: &Path) -> Result<PathBuf> {
         .map_err(PumasError::from)?;
     std::fs::write(
         runtime.join("runtime.json"),
-        r#"{"recipe_id":"torch-upstream-2.9.1-r1"}"#,
+        r#"{"recipe_id":"upstream-install-v2.9.1-cu130-3.12-none"}"#,
     )
     .map_err(PumasError::from)?;
+    std::fs::write(runtime.join("resolution.json"), r#"{"torch":"2.9.1+cu130","artifacts":[{"name":"torch","version":"2.9.1+cu130","url":"https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl","sha256":"e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b"}]}"#)
+        .map_err(PumasError::from)?;
     Ok(runtime)
 }
 

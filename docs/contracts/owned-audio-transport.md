@@ -103,10 +103,10 @@ resolved packages are moved in. A resolved package may therefore reuse a bootstr
 name without being removed or exempted from its dependency manifest. Existing
 runtimes with unreported bootstrap material continue to refuse capture.
 
-The installer-only `validate_runtime.py` member may be absent after direct or
-resolved installation; when a bundled runtime retains it, it must be a regular
-owned member. Other required code remains mandatory; installed code is not
-compared with embedded bytes. Capture still
+Every embedded sidecar member must be present as a regular owned file; any
+other executable Python, including a `validate_runtime.py` left by the former
+fixed preset, refuses capture. Installed code is not compared with embedded
+bytes. Capture still
 rejects bytecode and unreported members; successful import checks do not weaken
 the retained manifest.
 
@@ -141,7 +141,7 @@ Before making shipping audio available through the existing generic endpoint, th
 owning runtime must qualify and retain the installed interpreter and complete
 immutable dependency/loader code, materialize all imported modules in the
 runtime recipe, and prove the real loader's full selected-model read set.
-The bundled Transformers 4.57.6 recipe is not sufficient for this loader, which
+Transformers 4.57.6, as recorded for the verified image combination, is not sufficient for this loader, which
 requires Transformers >=5.4. Bind
 the client and stop callback to that exact process generation, register its
 private slot owner through the existing model-operation boundary, and derive

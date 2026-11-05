@@ -13,8 +13,8 @@ const unconditionalStop = vi.fn<(profileId: string) => Promise<unknown>>();
 const getProfiles = vi.fn<() => Promise<unknown>>().mockResolvedValue({ success: true, snapshot: { profiles: [] } });
 const baseOptions: TorchRuntimeOptions = {
   builds: ['cpu'], pythons: [], adapters: ['none'],
-  bundledPresetAvailable: false, defaultAdapter: 'none', defaultBuild: 'auto',
-  preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+  defaultAdapter: 'none', defaultBuild: 'auto',
+  verified: [], adapterRequirements: [],
   installed: [],
 };
 vi.mock('../api/adapter', () => ({

@@ -2,8 +2,8 @@
 
 The public ``/v1/images/generations`` route is gateway-owned and must not
 be served here. The provider operation lives at ``POST
-/api/images/generate``, ``/v1/models`` stays OpenAI-shaped, and ``/health``
-must match the staged runtime recipe, including the image capability.
+/api/images/generate``, ``/v1/models`` stays OpenAI-shaped, and ``/health`` reports the protocol and
+image capability the Rust client requires.
 """
 
 import asyncio
@@ -33,7 +33,6 @@ from test_validation_and_app import (  # noqa: E402
 _install_dependency_stubs()
 
 import serve  # noqa: E402
-import validate_runtime  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from image_api import ImageRequest, generate_image  # noqa: E402
 from model_manager import LoadedModel, ModelSlot, SlotState  # noqa: E402
@@ -69,39 +68,17 @@ class ImageProviderBoundaryTests(unittest.TestCase):
         self.assertIn("/v1/chat/completions", paths)
         self.assertIn("/v1/completions", paths)
 
-    def test_health_handshake_matches_runtime_recipe(self):
-        recipe = json.loads((TORCH_SERVER_ROOT / "runtime" / "runtime.json").read_text())
+    def test_health_reports_the_protocol_and_capability_the_client_requires(self):
+        # pumas-app-manager's TorchClient admits only protocol 3 with
+        # image_generation (SUPPORTED_TORCH_PROTOCOL and
+        # TORCH_IMAGE_GENERATION_CAPABILITY in torch_client.rs).
         app = serve.create_app()
         endpoint = next(route.endpoint for route in app.routes if route.path == "/health")
         health = asyncio.run(endpoint())
 
         self.assertEqual(health["status"], "ok")
-        self.assertEqual(health["protocol"], recipe["protocol"])
-        self.assertEqual(health["capabilities"], recipe["capabilities"])
-        self.assertEqual(recipe["protocol"], 3)
-        self.assertEqual(recipe["recipe_id"], "torch-runtime-0.1.6")
-
-    def test_runtime_qualification_rejects_recipe_sidecar_drift(self):
-        recipe = {"protocol": 3, "capabilities": ["image_generation"]}
-        validate_runtime.validate_recipe_handshake(
-            recipe,
-            {"status": "ok", "protocol": 3, "capabilities": ["image_generation"]},
-        )
-        validate_runtime.validate_recipe_handshake(
-            recipe,
-            {
-                "status": "ok",
-                "protocol": 3,
-                "capabilities": ["image_generation", "future_capability"],
-            },
-        )
-        for health in (
-            {"status": "ok", "protocol": 2, "capabilities": ["image_generation"]},
-            {"status": "ok", "protocol": 3, "capabilities": []},
-            {"status": "starting", "protocol": 3, "capabilities": ["image_generation"]},
-        ):
-            with self.subTest(health=health), self.assertRaises(RuntimeError):
-                validate_runtime.validate_recipe_handshake(recipe, health)
+        self.assertEqual(health["protocol"], 3)
+        self.assertIn("image_generation", health["capabilities"])
 
     def test_generate_image_leases_by_model_id(self):
         seen = {}

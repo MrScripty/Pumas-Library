@@ -86,21 +86,28 @@ test('compiled preload forwards exact anonymous S3 pins and runtime-decodes obse
   }
 });
 
-test('Torch runtime options require manager preset capability and an offered default adapter', async () => {
+test('Torch runtime options require verified records and an offered default adapter', async () => {
   const harness = loadCompiledPreload();
   const options = {
     builds: ['cpu'], defaultBuild: 'auto', pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
-    adapters: ['none', 'flux2'], bundledPresetAvailable: true, defaultAdapter: 'flux2',
-    preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+    adapters: ['none', 'flux2'], defaultAdapter: 'flux2',
+    verified: [{
+      tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2'], verifiedOn: '2026-09-23',
+      scope: 'Adapter imports passed.', sourceCommit: '5d373bf8', packages: [{ name: 'diffusers', version: '0.37.0' }],
+    }],
+    adapterRequirements: [{ adapter: 'flux2', tag: 'v2.9.1', build: 'cu130', python: 'python3.12' }],
     installed: [],
   };
-  for (const valid of [options, { ...options, adapters: ['none'], bundledPresetAvailable: false, defaultAdapter: 'none' }]) {
+  for (const valid of [options, { ...options, adapters: ['none'], defaultAdapter: 'none', verified: [], adapterRequirements: [] }]) {
     harness.respondWith(valid);
     assert.deepEqual(toPlainValue(await harness.api.get_torch_runtime_options()), valid);
   }
   for (const invalid of [
-    { ...options, bundledPresetAvailable: undefined },
-    { ...options, bundledPresetAvailable: 'false' },
+    { ...options, verified: undefined },
+    { ...options, adapterRequirements: undefined },
+    { ...options, adapterRequirements: [{ adapter: 'flux2', tag: 'v2.9.1', build: 'cu130' }] },
+    { ...options, verified: [{ ...options.verified[0], packages: [{ name: 'diffusers' }] }] },
+    { ...options, bundledPresetAvailable: true },
     { ...options, defaultAdapter: undefined },
     { ...options, defaultAdapter: 'bundled' },
     { ...options, adapters: ['none'], defaultAdapter: 'flux2' },
@@ -115,21 +122,21 @@ test('Torch runtime options require manager preset capability and an offered def
   }
 });
 
-test('Torch preview decodes resolved and all typed rejection outcomes without reading message wording', async () => {
+test('Torch preview decodes ready and all typed rejection outcomes without reading message wording', async () => {
   const harness = loadCompiledPreload();
   const request = { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'none' };
-  const resolved = {
-    status: 'resolved',
+  const ready = {
+    status: 'ready',
     preview: {
       previewId: 'preview-42', ...request, expiresInSeconds: 300,
       qualification: 'unverified',
       artifacts: [{ name: 'torch', version: '2.10.0', url: 'https://download.pytorch.org/torch.whl', sha256: 'abc123' }],
     },
   };
-  harness.respondWith(resolved);
-  assert.deepEqual(toPlainValue(await harness.api.preview_torch_runtime(request)), resolved);
+  harness.respondWith(ready);
+  assert.deepEqual(toPlainValue(await harness.api.preview_torch_runtime(request)), ready);
   assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), request);
-  const qualified = { status: 'resolved', preview: { ...resolved.preview, qualification: 'qualified' } };
+  const qualified = { status: 'ready', preview: { ...ready.preview, qualification: 'qualified' } };
   harness.respondWith(qualified);
   assert.deepEqual(toPlainValue(await harness.api.preview_torch_runtime(request)), qualified);
 
@@ -148,16 +155,17 @@ test('Torch preview decodes resolved and all typed rejection outcomes without re
     null,
     { status: 'rejected', reason: 'unknown', message: 'unsupported' },
     { status: 'rejected', reason: 'unsupported', message: 42 },
-    { status: 'rejected', reason: 'unsupported', message: 'no wheel', preview: resolved.preview },
+    { status: 'rejected', reason: 'unsupported', message: 'no wheel', preview: ready.preview },
     { status: 'rejected', reason: 'unsupported', message: 'no wheel', extra: true },
-    { status: 'resolved', preview: { ...resolved.preview, artifacts: [], extra: true } },
-    { status: 'resolved', preview: { ...resolved.preview, qualification: 'unexpected-value' } },
-    { status: 'resolved', preview: { ...resolved.preview, expiresInSeconds: '300' } },
+    { status: 'resolved', preview: ready.preview },
+    { status: 'ready', preview: { ...ready.preview, artifacts: [], extra: true } },
+    { status: 'ready', preview: { ...ready.preview, qualification: 'unexpected-value' } },
+    { status: 'ready', preview: { ...ready.preview, expiresInSeconds: '300' } },
   ]) {
     harness.respondWith(malformed);
     await assert.rejects(harness.api.preview_torch_runtime(request), { name: 'DesktopContractError' });
   }
-  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'preview_torch_runtime').length, 14);
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'preview_torch_runtime').length, 15);
 });
 
 test('installation start validates exact requests and discriminated outcomes without retry', async () => {

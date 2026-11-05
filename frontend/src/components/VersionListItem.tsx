@@ -12,12 +12,13 @@ import { IconButton } from './ui';
 import { VersionListItemButton } from './VersionListItemButton';
 import { VersionListItemInfo } from './VersionListItemInfo';
 import { getVersionInstallDisplayState } from './VersionListItemState';
-import type { TorchInstalledConfig } from '../types/torch-install';
+import type { TorchInstalledConfig, TorchVerifiedRuntime } from '../types/torch-install';
 
 interface VersionListItemProps {
   appId?: string;
   release: VersionRelease;
   torchInstalledConfig?: TorchInstalledConfig;
+  torchVerified?: readonly TorchVerifiedRuntime[];
   isInstalled: boolean;
   isInstalling: boolean;
   progress: InstallationProgress | null;
@@ -43,6 +44,7 @@ export function VersionListItem({
   appId,
   release,
   torchInstalledConfig,
+  torchVerified,
   isInstalled,
   isInstalling,
   progress,
@@ -91,6 +93,7 @@ export function VersionListItem({
           release={release}
           isInstalled={isInstalled}
           torchInstalledConfig={torchInstalledConfig}
+          torchVerified={torchVerified}
           onOpenLogPath={onOpenLogPath}
           onOpenUrl={onOpenUrl}
         />

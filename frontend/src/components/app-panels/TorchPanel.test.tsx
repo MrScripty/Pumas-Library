@@ -205,8 +205,8 @@ describe('TorchPanel shared version controls', () => {
       get_torch_release_options: discoverRelease,
       get_torch_runtime_options: vi.fn().mockResolvedValue({
         builds: ['cpu'], defaultBuild: 'auto', pythons: [],
-        adapters: ['none'], bundledPresetAvailable: false, defaultAdapter: 'none',
-        preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+        adapters: ['none'], defaultAdapter: 'none',
+        verified: [], adapterRequirements: [],
       }),
       preview_torch_runtime: vi.fn().mockResolvedValue({
         status: 'ready', preview: {

@@ -75,6 +75,17 @@ downloads and known limitations.
 - Desktop Torch install choices, saved probe results, startup trials and
   alternative wheels are declared once by the backend and validated from that
   declaration. The saved probe result carries only the checks the desktop shows.
+- Managed Torch runtimes no longer install from a fixed package lock. The
+  fixed v2.9.1 preset and its embedded lock are replaced by verified
+  combinations (`torch-server/runtime/verified-runtimes.json`), which the
+  install dialog offers as shortcuts that resolve current package versions; a
+  runtime is reported as verified only when its packages match the recorded
+  versions. The FLUX.2 and Nunchaku image adapters name their packages without
+  version pins, and Nunchaku is a regular adapter choice, offered and accepted
+  only for the selection its wheel supports (Torch v2.9.1, cu130, Python
+  3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
+  from the preset keep working. Torch install options replace
+  `bundledPresetAvailable` and `preset` with `verified`.
 - Desktop update streams (model library, downloads, runtime profiles, serving
   status and status telemetry) are validated against the backend's declaration.
   A rejected desktop payload says which field and rule failed.

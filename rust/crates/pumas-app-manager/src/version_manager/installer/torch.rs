@@ -731,7 +731,7 @@ mod cross_process_recovery_tests {
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let task = spawn_blocking_with_stage(stage.clone(), move || {
-            write_embedded_torch_runtime(&runtime).unwrap();
+            write_embedded_torch_sidecar(&runtime).unwrap();
             started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
         });
@@ -741,7 +741,7 @@ mod cross_process_recovery_tests {
 
         let metadata = MetadataManager::new(versions);
         assert!(retry_pending_torch_cleanup(versions, &metadata).is_err());
-        assert!(stage_path.join("runtime/runtime.json").exists());
+        assert!(stage_path.join("runtime/serve.py").exists());
         release_tx.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
@@ -1006,35 +1006,6 @@ mod publication_identity_tests {
     }
 }
 
-pub(crate) struct TorchRuntimeRecipe {
-    #[cfg(test)]
-    pub(crate) release_tag: &'static str,
-    pub(crate) recipe_id: &'static str,
-    pub(crate) torch_version: &'static str,
-    pub(crate) torch_wheel_url: &'static str,
-    pub(crate) torch_wheel_sha256: &'static str,
-    pub(crate) torchvision_wheel_url: &'static str,
-    pub(crate) torchvision_wheel_sha256: &'static str,
-}
-
-const TORCH_291: TorchRuntimeRecipe = TorchRuntimeRecipe {
-    #[cfg(test)]
-    release_tag: "v2.9.1",
-    recipe_id: "torch-upstream-2.9.1-r1",
-    torch_version: "2.9.1+cu130",
-    torch_wheel_url: "https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl",
-    torch_wheel_sha256: "e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b",
-    torchvision_wheel_url: "https://download-r2.pytorch.org/whl/cu130/torchvision-0.24.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl",
-    torchvision_wheel_sha256: "6939dd403cc28ab0a46f53e6c86e2e852cf65771c1b0ddd09c44c541a1cdbad9",
-};
-
-pub(crate) fn torch_recipe_for_tag(tag: &str) -> Option<&'static TorchRuntimeRecipe> {
-    match tag {
-        "v2.9.1" => Some(&TORCH_291),
-        _ => None,
-    }
-}
-
 pub(crate) fn is_torch_runtime_release(release: &GitHubRelease) -> bool {
     !release.prerelease && stable_torch_tag(&release.tag_name).is_some()
 }
@@ -1142,47 +1113,15 @@ pub(super) fn schedule_torch_orphan_prune(
     });
 }
 
-/// Materialize the qualified sidecar and lock from bytes embedded in the app binary.
-pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
-    let lock = include_str!("../../../../../../torch-server/runtime/requirements.lock");
-    for (name, url, hash) in [
-        (
-            "torch",
-            TORCH_291.torch_wheel_url,
-            TORCH_291.torch_wheel_sha256,
-        ),
-        (
-            "torchvision",
-            TORCH_291.torchvision_wheel_url,
-            TORCH_291.torchvision_wheel_sha256,
-        ),
-    ] {
-        if !lock.contains(&format!("{name} @ {url}"))
-            || !lock.contains(&format!("--hash=sha256:{hash}"))
-        {
-            return Err(failed(format!(
-                "Embedded lock disagrees with the qualified {name} wheel"
-            )));
-        }
-    }
-    if !include_str!("../../../../../../torch-server/validate_runtime.py").contains(&format!(
-        "torch.__version__ != \"{}\"",
-        TORCH_291.torch_version
-    )) {
-        return Err(failed(
-            "Embedded runtime validator disagrees with the qualified Torch version",
-        ));
-    }
+/// Materialize the sidecar code embedded in the app binary. The runtime's
+/// packages are resolved per installation, never from an embedded lock.
+pub(crate) fn write_embedded_torch_sidecar(destination: &Path) -> Result<()> {
     std::fs::create_dir_all(destination).map_err(PumasError::from)?;
     for (name, contents) in [
         ("LICENSE", include_str!("../../../../../../LICENSE")),
         (
             "serve.py",
             include_str!("../../../../../../torch-server/serve.py"),
-        ),
-        (
-            "validate_runtime.py",
-            include_str!("../../../../../../torch-server/validate_runtime.py"),
         ),
         (
             "resolve_runtime.py",
@@ -1292,7 +1231,6 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             "loaders/sherry_loader.py",
             include_str!("../../../../../../torch-server/loaders/sherry_loader.py"),
         ),
-        ("requirements.txt", lock),
     ] {
         let path = destination.join(name);
         if let Some(parent) = path.parent() {
@@ -1300,30 +1238,7 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
         }
         std::fs::write(path, contents).map_err(PumasError::from)?;
     }
-    let recipe = serde_json::json!({
-        "recipe_id": TORCH_291.recipe_id,
-        "protocol": SUPPORTED_TORCH_PROTOCOL,
-        "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
-        "python": "3.12",
-        "platform": "linux-x86_64",
-    });
-    std::fs::write(
-        destination.join("runtime.json"),
-        serde_json::to_vec_pretty(&recipe)
-            .map_err(|e| failed(format!("Cannot serialize Torch recipe: {e}")))?,
-    )
-    .map_err(PumasError::from)?;
     Ok(())
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RuntimeRecipe {
-    recipe_id: String,
-    protocol: u32,
-    capabilities: Vec<String>,
-    python: String,
-    platform: String,
 }
 
 fn failed(message: impl Into<String>) -> PumasError {
@@ -1354,26 +1269,6 @@ fn managed_python_identity_record(
             "sha256": interpreter_hash,
         },
     })
-}
-
-fn managed_python_record(plan: &super::TorchInstallPlan) -> serde_json::Value {
-    managed_python_identity_record(&plan.managed_python, &plan.interpreter_hash)
-}
-
-fn record_managed_python(runtime: &Path, plan: &super::TorchInstallPlan) -> Result<()> {
-    let path = runtime.join("runtime.json");
-    let bytes = std::fs::read(&path).map_err(PumasError::from)?;
-    let mut recipe: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|error| failed(format!("Invalid Torch runtime recipe: {error}")))?;
-    if !recipe.is_object() {
-        return Err(failed("Torch runtime recipe is not an object"));
-    }
-    recipe["managed_python"] = managed_python_record(plan);
-    std::fs::write(
-        path,
-        serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
-    )
-    .map_err(PumasError::from)
 }
 
 fn cuda_build_for_driver(version: (u32, u32, u32)) -> Option<&'static str> {
@@ -1620,6 +1515,13 @@ fn validate_direct_torch_report(
                         &artifact.version,
                         cfg!(target_os = "macos") && build == "cpu",
                     )
+            } else if adapter == "nunchaku" && artifact.name == "nunchaku" {
+                // The adapter's own wheel comes from its project's releases;
+                // the resolver admits only its exact URL and hash.
+                url.host_str() == Some("github.com")
+                    && url
+                        .path()
+                        .starts_with("/nunchux-ai/nunchaku/releases/download/")
             } else {
                 (url.host_str() == Some("files.pythonhosted.org")
                     && url.path().starts_with("/packages/"))
@@ -1690,7 +1592,7 @@ fn validate_direct_torch_report(
             return Err(failed("Torch report omitted a required core dependency"));
         }
     }
-    if adapter == "flux2" {
+    if adapter == "flux2" || adapter == "nunchaku" {
         for required in [
             "torchvision",
             "diffusers",
@@ -1703,6 +1605,9 @@ fn validate_direct_torch_report(
             if !names.contains(required) {
                 return Err(failed("Torch report omitted an image dependency"));
             }
+        }
+        if adapter == "nunchaku" && !names.contains("nunchaku") {
+            return Err(failed("Torch report omitted the Nunchaku adapter wheel"));
         }
     }
     if adapter == "cohere-asr" {
@@ -2023,10 +1928,8 @@ impl VersionInstaller {
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        if !["none", "flux2", "cohere-asr"].contains(&selection.adapter.as_str()) {
-            return Err(failed(
-                "This Torch dependency profile requires a resolved plan",
-            ));
+        if !["none", "flux2", "nunchaku", "cohere-asr"].contains(&selection.adapter.as_str()) {
+            return Err(failed("Unknown Torch dependency profile"));
         }
         if selection.adapter == "cohere-asr" {
             super::super::cohere_asr_profile::validate_selection(
@@ -2138,12 +2041,10 @@ impl VersionInstaller {
         let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
         spawn_blocking_with_stage(staging.clone(), move || {
-            write_embedded_torch_runtime(&runtime_for_write)
+            write_embedded_torch_sidecar(&runtime_for_write)
         })
         .await
         .map_err(|error| failed(format!("Runtime staging task failed: {error}")))??;
-        std::fs::remove_file(runtime.join("requirements.txt")).map_err(PumasError::from)?;
-        std::fs::remove_file(runtime.join("validate_runtime.py")).map_err(PumasError::from)?;
         let mut venv = Command::new(&managed_python.executable);
         venv.args(["-I", "-B", "-m", "venv"])
             .arg(runtime.join("venv"))
@@ -2288,123 +2189,12 @@ impl VersionInstaller {
         Ok(DirectTorchAttempt::Installed(runtime))
     }
 
-    async fn stage_resolved_torch_runtime(
-        &self,
-        plan: &TorchInstallPlan,
-        staging: &std::sync::Arc<TorchPendingStage>,
-        log_path: &Path,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<PathBuf> {
-        // The legacy retained-plan installer does not produce the staged RECORD
-        // manifest required by the ASR byte owner. Public Ready selections use
-        // the direct installer, which validates and publishes that manifest.
-        if plan.preview.adapter == "cohere-asr" {
-            return Err(failed(
-                "cohere-asr requires the public direct installation selection",
-            ));
-        }
-        let runtime = staging.path().join("runtime");
-        let runtime_for_write = runtime.clone();
-        spawn_blocking_with_stage(staging.clone(), move || {
-            write_embedded_torch_runtime(&runtime_for_write)
-        })
-        .await
-        .map_err(|e| failed(format!("Runtime staging task failed: {e}")))??;
-        std::fs::remove_file(runtime.join("validate_runtime.py")).map_err(PumasError::from)?;
-        if std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
-            != plan.managed_python.executable
-        {
-            return Err(failed("Selected Python executable changed after preview"));
-        }
-        let interpreter = &plan.interpreter_path;
-        let mut venv = Command::new(interpreter);
-        venv.args(["-I", "-B", "-m", "venv"])
-            .arg(runtime.join("venv"))
-            .env("PYTHONDONTWRITEBYTECODE", "1");
-        self.run_runtime_command(
-            venv,
-            log_path,
-            &format!("Creating Python environment with {}", interpreter.display()),
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        std::fs::write(runtime.join("requirements.txt"), &plan.requirements)
-            .map_err(PumasError::from)?;
-        std::fs::write(runtime.join("resolution.json"), &plan.resolution)
-            .map_err(PumasError::from)?;
-        std::fs::write(runtime.join("pip-resolution.json"), &plan.report)
-            .map_err(PumasError::from)?;
-        let recipe = serde_json::json!({
-            "recipe_id": format!("upstream-preview-{}-{}-{}-{}", plan.preview.tag, plan.preview.build, plan.preview.python, plan.preview.adapter),
-            "protocol": SUPPORTED_TORCH_PROTOCOL,
-            "capabilities": if plan.preview.adapter == "cohere-asr" { Vec::<&str>::new() } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
-            "qualification": "not verified by Pumas",
-            "build": plan.preview.build,
-            "python": plan.preview.python,
-            "adapter": plan.preview.adapter,
-            "managed_python": managed_python_record(plan),
-            "artifacts": plan.preview.artifacts,
-        });
-        std::fs::write(
-            runtime.join("runtime.json"),
-            serde_json::to_vec_pretty(&recipe).map_err(|e| failed(e.to_string()))?,
-        )
-        .map_err(PumasError::from)?;
-        let python = pumas_library::platform::paths::venv_python(&runtime);
-        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
-        let download_progress_path = runtime.join("download-progress.json");
-        let mut install = Command::new(&python);
-        install
-            .args(["-I", "-B"])
-            .arg(runtime.join("resolve_runtime.py"))
-            .arg("--_pumas-pip-progress-worker")
-            .arg(&download_progress_path)
-            .args([
-                "--isolated",
-                "install",
-                "--no-deps",
-                "--require-hashes",
-                "--only-binary=:all:",
-                "--disable-pip-version-check",
-                "-r",
-            ])
-            .arg(runtime.join("requirements.txt"))
-            .arg("--cache-dir")
-            .arg(pip_cache);
-        let status = self
-            .run_runtime_command_status_with_download_progress(
-                install,
-                log_path,
-                "Installing resolved wheel artifacts",
-                progress_tx,
-                Some(staging.clone()),
-                Some(&download_progress_path),
-            )
-            .await?;
-        if !status.success() {
-            return Err(failed(
-                "Installing resolved wheel artifacts failed; see installation log",
-            ));
-        }
-        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
-        self.run_runtime_command(
-            probe,
-            log_path,
-            "Checking installed Torch identity and CPU operation",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        Ok(runtime)
-    }
-
     pub(super) async fn install_torch_runtime(
         &self,
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
-        input: Option<TorchInstallInput>,
+        selection: Option<super::super::torch_preview::TorchInstallSelection>,
     ) -> Result<()> {
         let _attempt = self
             .torch_attempt_lock
@@ -2412,7 +2202,7 @@ impl VersionInstaller {
             .map_err(|_| failed("Torch installation already active"))?;
         self.torch_control.start();
         let result = self
-            .install_torch_runtime_inner(tag, release, progress_tx, input)
+            .install_torch_runtime_inner(tag, release, progress_tx, selection)
             .await;
         self.torch_control.finish();
         result
@@ -2423,7 +2213,7 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
-        input: Option<TorchInstallInput>,
+        selection: Option<super::super::torch_preview::TorchInstallSelection>,
     ) -> Result<()> {
         if !cfg!(any(
             all(target_os = "linux", target_arch = "x86_64"),
@@ -2441,25 +2231,8 @@ impl VersionInstaller {
                 "Unsupported upstream PyTorch release or mismatched tag",
             ));
         }
-        let plan = match input.as_ref() {
-            Some(TorchInstallInput::Resolved(plan)) => Some(plan.as_ref()),
-            _ => None,
-        };
-        let selection = match input.as_ref() {
-            Some(TorchInstallInput::Selection(selection)) => Some(selection),
-            _ => None,
-        };
-        let recipe = if selection.is_none()
-            && cfg!(all(target_os = "linux", target_arch = "x86_64"))
-            && plan.is_none_or(|p| p.preview.qualification == "qualified")
-        {
-            torch_recipe_for_tag(tag)
-        } else {
-            None
-        };
-        if plan.is_some_and(|p| p.preview.tag != tag)
-            || selection.is_some_and(|selection| selection.tag != tag)
-        {
+        let selection = selection.as_ref();
+        if selection.is_some_and(|selection| selection.tag != tag) {
             return Err(failed("Torch preview tag mismatch"));
         }
         if !tag
@@ -2524,7 +2297,7 @@ impl VersionInstaller {
                 ));
             }
         }
-        if recipe.is_none() && input.is_none() {
+        if selection.is_none() {
             #[cfg(test)]
             if self.torch_stage_override.is_none() {
                 return Err(failed(
@@ -2554,7 +2327,7 @@ impl VersionInstaller {
             Some(log_path.to_string_lossy().as_ref()),
         );
         let result = self
-            .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
+            .stage_torch_runtime(selection, &staging, &log_path, &progress_tx)
             .await;
         #[cfg(test)]
         if result.is_ok() && self.torch_stage_override.is_some() {
@@ -2611,8 +2384,7 @@ impl VersionInstaller {
                             &destination,
                             &progress_tx,
                             staging.clone(),
-                            plan
-                                .map(|plan| format!("Python {}", plan.managed_python.version)),
+                            None,
                         )
                         .await;
                     if result.is_err() {
@@ -2661,8 +2433,6 @@ impl VersionInstaller {
 
     async fn stage_torch_runtime(
         &self,
-        recipe_spec: Option<&TorchRuntimeRecipe>,
-        plan: Option<&TorchInstallPlan>,
         selection: Option<&super::super::torch_preview::TorchInstallSelection>,
         staging: &std::sync::Arc<TorchPendingStage>,
         log_path: &Path,
@@ -2672,164 +2442,14 @@ impl VersionInstaller {
         if let Some(stage) = &self.torch_stage_override {
             return stage(staging.path());
         }
-        if let Some(plan) = plan.filter(|p| p.preview.qualification != "qualified") {
-            return self
-                .stage_resolved_torch_runtime(plan, staging, log_path, progress_tx)
-                .await;
-        }
         if let Some(selection) = selection {
             return self
                 .stage_selected_torch_runtime(selection, staging, log_path, progress_tx)
                 .await;
         }
-        let recipe_spec = recipe_spec.expect("checked above");
-        let runtime = staging.path().join("runtime");
-        let runtime_for_write = runtime.clone();
-        spawn_blocking_with_stage(staging.clone(), move || {
-            write_embedded_torch_runtime(&runtime_for_write)
-        })
-        .await
-        .map_err(|e| failed(format!("Runtime staging task failed: {e}")))??;
-        self.check_cancelled()?;
-        let recipe: RuntimeRecipe = serde_json::from_slice(
-            &fs::read(runtime.join("runtime.json"))
-                .await
-                .map_err(PumasError::from)?,
-        )
-        .map_err(|e| failed(format!("Invalid runtime recipe: {e}")))?;
-        if recipe.recipe_id != recipe_spec.recipe_id {
-            return Err(failed("Embedded Torch recipe identity mismatch"));
-        }
-        if recipe.protocol != SUPPORTED_TORCH_PROTOCOL {
-            return Err(failed(format!(
-                "Runtime recipe protocol {} does not match required protocol {SUPPORTED_TORCH_PROTOCOL}",
-                recipe.protocol
-            )));
-        }
-        if !recipe
-            .capabilities
-            .iter()
-            .any(|capability| capability == TORCH_IMAGE_GENERATION_CAPABILITY)
-        {
-            return Err(failed(format!(
-                "Runtime recipe is missing required capability {TORCH_IMAGE_GENERATION_CAPABILITY}"
-            )));
-        }
-        if recipe.python != "3.12" || recipe.platform != "linux-x86_64" {
-            return Err(failed(
-                "Runtime recipe does not match Python 3.12 on linux-x86_64",
-            ));
-        }
-        if let Some(plan) = plan {
-            if std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
-                != plan.managed_python.executable
-            {
-                return Err(failed("Selected Python executable changed after preview"));
-            }
-            record_managed_python(&runtime, plan)?;
-        }
-        let plan = plan.ok_or_else(|| {
-            failed("The bundled Torch runtime requires a retained managed Python preview")
-        })?;
-        let interpreter = plan.interpreter_path.as_path();
-        let mut python_check = Command::new(interpreter);
-        python_check.args([
-            "-I",
-            "-B",
-            "-c",
-            "import sys; assert sys.version_info[:2] == (3,12)",
-        ]);
-        self.run_runtime_command(
-            python_check,
-            log_path,
-            "Checking Python 3.12",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        let mut venv = Command::new(interpreter);
-        venv.args(["-I", "-B", "-m", "venv"])
-            .arg(runtime.join("venv"))
-            .env("PYTHONDONTWRITEBYTECODE", "1");
-        self.run_runtime_command(
-            venv,
-            log_path,
-            "Creating managed environment",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        let python = pumas_library::platform::paths::venv_python(&runtime);
-        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
-        let download_progress_path = runtime.join("download-progress.json");
-        let mut install = Command::new(&python);
-        install
-            .args(["-I", "-B"])
-            .arg(runtime.join("resolve_runtime.py"))
-            .arg("--_pumas-pip-progress-worker")
-            .arg(&download_progress_path)
-            .args([
-                "--isolated",
-                "install",
-                "--require-hashes",
-                "--only-binary=:all:",
-                "--disable-pip-version-check",
-                "-r",
-            ])
-            .arg(runtime.join("requirements.txt"))
-            .arg("--cache-dir")
-            .arg(pip_cache);
-        let status = self
-            .run_runtime_command_status_with_download_progress(
-                install,
-                log_path,
-                "Installing locked runtime dependencies",
-                progress_tx,
-                Some(staging.clone()),
-                Some(&download_progress_path),
-            )
-            .await?;
-        if !status.success() {
-            return Err(failed(
-                "Installing locked runtime dependencies failed; see installation log",
-            ));
-        }
-        let mut validate = runtime_check_command(&python, &runtime.join("validate_runtime.py"));
-        validate
-            .current_dir(&runtime)
-            .env("HF_HUB_OFFLINE", "1")
-            .env("PYTHONNOUSERSITE", "1");
-        self.run_runtime_command(
-            validate,
-            log_path,
-            "Validating GPU and sidecar protocol",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        let resolution = serde_json::json!({
-            "torch": recipe_spec.torch_version,
-            "build": "cu130",
-            "python": "3.12",
-            "adapter": "bundled",
-            "managed_python": managed_python_record(plan),
-            "artifacts": plan.preview.artifacts.clone(),
-        });
-        std::fs::write(
-            runtime.join("resolution.json"),
-            serde_json::to_vec_pretty(&resolution).map_err(|e| failed(e.to_string()))?,
-        )
-        .map_err(PumasError::from)?;
-        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
-        self.run_runtime_command(
-            probe,
-            log_path,
-            "Recording core and adapter probe evidence",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        Ok(runtime)
+        Err(failed(
+            "A retained preview is required for this Torch runtime",
+        ))
     }
 
     pub(super) async fn run_runtime_command(
@@ -3352,62 +2972,6 @@ mod managed_python_provenance_tests {
         );
     }
 
-    #[tokio::test]
-    async fn cohere_asr_legacy_plan_refuses_before_staging_or_provisioning() {
-        let root = tempfile::tempdir().unwrap();
-        let metadata = Arc::new(MetadataManager::new(root.path()));
-        metadata.ensure_directories().unwrap();
-        let tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
-            root.path().join("launcher-data/cache"),
-        )));
-        let installer = VersionInstaller::new(
-            root.path().to_owned(),
-            AppId::Torch,
-            metadata,
-            tracker,
-            Arc::new(AtomicBool::new(false)),
-        );
-        let versions = installer.versions_dir();
-        std::fs::create_dir_all(&versions).unwrap();
-        let stage = Arc::new(
-            TorchPendingStage::new(
-                &versions,
-                "v2.10.0",
-                TorchVersionsLock::try_acquire(&versions).unwrap(),
-            )
-            .unwrap(),
-        );
-        let nonexistent = root.path().join("must-not-open-or-run-python");
-        let plan=super::TorchInstallPlan {
-            preview:crate::version_manager::TorchPreview { preview_id:"legacy".into(),tag:"v2.10.0".into(),build:"cpu".into(),python:"python3.12".into(),adapter:"cohere-asr".into(),artifacts:Vec::new(),qualification:"unverified".into(),expires_in_seconds:1800 },
-            requirements:String::new(),resolution:String::new(),report:String::new(),interpreter_path:nonexistent.clone(),interpreter_hash:String::new(),
-            managed_python:crate::version_manager::managed_python::ManagedPythonIdentity { python:"python3.12".into(),version:"3.12.0".into(),catalog_key:"inert".into(),source_url:"https://github.com/astral-sh/python-build-standalone/releases/download/inert/python.tar.zst".into(),target_triple:"x86_64-unknown-linux-gnu".into(),uv_version:"0.12.19".into(),uv_archive_sha256:"a".repeat(64),executable:nonexistent.clone() },
-        };
-        let log = root.path().join("must-not-create.log");
-        let (tx, mut rx) = mpsc::channel(8);
-        let before = std::fs::read_dir(stage.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect::<Vec<_>>();
-        let error = installer
-            .stage_resolved_torch_runtime(&plan, &stage, &log, &tx)
-            .await
-            .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("public direct installation selection"));
-        let after = std::fs::read_dir(stage.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect::<Vec<_>>();
-        assert_eq!(before, after);
-        assert!(!stage.path().join("runtime").exists());
-        assert!(!log.exists());
-        assert!(!nonexistent.exists());
-        assert!(!root.path().join("launcher-data/managed-python").exists());
-        assert!(rx.try_recv().is_err());
-    }
-
     #[cfg(target_os = "linux")]
     #[test]
     fn cohere_asr_direct_report_refuses_bad_profile_before_staged_publication() {
@@ -3654,67 +3218,5 @@ mod managed_python_provenance_tests {
             assert!(bootstrap.remove().is_err());
             assert!(packages.join("pip/__init__.py").exists());
         }
-    }
-
-    #[tokio::test]
-    async fn installed_runtime_recipe_retains_managed_python_provider_identity() {
-        let root = tempfile::tempdir().unwrap();
-        let runtime = root.path().join("runtime");
-        std::fs::create_dir_all(&runtime).unwrap();
-        std::fs::write(
-            runtime.join("runtime.json"),
-            r#"{"recipe_id":"upstream-preview-v2.14.0-cpu-python3.14-none"}"#,
-        )
-        .unwrap();
-        let plan = super::TorchInstallPlan {
-            preview: crate::version_manager::TorchPreview {
-                preview_id: "preview-id".into(),
-                tag: "v2.14.0".into(),
-                build: "cpu".into(),
-                python: "python3.14".into(),
-                adapter: "none".into(),
-                artifacts: Vec::new(),
-                qualification: "unverified".into(),
-                expires_in_seconds: 1800,
-            },
-            requirements: String::new(),
-            resolution: String::new(),
-            report: String::new(),
-            interpreter_path: root.path().join("python3.14"),
-            interpreter_hash: "b".repeat(64),
-            managed_python: crate::version_manager::managed_python::ManagedPythonIdentity {
-                python: "python3.14".into(),
-                version: "3.14.0".into(),
-                catalog_key: "cpython-3.14.0+20250901-x86_64-unknown-linux-gnu-install_only".into(),
-                source_url: "https://github.com/astral-sh/python-build-standalone/releases/download/20250901/cpython-3.14.0%2B20250901-x86_64-unknown-linux-gnu-install_only.tar.zst".into(),
-                executable: root.path().join("python3.14"),
-                target_triple: "x86_64-unknown-linux-gnu".into(),
-                uv_version: "0.12.19".into(),
-                uv_archive_sha256: "a".repeat(64),
-            },
-        };
-
-        record_managed_python(&runtime, &plan).unwrap();
-
-        let recipe: serde_json::Value =
-            serde_json::from_slice(&fs::read(runtime.join("runtime.json")).await.unwrap()).unwrap();
-        assert_eq!(recipe["managed_python"]["provider"]["name"], "uv");
-        assert_eq!(recipe["managed_python"]["provider"]["version"], "0.12.19");
-        assert_eq!(
-            recipe["managed_python"]["provider"]["archiveSha256"],
-            "a".repeat(64)
-        );
-        assert_eq!(
-            recipe["managed_python"]["distribution"]["version"],
-            "3.14.0"
-        );
-        assert_eq!(
-            recipe["managed_python"]["distribution"]["targetTriple"],
-            "x86_64-unknown-linux-gnu"
-        );
-        assert_eq!(
-            recipe["managed_python"]["executable"]["sha256"],
-            "b".repeat(64)
-        );
     }
 }

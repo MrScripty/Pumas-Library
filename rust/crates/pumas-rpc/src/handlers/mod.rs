@@ -1152,14 +1152,6 @@ async fn dispatch_admitted_command(
             Ok(RpcOutcome::TorchRuntimePreview(preview.try_into()?))
         }
         #[cfg(feature = "inference-plugins")]
-        RpcCommand::GetTorchPreviewReport { preview_id } => {
-            let vm = require_version_manager(state, "torch").await?;
-            let report = vm.torch_preview_report(&preview_id).await?;
-            serde_json::from_str(&report)
-                .map(RpcOutcome::TorchPreviewReport)
-                .map_err(|e| pumas_library::PumasError::Other(e.to_string()))
-        }
-        #[cfg(feature = "inference-plugins")]
         RpcCommand::GetTorchRuntimeProbe { tag } => {
             let vm = require_version_manager(state, "torch").await?;
             let report = vm.torch_installed_probe_report(&tag).await?;

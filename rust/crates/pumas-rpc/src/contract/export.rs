@@ -494,8 +494,8 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     }
     fixtures["version_status"] =
         serde_json::to_value(VersionStatusOutcome::new(version_status_fixture())?)?;
-    fixtures["torch_runtime_preview_resolved"] =
-        serde_json::to_value(TorchRuntimePreviewOutcome::Resolved {
+    fixtures["torch_runtime_preview_ready"] =
+        serde_json::to_value(TorchRuntimePreviewOutcome::Ready {
             preview: torch_runtime_preview_fixture(),
         })?;
     for (key, reason) in [
@@ -867,7 +867,6 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         TorchRuntimePreviewArtifact,
         TorchRuntimePreviewQualification,
         TorchRuntimePreviewRejectionReason,
-        GetTorchPreviewReportParams,
         GetTorchRuntimeProbeParams,
         TrialTorchRuntimeParams,
         TrialTorchRuntimeOutcome,
@@ -876,7 +875,9 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         TorchTrialCleanup,
         TorchRuntimeOptionsOutcome,
         TorchPythonChoice,
-        TorchRuntimeSelection,
+        TorchVerifiedRuntime,
+        TorchVerifiedPackage,
+        TorchAdapterRequirement,
         TorchInstalledRuntime,
         TorchRuntimeProbeOutcome,
         TorchProbeStatus,
@@ -1253,15 +1254,9 @@ fn refine_named(name: &str, schema: &mut Value) {
     }
     if matches!(
         name,
-        "TrialTorchRuntimeParams"
-            | "StopRuntimeProfileGenerationParams"
-            | "GetTorchPreviewReportParams"
+        "TrialTorchRuntimeParams" | "StopRuntimeProfileGenerationParams"
     ) {
-        let (canonical_key, alias_key) = if name == "GetTorchPreviewReportParams" {
-            ("preview_id", "previewId")
-        } else {
-            ("profile_id", "profileId")
-        };
+        let (canonical_key, alias_key) = ("profile_id", "profileId");
         let mut canonical = schema.clone();
         let object = canonical.as_object_mut().expect("request object schema");
         object.remove("$schema");

@@ -14,24 +14,29 @@ pub struct TorchRuntimeOptions {
     pub default_build: String,
     pub pythons: Vec<TorchPythonChoice>,
     pub adapters: Vec<String>,
-    pub bundled_preset_available: bool,
     pub default_adapter: String,
-    pub preset: TorchRuntimeSelection,
+    /// Combinations verified on this platform. Evidence only: choosing one
+    /// still resolves current package versions.
+    pub verified: Vec<super::torch_verified::TorchVerifiedRuntime>,
+    /// Offered adapters that install only on one selection, because the
+    /// adapter's own binary wheel was built for it.
+    pub adapter_requirements: Vec<TorchAdapterRequirement>,
     pub installed: Vec<TorchInstalledRuntime>,
+}
+
+/// The one Torch release, build and managed Python an adapter installs on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TorchAdapterRequirement {
+    pub adapter: String,
+    pub tag: String,
+    pub build: String,
+    pub python: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TorchPythonChoice {
     pub id: String,
     pub label: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TorchRuntimeSelection {
-    pub tag: String,
-    pub build: String,
-    pub python: String,
-    pub adapter: String,
 }
 
 /// An installed runtime. Fields are `None` when its recipe does not record them.
@@ -41,7 +46,9 @@ pub struct TorchInstalledRuntime {
     pub build: Option<String>,
     pub python: Option<String>,
     pub adapter: Option<String>,
-    /// True only for the qualified bundled preset.
+    /// True when the runtime is a verified combination with the recorded
+    /// package versions, including runtimes installed from the former fixed
+    /// v2.9.1 preset.
     pub qualified: bool,
 }
 

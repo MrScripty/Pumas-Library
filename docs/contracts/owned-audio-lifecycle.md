@@ -92,7 +92,7 @@ later controlled integration boundary.
 ## Concrete qualification blockers
 
 The execution environment has no installed Torch or Transformers and no
-qualified local speech model. The bundled recipe pins Transformers 4.57.6,
+qualified local speech model. The verified image combination recorded Transformers 4.57.6,
 while the native loader requires the supported Cohere ASR implementation. The
 installer now materializes the speech operation owner, native audio loader,
 PCM helpers and actor/bridge, and installed-byte custody retains their actual

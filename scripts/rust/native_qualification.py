@@ -25,7 +25,6 @@ ALL = HOSTS
 UNIX = ("Linux", "macOS")
 WINDOWS = ("Windows",)
 LINUX = ("Linux",)
-WINDOWS_AND_MACOS = ("Windows", "macOS")
 
 # `--tests` selects the library's unit tests, binaries and integration tests,
 # and leaves out doctests (Rust quality runs those on Linux).
@@ -77,7 +76,7 @@ GROUPS = (
             f("torch_alternatives"),
             f("version_manager::managed_python::tests"),
             f("version_manager::torch_preview::tests", LINUX),
-            f("auto_python_fallback_requires_a_definite_unsupported_attempt", WINDOWS_AND_MACOS),
+            f("version_manager::torch_verified::tests"),
             f("restart_falls_back_from_invalid_active_torch_to_verified_default", WINDOWS),
             f("locked_stage_stays_owned", WINDOWS),
             # Acquisition workspace cleanup must run on every native host.

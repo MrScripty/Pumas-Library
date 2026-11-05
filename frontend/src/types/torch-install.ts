@@ -9,6 +9,7 @@ import type {
   TorchRuntimePreviewRejectionReason as DesktopTorchRuntimePreviewRejectionReason,
   TorchRuntimeProbeOutcome as DesktopTorchRuntimeProbeOutcome,
   TorchReleaseOptionsOutcome as DesktopTorchReleaseOptionsOutcome,
+  TorchVerifiedRuntime as DesktopTorchVerifiedRuntime,
   TrialTorchRuntimeOutcome as DesktopTrialTorchRuntimeOutcome,
 } from '../generated/desktop-contract';
 
@@ -19,6 +20,7 @@ export type TorchRuntimePreview = DesktopTorchRuntimePreview;
 export type TorchReleaseOptionsOutcome = DesktopTorchReleaseOptionsOutcome;
 export type TorchRuntimeOptions = DesktopTorchRuntimeOptionsOutcome;
 export type TorchInstalledConfig = DesktopTorchInstalledRuntime;
+export type TorchVerifiedRuntime = DesktopTorchVerifiedRuntime;
 export type TorchCapabilityProbe = DesktopTorchCapabilityProbe;
 export type TorchRuntimeProbeReport = DesktopTorchRuntimeProbeOutcome;
 export type TorchStartupTrialOutcome = DesktopTrialTorchRuntimeOutcome;

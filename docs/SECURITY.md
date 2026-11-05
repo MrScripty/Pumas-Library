@@ -54,12 +54,15 @@ projection rather than serializing errors directly.
 ## Dependency and Release Evidence
 
 Authoritative dependency inputs are the checked-in Cargo and pnpm lockfiles plus
-the Python requirements under `torch-server/`. Only the bundled Torch preset
-(Linux x86_64, CPython 3.12) installs from `torch-server/runtime/requirements.lock`,
-a hash-pinned lock for that one recipe. Every other managed Torch install
-resolves its own dependencies when it is created, so the checked-in lock does
-not describe it: audit that installation's `runtime/requirements.txt`,
-`runtime/resolution.json` and `runtime/pip-resolution.json` instead.
+the Python requirements under `torch-server/`. Managed Torch runtimes are
+optional add-ons: each install resolves current package versions when it is
+created, and Pumas ships no lock for them, so their advisories belong to the
+installed versions rather than to a Pumas release. Audit an installation's
+`requirements.txt`, `resolution.json` and `pip-resolution.json`.
+`torch-server/runtime/verified-runtimes.json` records verified combinations as
+evidence and installs nothing. The one exact pin is the Cohere audio candidate
+recipe (`rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json`):
+the confined audio read boundary admits only the files that recipe describes.
 `torch-server/requirements.txt` is an unpinned direct-development input, not a
 shipped dependency set.
 

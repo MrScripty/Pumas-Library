@@ -210,7 +210,7 @@ class AdapterImportProbeTests(TestCase):
         ):
             self.assertEqual(probe_runtime.cohere_asr_import_probe()["status"], "unavailable")
 
-    def test_cohere_asr_selection_is_independent_of_image_device_and_bundled_imports(self):
+    def test_cohere_asr_selection_is_independent_of_image_device_and_image_imports(self):
         class Tensor:
             def __matmul__(self, _other):
                 return self
@@ -231,7 +231,7 @@ class AdapterImportProbeTests(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "serve.py").write_text("# fixture")
-            for selected in ("cohere-asr", "bundled", "none"):
+            for selected in ("cohere-asr", "nunchaku", "none"):
                 (root / "resolution.json").write_text(
                     json.dumps({"torch": torch.__version__, "adapter": selected, "artifacts": []})
                 )

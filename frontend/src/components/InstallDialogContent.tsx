@@ -3,7 +3,7 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 import type { InstallationProgress, VersionRelease } from '../hooks/useVersions';
 import { ProgressDetailsView } from './ProgressDetailsView';
 import { VersionListItem } from './VersionListItem';
-import type { TorchInstalledConfig } from '../types/torch-install';
+import type { TorchInstalledConfig, TorchVerifiedRuntime } from '../types/torch-install';
 import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 import { getInstallationDownloadPresentation } from '../utils/installationDownloadPresentation';
 
@@ -18,6 +18,7 @@ interface InstallDialogContentProps {
   installNetworkStatus: 'idle' | 'downloading' | 'stalled' | 'failed';
   installedVersions: string[];
   torchInstalledConfigs?: readonly TorchInstalledConfig[];
+  torchVerifiedRuntimes?: readonly TorchVerifiedRuntime[];
   installingVersion: string | null;
   isLoading: boolean;
   isRateLimited: boolean;
@@ -51,6 +52,7 @@ export function InstallDialogContent({
   installNetworkStatus,
   installedVersions,
   torchInstalledConfigs = [],
+  torchVerifiedRuntimes = [],
   installingVersion,
   isLoading,
   isRateLimited,
@@ -168,6 +170,7 @@ export function InstallDialogContent({
                 key={release.tagName}
                 release={release}
                 torchInstalledConfig={torchInstalledConfigs.find((config) => config.tag === release.tagName)}
+                torchVerified={torchVerifiedRuntimes.filter((record) => record.tag === release.tagName)}
                 isInstalled={isInstalled}
                 isInstalling={isInstalling}
                 progress={currentProgress}

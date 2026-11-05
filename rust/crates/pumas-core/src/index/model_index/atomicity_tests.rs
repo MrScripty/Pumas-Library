@@ -1,8 +1,85 @@
 //! Fault-injection tests: a failure between a mutation and its update-feed
-//! event must leave neither behind.
+//! event must leave neither behind, and a damaged row or search failure must
+//! surface as an error rather than as a plausible result.
 
 use super::*;
 use tempfile::TempDir;
+
+fn corrupt_column(index: &ModelIndex, id: &str, column: &str) {
+    // Bypass the FTS triggers' JSON projection, which would reject the value.
+    let conn = index.conn.lock().unwrap();
+    conn.execute_batch("DROP TRIGGER model_search_au;").unwrap();
+    conn.execute(
+        &format!("UPDATE models SET {column} = '{{not json' WHERE id = ?1"),
+        params![id],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_corrupt_json_column_is_an_error_naming_the_row_and_column() {
+    for column in ["tags_json", "hashes_json", "metadata_json"] {
+        let (index, _temp) = index();
+        index.upsert(&record("good")).unwrap();
+        index.upsert(&record("damaged")).unwrap();
+        corrupt_column(&index, "damaged", column);
+
+        let error = index.get("damaged").unwrap_err().to_string();
+        assert!(error.contains("\"damaged\""), "{error}");
+        assert!(error.contains(column), "{error}");
+        assert!(index.list_all().is_err());
+        assert!(index.search("", None, None, 10, 0).is_err());
+        assert!(index.search("damaged", None, None, 10, 0).is_err());
+        // A healthy row still reads, and a search that skips the damaged
+        // row still succeeds.
+        assert_eq!(index.get("good").unwrap().unwrap().id, "good");
+        assert_eq!(
+            index
+                .search("good", None, None, 10, 0)
+                .unwrap()
+                .models
+                .len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn an_unparsable_full_text_query_is_a_typed_refusal() {
+    let (index, _temp) = index();
+    index.upsert(&record("llama")).unwrap();
+
+    for query in ["(llama", "nosuchcolumn:llama"] {
+        match index.search(query, None, None, 10, 0) {
+            Err(PumasError::Validation { field, message }) => {
+                assert_eq!(field, "query");
+                assert!(message.contains("full-text syntax"), "{message}");
+            }
+            other => panic!("expected a query refusal for {query:?}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_missing_search_table_is_a_storage_error_not_an_empty_result() {
+    let (index, _temp) = index();
+    index.upsert(&record("llama")).unwrap();
+    {
+        let conn = index.conn.lock().unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER model_search_ai; DROP TRIGGER model_search_au;
+             DROP TRIGGER model_search_ad; DROP TABLE model_search;",
+        )
+        .unwrap();
+    }
+
+    match index.search("llama", None, None, 10, 0) {
+        Err(PumasError::Database { message, .. }) => {
+            assert!(message.contains("model_search"), "{message}")
+        }
+        other => panic!("expected a storage error, got {other:?}"),
+    }
+}
 
 fn index() -> (ModelIndex, TempDir) {
     let temp = TempDir::new().unwrap();

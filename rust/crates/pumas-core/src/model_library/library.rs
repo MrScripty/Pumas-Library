@@ -8459,10 +8459,9 @@ mod tests {
             )
             .unwrap();
 
-        assert!(library
-            .index()
-            .search("", None, None, 10, 0)
-            .is_ok_and(|result| result.models.is_empty()));
+        // Paginated search and the complete list both surface the damaged
+        // row rather than presenting a partial catalog as success.
+        assert!(library.index().search("", None, None, 10, 0).is_err());
         assert!(library.list_models().await.is_err());
     }
 

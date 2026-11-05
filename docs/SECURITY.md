@@ -51,6 +51,18 @@ the receiving boundary already restricts to loopback clients of the same user.
 Raw subprocess output is not forwarded. New transports must reuse the same
 projection rather than serializing errors directly.
 
+## Runtime Install Integrity
+
+Ollama and llama.cpp releases are installed only from bytes that match the
+publisher's SHA-256 digest, which Pumas reads from a fresh GitHub release API
+response. A release asset without a digest is refused, as is a download or a
+cached archive that does not hash to it; a cached archive is re-hashed before
+every reuse. Downloads are HTTPS-only. Archives are extracted into a private
+stage under cumulative byte and entry limits that scale with the archive's
+size, without setuid, setgid or sticky bits, and the stage is checked for
+escaping links and special files before the launch binary is accepted. That
+binary must be a regular file, not a link.
+
 ## Dependency and Release Evidence
 
 Authoritative dependency inputs are the checked-in Cargo and pnpm lockfiles plus

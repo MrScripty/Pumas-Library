@@ -51,7 +51,6 @@ mod installer;
 mod launcher;
 mod managed_depot_lease;
 mod managed_python;
-pub mod ollama;
 mod operation_receipt;
 mod progress;
 pub mod size_calculator;
@@ -67,7 +66,6 @@ pub use constraints::ConstraintsManager;
 pub use dependencies::DependencyManager;
 pub use installer::VersionInstaller;
 pub use launcher::VersionLauncher;
-pub use ollama::OllamaVersionManager;
 pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
@@ -2037,7 +2035,7 @@ mod tests {
                         assets: vec![pumas_library::network::GitHubAsset {
                             name: "ollama-linux-amd64.tgz".into(),
                             size: 100,
-                            download_url: url,
+                            download_url: url.clone(),
                             content_type: Some("application/gzip".into()),
                         }],
                         html_url: "https://github.com/ollama/ollama/releases/tag/v0.1.2".into(),
@@ -2049,9 +2047,35 @@ mod tests {
                 .unwrap();
             let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
             let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let base_url = url.trim_end_matches("/archive").to_owned();
+            let metadata_url = url.clone();
             let server = tokio::spawn(async move {
-                let (mut stream, _) = listener.accept().await.unwrap();
+                // Fresh release metadata supplies the publisher digest that
+                // authorizes the archive; the stall happens on the archive.
+                let (mut metadata, _) = listener.accept().await.unwrap();
                 let mut request = [0; 4096];
+                assert!(metadata.read(&mut request).await.unwrap() > 0);
+                let body = serde_json::to_vec(&serde_json::json!({
+                    "tag_name": "v0.1.2", "assets": [{
+                        "id": 12, "name": "ollama-linux-amd64.tgz", "size": 100,
+                        "browser_download_url": metadata_url,
+                        "digest": format!("sha256:{}", "0".repeat(64)),
+                    }]
+                }))
+                .unwrap();
+                metadata
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                metadata.write_all(&body).await.unwrap();
+                drop(metadata);
+                let (mut stream, _) = listener.accept().await.unwrap();
                 assert!(stream.read(&mut request).await.unwrap() > 0);
                 if send_headers {
                     stream
@@ -2064,9 +2088,20 @@ mod tests {
                 entered_tx.send(()).unwrap();
                 release_rx.await.unwrap();
             });
-            let manager = VersionManager::new(root.path(), AppId::Ollama)
-                .await
-                .unwrap();
+            let manager = VersionManager::new_with_github_client(
+                root.path().to_path_buf(),
+                AppId::Ollama,
+                Some(Arc::new(
+                    GitHubClient::with_loopback_api(
+                        root.path().join("launcher-data/cache"),
+                        Duration::from_secs(3600),
+                        base_url,
+                    )
+                    .unwrap(),
+                )),
+            )
+            .await
+            .unwrap();
             let mut updates = manager.install_version("v0.1.2").await.unwrap();
             tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, entered_rx)
                 .await

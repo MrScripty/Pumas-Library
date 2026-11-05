@@ -170,6 +170,12 @@ renderer. It must make startup, ready, timeout, exit, and shutdown outcomes
 distinct. Events coordinate or invalidate cached state; they do not transfer
 durable ownership into Electron.
 
+A ready backend is health-checked every 30 seconds. Three consecutive failed
+checks mark it hung: Electron sends SIGTERM (SIGKILL after the force-wait on
+Unix; Windows terminates directly), and the exit takes the normal crash
+restart path, bounded by `maxRestarts`. Making `pumas-rpc` exit when Electron
+itself dies is the backend's job (stdin EOF / parent-death signal).
+
 The RPC server binds loopback only and has no LAN mode; see
 [Security](../docs/SECURITY.md) for its Host/Origin admission checks.
 

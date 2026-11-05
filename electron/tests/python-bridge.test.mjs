@@ -1556,3 +1556,45 @@ test('sidecar stdout and stderr stay at debug, out of the persisted info log', a
     assert.ok(logs[level].every((line) => !line.includes('synthetic-sidecar-secret')), `${level} must not hold sidecar output`);
   }
 });
+
+test('consecutive failed health checks restart a hung backend; a healthy check resets the count', async () => {
+  for (const platform of ['linux', 'win32']) {
+    const fixture = stopFixture({ platform });
+    const { bridge, child, timers } = fixture;
+    bridge.serverReady = true;
+    const answers = [null, null, { status: 'ok' }, null, null, null];
+    bridge.call = async (method) => {
+      assert.equal(method, 'health_check');
+      return answers.shift();
+    };
+    bridge.startHealthCheck();
+    for (let check = 0; check < 5; check += 1) {
+      assert.equal(await timers.runNext(), 30_000);
+      assert.deepEqual(child.signals, [], `check ${check + 1} must not restart: the count was reset by a healthy check`);
+    }
+    assert.equal(await timers.runNext(), 30_000);
+    if (platform === 'win32') {
+      assert.deepEqual(child.signals, ['SIGKILL']);
+      assert.equal(timers.pendingCount(), 0, 'no further health checks after the restart begins');
+    } else {
+      assert.deepEqual(child.signals, ['SIGTERM']);
+      assert.equal(timers.pendingCount(), 1, 'only the force-stop deadline remains');
+      assert.equal(await timers.runNext(), 5_000);
+      assert.deepEqual(child.signals, ['SIGTERM', 'SIGKILL']);
+    }
+    assert.equal(timers.pendingCount(), 0);
+  }
+});
+
+test('a hung backend that exits after SIGTERM is not force-killed', async () => {
+  const fixture = stopFixture();
+  const { bridge, child, timers } = fixture;
+  bridge.serverReady = true;
+  bridge.call = async () => null;
+  bridge.startHealthCheck();
+  for (let check = 0; check < 3; check += 1) await timers.runNext();
+  assert.deepEqual(child.signals, ['SIGTERM']);
+  bridge.process = null; // the exit handler released the slot
+  await timers.runNext();
+  assert.deepEqual(child.signals, ['SIGTERM']);
+});

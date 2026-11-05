@@ -400,6 +400,7 @@ impl ModelIndex {
         Self::ensure_metadata_v2_schema(conn, identity)?;
         Self::ensure_package_facts_cache_schema(conn)?;
         Self::ensure_model_library_updates_schema(conn)?;
+        Self::ensure_metadata_projection_schema(conn)?;
         Self::seed_metadata_v2_rows(conn)?;
 
         Ok(())
@@ -665,6 +666,10 @@ impl ModelIndex {
         let link_exclusion_rows_deleted = tx.execute(
             "DELETE FROM model_link_exclusions WHERE model_id = ?1",
             params![old_id],
+        )?;
+        tx.execute(
+            "UPDATE model_metadata_projection_pending SET model_id = ?1 WHERE model_id = ?2",
+            params![record.id, old_id],
         )?;
 
         tx.execute("DELETE FROM models WHERE id = ?1", params![old_id])?;

@@ -523,6 +523,11 @@ live table by an interrupted rule rebuild of an earlier release, naming the
 table, and
 finishes the copy when the live table is missing.
 
+Review edits (`submit_model_review`, `reset_model_review`) commit the overlay
+first; it is authoritative. `metadata.json` and the index row are derived from
+it, and a failure before they are written is replayed by the next index
+rebuild, which runs at startup.
+
 For managed HF downloads, Completed requires successful metadata publication
 and indexing before the durable download admission is settled. Startup
 finalization uses the same importer. An import failure retains the downloaded

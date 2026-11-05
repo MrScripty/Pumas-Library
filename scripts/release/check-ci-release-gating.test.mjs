@@ -155,6 +155,8 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
 test('both renderer variants build and are checked on every trigger, apart from the packaging input', () => {
   const frontend = job('build-frontend');
   const steps = [
+    // Vitest suites for the library-only replacements (frontend/vitest.library-only.config.ts).
+    ['Test library-only renderer behavior', 'pnpm --dir frontend test:library-only'],
     ['Build library-only renderer', 'pnpm --dir frontend build:library-only --outDir "${{ runner.temp }}/frontend-library-only" --emptyOutDir'],
     ['Verify library-only renderer excludes inference plugins', 'node scripts/release/check-frontend-variant.mjs "${{ runner.temp }}/frontend-library-only" library-only'],
     ['Build default renderer', 'pnpm --dir frontend build'],

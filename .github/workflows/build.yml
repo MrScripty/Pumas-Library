@@ -514,6 +514,8 @@ jobs:
       - run: pnpm --dir frontend test:run
       # Both renderer variants build on every trigger. The library-only bundle
       # goes to its own directory so it never mixes with the packaging input.
+      - name: Test library-only renderer behavior
+        run: pnpm --dir frontend test:library-only
       - name: Build library-only renderer
         run: pnpm --dir frontend build:library-only --outDir "${{ runner.temp }}/frontend-library-only" --emptyOutDir
       - name: Verify library-only renderer excludes inference plugins

@@ -56,7 +56,10 @@ without DevTools or reload accelerators.
 TypeScript interfaces are compile-time projections, not validation of runtime
 messages. A contract change must update the receiver decoder, producer,
 consumer, and negative tests together. Treat sidecar logs as sensitive: they
-can contain backend diagnostics and must not expose credentials.
+can contain backend diagnostics and must not expose credentials. Electron logs
+sidecar stdout/stderr at `debug`, below the persisted file level (`info`), and
+an unparseable RPC response is reported by method, HTTP status and size, never
+by its body.
 
 ### Backend setup observation
 

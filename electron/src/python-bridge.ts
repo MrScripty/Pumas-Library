@@ -546,20 +546,22 @@ export class PythonBridge {
     });
     void closedBeforeReady.catch(() => {});
 
-    // Handle stdout
+    // Sidecar output is backend diagnostics, not a user-facing record: it
+    // stays at debug so the persisted (info) log never holds it. The startup
+    // failure frame reaches the user through its own decoded channel.
     child.stdout?.on('data', (data: Buffer) => {
       if (!this.serverReady) startupFailure.push(data.toString());
       const output = data.toString().trim();
       if (output) {
-        log.info(`[${backendLabel}] ${output}`);
+        log.debug(`[${backendLabel}] ${output}`);
       }
     });
 
-    // Handle stderr (Rust uses stderr for tracing logs, which is normal)
+    // Rust writes tracing logs to stderr.
     child.stderr?.on('data', (data: Buffer) => {
       const output = data.toString().trim();
       if (output) {
-        log.info(`[${backendLabel}] ${output}`);
+        log.debug(`[${backendLabel}] ${output}`);
       }
     });
 
@@ -1060,7 +1062,10 @@ export class PythonBridge {
               finish(null, sourceCall ? decodeS3ImportRpcResult(method, response.result) : response.result);
             }
           } catch {
-            finish(new Error(sourceCall ? S3_RPC_FAILURE : `Invalid JSON response: ${data}`));
+            // Never echo the body: it can carry backend diagnostics.
+            finish(new Error(sourceCall
+              ? S3_RPC_FAILURE
+              : `Invalid JSON-RPC response for ${method} (HTTP ${res.statusCode ?? 'unknown'}, ${Buffer.byteLength(data)} bytes)`));
           } finally {
             data = '';
           }

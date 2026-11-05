@@ -90,7 +90,7 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime, packaged = fal
   const shell = { async openExternal(url) { externalOpens.push(url); } };
   const logger = {
     transports: { file: {}, console: {} },
-    info() {}, warn() {}, error(...args) { errors.push(args); },
+    debug() {}, info() {}, warn() {}, error(...args) { errors.push(args); },
   };
   const menus = [];
   const Menu = {
@@ -182,7 +182,7 @@ function createFailedProcessRuntime() {
     },
     clearTimeout(timer) { timers.delete(timer); },
     require(specifier) {
-      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
       if (specifier === 'net') return { createServer: () => server };
       if (specifier === 'child_process') return {
         spawn() {

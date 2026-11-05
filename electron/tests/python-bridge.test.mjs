@@ -37,7 +37,7 @@ test('bridge applies method-specific socket deadlines to Torch requests', async 
     setTimeout,
     clearTimeout,
     require(specifier) {
-      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
       if (specifier === 'http') return {
         request(options, onResponse) {
           seen.push(options);
@@ -139,7 +139,7 @@ function stopFixture({ platform = 'linux', options = {}, request, server } = {})
     exports, Buffer, setTimeout, clearTimeout,
     process: { env: {}, platform },
     require(specifier) {
-      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
       if (specifier === 'http' && request) return { request };
       if (specifier === 'net' && server) return { createServer: () => server };
       if (specifier === 'child_process') return {
@@ -937,7 +937,7 @@ test('stop cancels outstanding RPC calls and releases their deadlines', async ()
     setTimeout,
     clearTimeout,
     require(specifier) {
-      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
       if (specifier === 'http') return {
         request() {
           const request = new EventEmitter();
@@ -1009,7 +1009,7 @@ test('stop during port allocation prevents the pending start from spawning a bac
     clearTimeout,
     require(specifier) {
       if (specifier === 'net') return { createServer: () => server };
-      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
       if (specifier === 'child_process') return {
         spawn() {
           spawned += 1;
@@ -1462,7 +1462,7 @@ test('all named observation streams use separate nonpooled connections', async (
   runInNewContext(readFileSync(bridgeUrl, 'utf8'), {
     exports, Buffer, process: { env: {} }, setTimeout, clearTimeout,
     require(specifier) {
-      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
       if (specifier === 'http') return {
         get(options) {
           seen.push(options);
@@ -1488,4 +1488,71 @@ test('all named observation streams use separate nonpooled connections', async (
   assert.equal(new Set(seen.map((options) => options.path)).size, 5);
   bridge.process = null;
   await bridge.stop();
+});
+
+function loggingBridgeFixture({ responseBody = '{}', statusCode = 200 } = {}) {
+  const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
+  const requireBridge = createRequire(bridgeUrl);
+  const exports = {};
+  const logs = { debug: [], info: [], warn: [], error: [] };
+  const children = [];
+  const logger = Object.fromEntries(Object.keys(logs).map((level) => [level, (...args) => logs[level].push(args.join(' '))]));
+  runInNewContext(readFileSync(bridgeUrl, 'utf8'), {
+    exports, Buffer, setTimeout, clearTimeout,
+    process: { env: {} },
+    require(specifier) {
+      if (specifier === 'electron-log') return logger;
+      if (specifier === 'child_process') return {
+        spawn() { const child = fakeChild(); children.push(child); return child; },
+      };
+      if (specifier === 'http') return {
+        request(_options, onResponse) {
+          const request = new EventEmitter();
+          request.write = () => {};
+          request.destroy = () => {};
+          request.end = () => {
+            const response = new EventEmitter();
+            response.statusCode = statusCode;
+            onResponse(response);
+            response.emit('data', responseBody);
+            response.emit('end');
+          };
+          return request;
+        },
+      };
+      return requireBridge(specifier);
+    },
+  });
+  const bridge = new exports.PythonBridge({
+    port: 49152, debug: false, rustBinaryPath: process.execPath, launcherRoot: process.cwd(),
+    timerController: new FakeTimerController(),
+  });
+  return { bridge, logs, children };
+}
+
+test('an invalid JSON-RPC body is reported by size, never echoed to the renderer', async () => {
+  const { bridge } = loggingBridgeFixture({ responseBody: '<html>synthetic-backend-secret</html>', statusCode: 502 });
+  bridge.process = {};
+  await assert.rejects(bridge.call('get_status', {}), (error) => {
+    assert.match(error.message, /Invalid JSON-RPC response for get_status \(HTTP 502, 37 bytes\)/);
+    assert.ok(!error.message.includes('synthetic-backend-secret'));
+    return true;
+  });
+});
+
+test('sidecar stdout and stderr stay at debug, out of the persisted info log', async () => {
+  const { bridge, logs, children } = loggingBridgeFixture({ responseBody: '{"result":{"status":"starting"}}' });
+  const starting = bridge.start();
+  const refused = assert.rejects(starting);
+  await new Promise((resolve) => setImmediate(resolve));
+  const [child] = children;
+  child.stdout.emit('data', Buffer.from('stdout synthetic-sidecar-secret\n'));
+  child.stderr.emit('data', Buffer.from('INFO stderr synthetic-sidecar-secret\n'));
+  child.exit(1);
+  child.emit('close', 1, null);
+  await refused;
+  assert.equal(logs.debug.filter((line) => line.includes('synthetic-sidecar-secret')).length, 2);
+  for (const level of ['info', 'warn', 'error']) {
+    assert.ok(logs[level].every((line) => !line.includes('synthetic-sidecar-secret')), `${level} must not hold sidecar output`);
+  }
 });

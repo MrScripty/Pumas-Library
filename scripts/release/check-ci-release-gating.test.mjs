@@ -265,3 +265,32 @@ test('controlled session lifecycle reuses the installed managed interpreter with
   assert.doesNotMatch(step, /pip install|curl |wget |continue-on-error/);
   assert.match(audio, /controlled-session-protocol.log/);
 });
+
+test('dependency audit is advisory on reviews, blocking on candidates and feeds the release candidate', () => {
+  const audit = job('dependency-audit');
+  assert.match(audit, /^    needs: lint-workflows$/m);
+  assert.doesNotMatch(audit, /^    if:/m, 'the scan runs for every trigger');
+  // D6: a failing scan never fails a review run, and always fails a candidate run.
+  assert.ok(audit.includes(`    continue-on-error: \${{ !(${versionTagGuard}) }}\n`));
+  assert.match(audit, /persist-credentials: false/);
+  assert.doesNotMatch(audit, /secrets\.|permissions:|cargo install|pip install (?!--require-hashes)/);
+  assert.match(audit, /pip install --require-hashes -r scripts\/dev\/pip-audit-python\.lock/);
+  assert.match(audit, /cargo-deny\/releases\/download\/(\d+\.\d+\.\d+)\/cargo-deny-\1-x86_64-unknown-linux-musl\.tar\.gz/);
+  assert.match(audit, /echo "[0-9a-f]{64} {2}\$tool_dir\/cargo-deny\.tar\.gz" \| sha256sum --check/);
+  assert.ok(audit.includes('node scripts/release/dependency-audit.mjs run --output "${{ runner.temp }}/current-vulnerability-results"'));
+  const upload = audit.slice(audit.indexOf('Upload current vulnerability results'));
+  assert.match(upload, /^        if: always\(\)$/m);
+  assert.match(upload, /^          name: current-vulnerability-results$/m);
+  assert.match(upload, /if-no-files-found: error/);
+
+  // The artifact name is the review the release plan requires.
+  const plan = JSON.parse(fs.readFileSync(path.join(root, 'scripts/release/artifact-plan.json'), 'utf8'));
+  assert.ok(plan.release_metadata.required_reviews.includes('current-vulnerability-results'));
+
+  const candidate = job('release-candidate');
+  assert.match(candidate, /^    needs: \[dependency-audit, /m);
+  assert.match(candidate, /name: current-vulnerability-results\n/);
+  const verify = 'check-artifacts.mjs "${{ runner.temp }}/current-vulnerability-results" current-vulnerability-results "${{ github.sha }}"';
+  assert.ok(candidate.includes(verify));
+  assert.ok(candidate.indexOf(verify) < candidate.indexOf('write-release-metadata.py'));
+});

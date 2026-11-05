@@ -1,6 +1,10 @@
-# Workflow actions are pinned to commit SHAs; this keeps those pins current.
+# Version updates for every ecosystem the release closure is built from. The
+# dependency policy is in docs/SECURITY.md#dependency-currency: compatible
+# (minor/patch) updates arrive as one grouped PR per ecosystem each week;
+# each major version arrives as its own PR and is taken deliberately.
 version: 2
 updates:
+  # Workflow actions are pinned to commit SHAs; this keeps those pins current.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -9,3 +13,39 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # rust/Cargo.lock. A lockfile change also needs regenerated release
+  # attribution (scripts/release/generate-notices.py); CI rejects stale notices.
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
+    groups:
+      cargo-compatible:
+        update-types:
+          - minor
+          - patch
+
+  # pnpm-lock.yaml for the frontend and Electron workspaces.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-compatible:
+        update-types:
+          - minor
+          - patch
+
+  # torch-server/requirements-dev.txt. CI installs the hash lock generated
+  # from it, so regenerate requirements-dev.lock with the command in that
+  # file's header before merging a bump.
+  - package-ecosystem: pip
+    directory: /torch-server
+    schedule:
+      interval: weekly
+    groups:
+      pip-compatible:
+        update-types:
+          - minor
+          - patch

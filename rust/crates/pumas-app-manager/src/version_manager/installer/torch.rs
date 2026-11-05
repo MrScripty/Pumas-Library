@@ -220,6 +220,9 @@ fn torch_directory_identity(path: &Path) -> std::io::Result<TorchDirectoryIdenti
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
             .open(path)?;
+        // SAFETY: FileInformation is a #[repr(C)] struct of u32 fields and u32
+        // arrays only, for which the all-zero bit pattern is a valid value; it
+        // is plain output storage that the call below overwrites.
         let mut info: FileInformation = unsafe { zeroed() };
         // SAFETY: the directory handle remains live and info has the Win32 layout.
         if unsafe { get_file_information_by_handle(directory.as_raw_handle(), &mut info) } == 0 {

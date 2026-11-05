@@ -84,13 +84,16 @@ npm run -w frontend dev
 npm run -w frontend lint
 npm run -w frontend check:types
 npm run -w frontend test:run
+npm run -w frontend test:library-only
 npm run -w frontend build
 npm run -w frontend build:library-only
 pnpm --dir frontend test:desktop-contract
 ```
 
 The default build includes inference integrations; `build:library-only` removes
-their UI. `test:desktop-contract` crosses the real bundled preload and renderer;
+their UI. `test:library-only` runs `*.library-only.test.tsx` with the same
+compiled-out feature flag and module replacements as that build; `test:run`
+does not include them. `test:desktop-contract` crosses the real bundled preload and renderer;
 [Development](../docs/DEVELOPMENT.md) describes its prerequisites. For
 representative desktop behavior, build and run through the root launcher.
 Open frontend findings are tracked in the

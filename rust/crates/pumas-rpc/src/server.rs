@@ -13,7 +13,7 @@ use crate::handlers::{
 };
 use crate::http_admission::{enforce_local_request, is_allowed_origin};
 #[cfg(feature = "inference-plugins")]
-use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
+use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory, ProviderHttp};
 use axum::{
     extract::DefaultBodyLimit,
     http::{header, Method},
@@ -134,9 +134,9 @@ pub struct AppState {
     /// Plugin configuration loader
     #[cfg(feature = "inference-plugins")]
     pub plugin_loader: Arc<PluginLoader>,
-    /// Shared HTTP client for OpenAI-compatible gateway proxying.
+    /// Shared HTTP clients for OpenAI-compatible gateway proxying.
     #[cfg(feature = "inference-plugins")]
-    pub gateway_http_client: reqwest::Client,
+    pub gateway_http_client: ProviderHttp,
     /// Public loopback base URL for the OpenAI-compatible serving gateway.
     #[cfg(feature = "inference-plugins")]
     pub gateway_base_url: RuntimeEndpointUrl,
@@ -730,18 +730,19 @@ async fn reject_during_shutdown(
 }
 
 #[cfg(feature = "inference-plugins")]
-fn build_gateway_http_client() -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
-        .timeout(GATEWAY_PROXY_TIMEOUT)
-        .build()?)
+fn build_gateway_http_client() -> anyhow::Result<ProviderHttp> {
+    Ok(ProviderHttp::build(|builder| {
+        builder.timeout(GATEWAY_PROXY_TIMEOUT)
+    })?)
 }
 
 #[cfg(feature = "inference-plugins")]
-fn build_provider_http_client() -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
-        .connect_timeout(PROVIDER_HTTP_CONNECT_TIMEOUT)
-        .user_agent("pumas-library")
-        .build()?)
+fn build_provider_http_client() -> anyhow::Result<ProviderHttp> {
+    Ok(ProviderHttp::build(|builder| {
+        builder
+            .connect_timeout(PROVIDER_HTTP_CONNECT_TIMEOUT)
+            .user_agent("pumas-library")
+    })?)
 }
 
 #[cfg(feature = "inference-plugins")]

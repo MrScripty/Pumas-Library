@@ -128,17 +128,14 @@ impl Observer {
             pending_model_ids: vec![],
             last_error: None,
         };
+        let client = router_http_client(spec.endpoint_url.as_str());
         Self {
             context,
             spec,
             generation,
             receipt: None,
             sync,
-            client: reqwest::Client::builder()
-                .connect_timeout(HTTP_BUDGET)
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("router HTTP client"),
+            client,
             catalog_dirty: true,
         }
     }
@@ -383,6 +380,53 @@ impl Observer {
         })
         .await
         .map_err(|_| error("Router model read timed out"))?
+    }
+}
+/// Router observation never follows redirects and, for a loopback router,
+/// never goes through `HTTP_PROXY`/`ALL_PROXY` or system proxy settings.
+fn router_http_client(endpoint: &str) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
+        .connect_timeout(HTTP_BUDGET)
+        .redirect(reqwest::redirect::Policy::none());
+    let builder = if is_loopback_endpoint(endpoint) {
+        builder.no_proxy()
+    } else {
+        builder
+    };
+    builder.build().expect("router HTTP client")
+}
+fn is_loopback_endpoint(endpoint: &str) -> bool {
+    match url::Url::parse(endpoint)
+        .ok()
+        .and_then(|url| url.host().map(|host| host.to_owned()))
+    {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            name == "localhost" || name.ends_with(".localhost")
+        }
+        None => false,
+    }
+}
+#[cfg(test)]
+mod loopback_tests {
+    #[test]
+    fn loopback_router_endpoints_bypass_proxies() {
+        for endpoint in [
+            "http://127.0.0.1:8080",
+            "http://[::1]:1/",
+            "http://localhost:9/",
+        ] {
+            assert!(super::is_loopback_endpoint(endpoint), "{endpoint}");
+        }
+        for endpoint in [
+            "http://10.1.2.3:8080",
+            "https://router.example/",
+            "not a url",
+        ] {
+            assert!(!super::is_loopback_endpoint(endpoint), "{endpoint}");
+        }
     }
 }
 fn error(message: &str) -> PumasError {

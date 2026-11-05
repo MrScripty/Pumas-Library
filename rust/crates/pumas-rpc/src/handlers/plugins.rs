@@ -51,8 +51,11 @@ pub async fn check_plugin_health(state: &AppState, params: &Value) -> pumas_libr
                     "{}://localhost:{}{}",
                     conn.protocol, conn.default_port, health_endpoint
                 );
+                // Plugin health is always a loopback probe; never proxy it.
                 let client = reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(3))
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
                     .build()
                     .unwrap_or_default();
                 let healthy = client

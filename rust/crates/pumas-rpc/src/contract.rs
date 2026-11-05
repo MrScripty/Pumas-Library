@@ -169,6 +169,14 @@ impl PublicError {
         }
     }
 
+    /// [`Self::unavailable`] whose message says what is unavailable and why.
+    pub(crate) fn unavailable_because(reason: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            message: reason.into(),
+            ..Self::unavailable()
+        }
+    }
+
     pub(crate) fn from_pumas(error: &PumasError) -> Self {
         let public = Self::classify_pumas(error);
         if matches!(error, PumasError::DownloadRootBusy) {

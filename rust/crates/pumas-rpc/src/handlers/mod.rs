@@ -478,7 +478,12 @@ pub async fn handle_rpc(State(state): State<Arc<AppState>>, body: Bytes) -> impl
     if state.shutdown_request.is_requested() && !matches!(request.command, RpcCommand::Shutdown) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(JsonRpcResponse::error(id, PublicError::unavailable())),
+            Json(JsonRpcResponse::error(
+                id,
+                PublicError::unavailable_because(
+                    "Pumas is shutting down; only `shutdown` is still accepted.",
+                ),
+            )),
         );
     }
     let method = request.command.method().to_string();

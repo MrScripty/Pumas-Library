@@ -423,6 +423,26 @@ impl S3Imports {
         }
     }
 }
+/// A fixed reason per S3 source failure kind. Text the S3 service sent back
+/// (protocol errors) and client internals are never forwarded.
+fn source_failure_reason(error: &pumas_library::acquisition::S3ReaderError) -> &'static str {
+    use pumas_library::acquisition::S3ReaderError;
+    match error {
+        S3ReaderError::Configuration(_) => "The S3 source configuration was refused.",
+        S3ReaderError::Manifest(_) => "The S3 file selection was refused.",
+        S3ReaderError::Client(_) => "The S3 client could not be constructed.",
+        S3ReaderError::Changed => {
+            "The selected S3 object version, validator, size or range changed during the transfer."
+        }
+        S3ReaderError::Unavailable => "The S3 object or selected version is unavailable.",
+        S3ReaderError::Protocol(_) => "An S3 request failed.",
+        S3ReaderError::InvalidRange => "An S3 range was empty or outside the selected object.",
+        S3ReaderError::BodyLength => "An S3 body did not match the requested byte count.",
+        S3ReaderError::TimedOut => "An S3 operation exceeded its time budget.",
+        S3ReaderError::Write(_) => "The transferred bytes could not be written locally.",
+    }
+}
+
 fn snapshot_inner(state: &Inner, id: Option<&str>) -> S3ImportOutcome {
     if state.sender.as_ref().is_none_or(mpsc::Sender::is_closed) {
         return S3ImportOutcome::Unavailable;
@@ -695,9 +715,13 @@ async fn run(state: &AppState, job: ImportJob) -> (S3ImportResultWire, Option<Re
                 drained_operation = true;
                 failure(PublicError::from_pumas(&error), true, None)
             }
-            Err(S3ModelImportError::Source(_)) => {
+            Err(S3ModelImportError::Source(error)) => {
                 drained_operation = true;
-                failure(PublicError::unavailable(), true, None)
+                failure(
+                    PublicError::unavailable_because(source_failure_reason(&error)),
+                    true,
+                    None,
+                )
             }
             Err(S3ModelImportError::Drain {
                 published_result, ..

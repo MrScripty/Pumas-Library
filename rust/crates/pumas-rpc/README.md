@@ -27,6 +27,15 @@ project their outcomes.
   unknown route or method, owner retention, transport) keeps its status and
   carries `{"error":{"code","message"}}` with `Cache-Control: no-store`; see
   [the refusal body](../../../docs/contracts/local-http-admission-fence.md#refusal-body).
+- Provider clients (`ProviderHttp` in `src/provider_clients.rs`) reach a
+  loopback provider directly, never through `HTTP_PROXY`/`ALL_PROXY` or system
+  proxy settings. External runtime profiles may name a provider on another
+  host; those requests keep the system proxy configuration, and a plain-`http`
+  remote endpoint logs a warning because prompts and outputs cross the network
+  unencrypted. Provider clients never follow redirects, provider replies are
+  read with explicit size bounds, and a gateway failure says whether the
+  provider was unreachable, slow, refused the request or exceeded the 32 MiB
+  response limit.
 - Every error leaves through the redacted public projection in
   `src/public_text.rs`; transports never serialize core errors directly.
 - Typed JSON-RPC parameters are closed: an unknown field is refused, not

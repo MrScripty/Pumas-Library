@@ -84,7 +84,7 @@ async fn gateway_test_state_with_clients(
             SizeCalculator::new_with_cache(launcher_root.join("launcher-data/cache")).await,
         )),
         plugin_loader: Arc::new(plugin_loader),
-        gateway_http_client,
+        gateway_http_client: gateway_http_client.into(),
         gateway_base_url: pumas_library::models::RuntimeEndpointUrl::parse(
             "http://127.0.0.1:3456/v1",
         )

@@ -5,9 +5,14 @@
 # Usage:
 #   ./scripts/generate-bindings.sh [python|csharp|kotlin|swift|ruby|elixir|all]
 #
-# Prerequisites:
-#   Python/Kotlin/Swift/Ruby:  cargo install uniffi-bindgen-cli
-#   C#:      cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3
+# No host binding is supported (bindings/support-matrix.json); output is for
+# local experiments only. See docs/native-bindings.md.
+#
+# Generators:
+#   Python/Kotlin/Swift/Ruby:  the in-tree pumas-uniffi-bindgen, run through
+#            `cargo run --locked` so it always matches the locked uniffi version
+#   C#:      uniffi-bindgen-cs at the commit of tag v0.9.0+v0.28.3, installed
+#            with --locked when absent (UNIFFI_BINDGEN_CS_REV below)
 #   Elixir:  mix deps.get (Rustler compiles NIFs as part of the Mix build)
 
 set -euo pipefail
@@ -17,6 +22,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUST_DIR="$PROJECT_ROOT/rust"
 BINDINGS_DIR="$PROJECT_ROOT/bindings"
 UNIFFI_CRATE="$RUST_DIR/crates/pumas-uniffi"
+# uniffi-bindgen-cs v0.9.0+v0.28.3 matches the workspace's uniffi 0.28.3.
+UNIFFI_BINDGEN_CS_REPO="https://github.com/NordSecurity/uniffi-bindgen-cs"
+UNIFFI_BINDGEN_CS_REV="2f4880f03ed08d960ad0ee14d11cf95444eee540"
 RUSTLER_CRATE="$RUST_DIR/crates/pumas-rustler"
 
 # Colors for output
@@ -36,12 +44,12 @@ error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 # ---------------------------------------------------------------------------
 build_uniffi() {
     info "Building pumas-uniffi in release mode..."
-    cargo build --manifest-path "$RUST_DIR/Cargo.toml" \
+    cargo build --locked --manifest-path "$RUST_DIR/Cargo.toml" \
         -p pumas-uniffi --release
     ok "pumas-uniffi built successfully."
 
     # Locate the built library
-    local target_dir="$RUST_DIR/target/release"
+    local target_dir="${CARGO_TARGET_DIR:-$RUST_DIR/target}/release"
     if [[ -f "$target_dir/libpumas_uniffi.so" ]]; then
         CDYLIB_PATH="$target_dir/libpumas_uniffi.so"
     elif [[ -f "$target_dir/libpumas_uniffi.dylib" ]]; then
@@ -55,26 +63,25 @@ build_uniffi() {
     info "Library: $CDYLIB_PATH"
 }
 
+# The in-tree generator is compiled from the same locked uniffi version as the
+# cdylib's scaffolding, so the generated sources always match the library.
+# Library mode reads crate configuration through `cargo metadata`, so the
+# generator runs from the workspace; every path passed to it is absolute.
+uniffi_bindgen() {
+    (cd "$RUST_DIR" && cargo run --locked --quiet \
+        -p pumas-uniffi --features cli --bin pumas-uniffi-bindgen -- "$@")
+}
+
 # ---------------------------------------------------------------------------
-# Python bindings (via uniffi-bindgen)
+# Python bindings (via pumas-uniffi-bindgen)
 # ---------------------------------------------------------------------------
 generate_python() {
     info "Generating Python bindings..."
 
-    if ! command -v uniffi-bindgen &>/dev/null; then
-        warn "uniffi-bindgen not found. Installing..."
-        cargo install uniffi-bindgen-cli
-        if [ $? -ne 0 ]; then
-            error "Failed to install uniffi-bindgen-cli"
-            return 1
-        fi
-        ok "uniffi-bindgen installed"
-    fi
-
     local out_dir="$BINDINGS_DIR/python"
     mkdir -p "$out_dir"
 
-    uniffi-bindgen generate \
+    uniffi_bindgen generate \
         --library \
         --language python \
         --out-dir "$out_dir" \
@@ -96,12 +103,9 @@ generate_csharp() {
     info "Generating C# bindings..."
 
     if ! command -v uniffi-bindgen-cs &>/dev/null; then
-        warn "uniffi-bindgen-cs not found. Installing..."
-        CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3
-        if [ $? -ne 0 ]; then
-            error "Failed to install uniffi-bindgen-cs"
-            return 1
-        fi
+        warn "uniffi-bindgen-cs not found. Installing the pinned revision..."
+        CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --locked uniffi-bindgen-cs \
+            --git "$UNIFFI_BINDGEN_CS_REPO" --rev "$UNIFFI_BINDGEN_CS_REV"
         ok "uniffi-bindgen-cs installed"
     fi
 
@@ -122,25 +126,15 @@ generate_csharp() {
 }
 
 # ---------------------------------------------------------------------------
-# Kotlin bindings (via uniffi-bindgen)
+# Kotlin bindings (via pumas-uniffi-bindgen)
 # ---------------------------------------------------------------------------
 generate_kotlin() {
     info "Generating Kotlin bindings..."
 
-    if ! command -v uniffi-bindgen &>/dev/null; then
-        warn "uniffi-bindgen not found. Installing..."
-        cargo install uniffi-bindgen-cli
-        if [ $? -ne 0 ]; then
-            error "Failed to install uniffi-bindgen-cli"
-            return 1
-        fi
-        ok "uniffi-bindgen installed"
-    fi
-
     local out_dir="$BINDINGS_DIR/kotlin"
     mkdir -p "$out_dir"
 
-    uniffi-bindgen generate \
+    uniffi_bindgen generate \
         --library \
         --language kotlin \
         --out-dir "$out_dir" \
@@ -155,25 +149,15 @@ generate_kotlin() {
 }
 
 # ---------------------------------------------------------------------------
-# Swift bindings (via uniffi-bindgen)
+# Swift bindings (via pumas-uniffi-bindgen)
 # ---------------------------------------------------------------------------
 generate_swift() {
     info "Generating Swift bindings..."
 
-    if ! command -v uniffi-bindgen &>/dev/null; then
-        warn "uniffi-bindgen not found. Installing..."
-        cargo install uniffi-bindgen-cli
-        if [ $? -ne 0 ]; then
-            error "Failed to install uniffi-bindgen-cli"
-            return 1
-        fi
-        ok "uniffi-bindgen installed"
-    fi
-
     local out_dir="$BINDINGS_DIR/swift"
     mkdir -p "$out_dir"
 
-    uniffi-bindgen generate \
+    uniffi_bindgen generate \
         --library \
         --language swift \
         --out-dir "$out_dir" \
@@ -187,25 +171,15 @@ generate_swift() {
 }
 
 # ---------------------------------------------------------------------------
-# Ruby bindings (via uniffi-bindgen)
+# Ruby bindings (via pumas-uniffi-bindgen)
 # ---------------------------------------------------------------------------
 generate_ruby() {
     info "Generating Ruby bindings..."
 
-    if ! command -v uniffi-bindgen &>/dev/null; then
-        warn "uniffi-bindgen not found. Installing..."
-        cargo install uniffi-bindgen-cli
-        if [ $? -ne 0 ]; then
-            error "Failed to install uniffi-bindgen-cli"
-            return 1
-        fi
-        ok "uniffi-bindgen installed"
-    fi
-
     local out_dir="$BINDINGS_DIR/ruby"
     mkdir -p "$out_dir"
 
-    uniffi-bindgen generate \
+    uniffi_bindgen generate \
         --library \
         --language ruby \
         --out-dir "$out_dir" \
@@ -259,7 +233,7 @@ generate_elixir() {
 
     # Optionally verify the Rustler crate builds
     info "Verifying pumas_rustler builds..."
-    cargo build --manifest-path "$RUST_DIR/Cargo.toml" \
+    cargo build --locked --manifest-path "$RUST_DIR/Cargo.toml" \
         -p pumas_rustler --release
     ok "pumas_rustler built successfully."
 }
@@ -273,11 +247,11 @@ usage() {
     echo "Generate cross-language bindings for pumas-core."
     echo ""
     echo "Targets:"
-    echo "  python   Generate Python bindings via uniffi-bindgen"
+    echo "  python   Generate Python bindings via pumas-uniffi-bindgen"
     echo "  csharp   Generate C# bindings via uniffi-bindgen-cs"
-    echo "  kotlin   Generate Kotlin bindings via uniffi-bindgen"
-    echo "  swift    Generate Swift bindings via uniffi-bindgen"
-    echo "  ruby     Generate Ruby bindings via uniffi-bindgen"
+    echo "  kotlin   Generate Kotlin bindings via pumas-uniffi-bindgen"
+    echo "  swift    Generate Swift bindings via pumas-uniffi-bindgen"
+    echo "  ruby     Generate Ruby bindings via pumas-uniffi-bindgen"
     echo "  elixir   Build Rustler NIF and print Elixir integration guide"
     echo "  all      Generate all bindings (default)"
     exit 1

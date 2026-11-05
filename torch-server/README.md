@@ -64,7 +64,10 @@ torch-server/.venv/bin/pip install --require-hashes -r torch-server/requirements
 torch-server/.venv/bin/python torch-server/serve.py --host 127.0.0.1 --port 8400 --max-models 4
 ```
 
-These commands are for direct development only. Managed installs use no fixed
+These commands are for direct development only. `requirements.txt` is an
+unpinned list of the runtime packages (Torch and its serving stack) and is never
+shipped. `requirements-dev.lock` is the hash-locked set CI installs for lint and
+unit tests; the unit suite needs only that lock. Managed installs use no fixed
 package lock: each resolves current package versions when it is installed and
 records the exact versions and hashes it received. Pumas does not choose those
 versions for the user, so it does not own their advisories.

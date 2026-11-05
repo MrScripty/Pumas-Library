@@ -1,7 +1,7 @@
 # Shared acquisition-to-model import bridge
 
 This report describes the shared GGUF and safetensors acquisition-to-import
-bridge. The [S3 brief](../../../breif/s3-model-fetch.md) separates generic byte
+bridge. The [S3 brief](../../../brief/s3-model-fetch.md) separates generic byte
 transfer from model semantics. The subsequent [bounded ONNX extension](acquired-onnx-package-2026-10-08.md)
 and [public S3 flow](s3-public-model-bridge-2026-10-08.md) build on this contract.
 

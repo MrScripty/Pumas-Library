@@ -3,9 +3,10 @@
 ## Prepare and rehearse before tagging
 
 The `Build` workflow runs on pull requests, `main`, version tags, and manual
-`workflow_dispatch`. Ordinary PR/main validation runs source/contract checks;
-PR/ordinary manual runs also produce a separately labeled Linux inference review
-archive.
+`workflow_dispatch`. Ordinary PR/main validation runs source/contract checks
+and the dependency scan (advisory there, blocking for candidates); PR, `main`
+and ordinary manual runs also produce a separately labeled Linux inference
+review archive.
 The complete optimized sixteen-artifact matrix runs for a `v*` version tag or an
 explicit manual `build_candidates=true` dispatch. Manual candidate builds require
 `expected_source` to equal the exact checked-out 40-character commit; a missing or
@@ -71,8 +72,10 @@ cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-fe
 pnpm --dir frontend lint
 pnpm --dir frontend check:types
 pnpm --dir frontend test:run
-pnpm --dir frontend build:library-only
+pnpm --dir frontend build:library-only --outDir /tmp/pumas-library-only --emptyOutDir
+node scripts/release/check-frontend-variant.mjs /tmp/pumas-library-only library-only
 pnpm --dir frontend build
+node scripts/release/check-frontend-variant.mjs frontend/dist default
 pnpm --dir electron lint
 pnpm --dir electron validate
 node electron/node_modules/electron/install.js
@@ -337,8 +340,10 @@ Before tagging or publishing, satisfy the remaining artifact-plan obligations:
   on every claimed target.
 - Generate current per-installer SPDX SBOMs, provenance, and third-party notices;
   embed the accepted notices and project license in each distributable.
-- Run current Cargo and pnpm vulnerability/license checks and review their
-  results against the shipped dependency closure.
+- Review the run's `current-vulnerability-results` artifact. The
+  `dependency-audit` job scans Cargo (advisories and licenses), pnpm and the
+  pinned Python inputs, and `release-candidate` refuses a review that failed or
+  scanned another commit. See [dependency scans](docs/SECURITY.md#dependency-scans).
 - Verify the final publication inventory. Candidate checksums cover every final
   artifact and metadata file; regenerate them if anything is added or changed.
 - If shipping a Torch runtime, verify its resolved dependencies and real
@@ -361,8 +366,9 @@ no-follow traversal, a pinned execution lock file, native handle-relative rename
 and writable directory flushes. Durable JSON publication retains the same explicit
 failure and durability states across Linux, macOS, and Windows. Native startup
 checks do not establish signing, SmartScreen acceptance, or interactive workflows.
-Run the vulnerability and license checks for the exact shipped closure, and
-re-confirm the [accepted advisory exceptions](docs/SECURITY.md#accepted-advisory-exceptions).
+The candidate's `current-vulnerability-results` must pass for that exact
+commit; re-confirm the [accepted advisory exceptions](docs/SECURITY.md#accepted-advisory-exceptions)
+against it.
 
 ## Tag and publish
 

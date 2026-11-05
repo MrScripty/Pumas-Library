@@ -1747,3 +1747,36 @@ test('update streams deliver decoded payloads and report undeliverable ones', ()
   assert.equal(libraryErrors.length, 1);
   assert.match(libraryErrors[0], /^Desktop contract invalid for model-library update: /);
 });
+
+test('every update stream reports transport loss and subscription failure to onError', async () => {
+  const streams = [
+    ['model-library', 'onModelLibraryUpdate', false],
+    ['model-download', 'onModelDownloadUpdate', true],
+    ['runtime-profile', 'onRuntimeProfileUpdate', true],
+    ['serving-status', 'onServingStatusUpdate', true],
+    ['status-telemetry', 'onStatusTelemetryUpdate', true],
+  ];
+  for (const [stream, subscribe, refcounted] of streams) {
+    const harness = loadCompiledPreload();
+    harness.respondWith(() => Promise.reject(new Error(`${stream} subscribe refused`)));
+    const errors = [];
+    const unsubscribe = harness.api[subscribe](() => assert.fail('no payload was sent'), (message) => errors.push(message));
+    await new Promise((resolve) => setImmediate(resolve));
+    harness.emit(`${stream}:error`, { message: `${stream} stream ended` });
+    harness.emit(`${stream}:error`, { message: 'x', extra: true });
+    const expected = [
+      ...(refcounted ? [`${stream} subscribe refused`] : []),
+      `${stream} stream ended`,
+    ];
+    assert.deepEqual(errors.slice(0, expected.length), expected, `${stream} errors reach onError`);
+    assert.match(errors.at(-1), new RegExp(`^Desktop contract invalid for ${stream} error update: `));
+    assert.deepEqual(
+      harness.invocations.map(([channel]) => channel),
+      refcounted ? [`${stream}:subscribe`] : [],
+    );
+    unsubscribe();
+    harness.emit(`${stream}:error`, { message: 'after unsubscribe' });
+    assert.ok(!errors.includes('after unsubscribe'), `${stream} error listener is removed`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+});

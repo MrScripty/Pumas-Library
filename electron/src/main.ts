@@ -75,10 +75,13 @@ const WINDOW_HEIGHT = 1000;
 const MIN_WINDOW_WIDTH = 360;
 const MIN_WINDOW_HEIGHT = 400;
 const MODEL_LIBRARY_UPDATE_CHANNEL = 'model-library:update';
+const MODEL_LIBRARY_ERROR_CHANNEL = 'model-library:error';
 const MODEL_DOWNLOAD_UPDATE_CHANNEL = 'model-download:update';
+const MODEL_DOWNLOAD_ERROR_CHANNEL = 'model-download:error';
 const MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL = 'model-download:subscribe';
 const MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL = 'model-download:unsubscribe';
 const RUNTIME_PROFILE_UPDATE_CHANNEL = 'runtime-profile:update';
+const RUNTIME_PROFILE_ERROR_CHANNEL = 'runtime-profile:error';
 const RUNTIME_PROFILE_SUBSCRIBE_CHANNEL = 'runtime-profile:subscribe';
 const RUNTIME_PROFILE_UNSUBSCRIBE_CHANNEL = 'runtime-profile:unsubscribe';
 const SERVING_STATUS_UPDATE_CHANNEL = 'serving-status:update';
@@ -86,6 +89,7 @@ const SERVING_STATUS_ERROR_CHANNEL = 'serving-status:error';
 const SERVING_STATUS_SUBSCRIBE_CHANNEL = 'serving-status:subscribe';
 const SERVING_STATUS_UNSUBSCRIBE_CHANNEL = 'serving-status:unsubscribe';
 const STATUS_TELEMETRY_UPDATE_CHANNEL = 'status-telemetry:update';
+const STATUS_TELEMETRY_ERROR_CHANNEL = 'status-telemetry:error';
 const STATUS_TELEMETRY_SUBSCRIBE_CHANNEL = 'status-telemetry:subscribe';
 const STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL = 'status-telemetry:unsubscribe';
 const LAUNCHER_ROOT_PRESENTATION_COMMITTED_CHANNEL =
@@ -774,19 +778,36 @@ function registerIPCHandlers(): void {
   log.info('IPC handlers registered');
 }
 
+/** Send to the main window's renderer, if it still exists. */
+function sendToMainWindow(channel: string, payload: unknown): void {
+  const targetWindow = mainWindow;
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+  targetWindow.webContents.send(channel, payload);
+}
+
+/**
+ * Forward one update stream. Transport loss (stream ended or failed) goes to
+ * its error channel so the renderer resynchronizes and can show the failure,
+ * instead of reaching only the main-process log.
+ */
+function streamForwarder(updateChannel: string, errorChannel: string) {
+  return [
+    (payload: unknown) => sendToMainWindow(updateChannel, payload),
+    // The renderer's UpdateStreamError contract bounds the message.
+    (message: string) => sendToMainWindow(errorChannel, { message: message.slice(0, 1024) }),
+  ] as const;
+}
+
 function startModelLibraryUpdateForwarder(): void {
   if (!pythonBridge?.isRunning()) {
     return;
   }
 
-  pythonBridge.startModelLibraryUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(MODEL_LIBRARY_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startModelLibraryUpdateStream(
+    ...streamForwarder(MODEL_LIBRARY_UPDATE_CHANNEL, MODEL_LIBRARY_ERROR_CHANNEL)
+  );
 }
 
 function startRuntimeProfileUpdateForwarder(): void {
@@ -794,14 +815,9 @@ function startRuntimeProfileUpdateForwarder(): void {
     return;
   }
 
-  pythonBridge.startRuntimeProfileUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(RUNTIME_PROFILE_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startRuntimeProfileUpdateStream(
+    ...streamForwarder(RUNTIME_PROFILE_UPDATE_CHANNEL, RUNTIME_PROFILE_ERROR_CHANNEL)
+  );
 }
 
 function startModelDownloadUpdateForwarder(): void {
@@ -809,14 +825,9 @@ function startModelDownloadUpdateForwarder(): void {
     return;
   }
 
-  pythonBridge.startModelDownloadUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(MODEL_DOWNLOAD_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startModelDownloadUpdateStream(
+    ...streamForwarder(MODEL_DOWNLOAD_UPDATE_CHANNEL, MODEL_DOWNLOAD_ERROR_CHANNEL)
+  );
 }
 
 function startStatusTelemetryUpdateForwarder(): void {
@@ -824,14 +835,9 @@ function startStatusTelemetryUpdateForwarder(): void {
     return;
   }
 
-  pythonBridge.startStatusTelemetryUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(STATUS_TELEMETRY_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startStatusTelemetryUpdateStream(
+    ...streamForwarder(STATUS_TELEMETRY_UPDATE_CHANNEL, STATUS_TELEMETRY_ERROR_CHANNEL)
+  );
 }
 
 function startServingStatusUpdateForwarder(): void {
@@ -840,22 +846,7 @@ function startServingStatusUpdateForwarder(): void {
   }
 
   pythonBridge.startServingStatusUpdateStream(
-    (payload) => {
-      const targetWindow = mainWindow;
-      if (!targetWindow || targetWindow.isDestroyed()) {
-        return;
-      }
-
-      targetWindow.webContents.send(SERVING_STATUS_UPDATE_CHANNEL, payload);
-    },
-    (message) => {
-      const targetWindow = mainWindow;
-      if (!targetWindow || targetWindow.isDestroyed()) {
-        return;
-      }
-
-      targetWindow.webContents.send(SERVING_STATUS_ERROR_CHANNEL, { message });
-    }
+    ...streamForwarder(SERVING_STATUS_UPDATE_CHANNEL, SERVING_STATUS_ERROR_CHANNEL)
   );
 }
 

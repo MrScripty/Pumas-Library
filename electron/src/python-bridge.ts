@@ -74,7 +74,7 @@ export type ModelDownloadUpdateListener = (payload: unknown) => void;
 export type RuntimeProfileUpdateListener = (payload: unknown) => void;
 export type ServingStatusUpdateListener = (payload: unknown) => void;
 export type StatusTelemetryUpdateListener = (payload: unknown) => void;
-type StreamErrorListener = (message: string) => void;
+export type StreamErrorListener = (message: string) => void;
 
 export interface ParsedSseChunk {
   buffer: string;
@@ -852,24 +852,33 @@ export class PythonBridge {
     }
   }
 
-  startModelLibraryUpdateStream(listener: ModelLibraryUpdateListener): void {
-    this.modelLibraryUpdateStream.start(listener);
+  startModelLibraryUpdateStream(
+    listener: ModelLibraryUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.modelLibraryUpdateStream.start(listener, errorListener);
   }
 
   stopModelLibraryUpdateStream(): void {
     this.modelLibraryUpdateStream.stop();
   }
 
-  startModelDownloadUpdateStream(listener: ModelDownloadUpdateListener): void {
-    this.modelDownloadUpdateStream.start(listener);
+  startModelDownloadUpdateStream(
+    listener: ModelDownloadUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.modelDownloadUpdateStream.start(listener, errorListener);
   }
 
   stopModelDownloadUpdateStream(): void {
     this.modelDownloadUpdateStream.stop();
   }
 
-  startRuntimeProfileUpdateStream(listener: RuntimeProfileUpdateListener): void {
-    this.runtimeProfileUpdateStream.start(listener);
+  startRuntimeProfileUpdateStream(
+    listener: RuntimeProfileUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.runtimeProfileUpdateStream.start(listener, errorListener);
   }
 
   stopRuntimeProfileUpdateStream(): void {
@@ -887,8 +896,11 @@ export class PythonBridge {
     this.servingStatusUpdateStream.stop();
   }
 
-  startStatusTelemetryUpdateStream(listener: StatusTelemetryUpdateListener): void {
-    this.statusTelemetryUpdateStream.start(listener);
+  startStatusTelemetryUpdateStream(
+    listener: StatusTelemetryUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.statusTelemetryUpdateStream.start(listener, errorListener);
   }
 
   stopStatusTelemetryUpdateStream(): void {

@@ -124,7 +124,10 @@ status telemetry) are declared by the backend and decoded in preload. Each
 subscription takes a required `onError`: a payload that fails its contract is
 never dropped silently. Its reason, naming the failed rule and location, goes
 to `onError`, and the renderer reloads from the RPC snapshot. Decoders never
-put a field's value in a rejection reason.
+put a field's value in a rejection reason. Transport loss reaches the same
+`onError`: main forwards each stream's "ended"/"failed" outcome on
+`<stream>:error` (an `UpdateStreamError`), and a refused subscription is
+reported there too.
 
 The backend's startup diagnostic is the exception to closed declarations. Rust
 writes one `PUMAS_STARTUP_FAILURE=` line holding a `StartupFailureFrame`

@@ -58,6 +58,8 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime, packaged = fal
       windowOpenHandler: null,
       mainFrame: { url: appEntryUrl },
       setWindowOpenHandler(handler) { contents.windowOpenHandler = handler; },
+      sent: [],
+      send(channel, payload) { contents.sent.push([channel, payload]); },
       devToolsOpened: 0,
       openDevTools() { contents.devToolsOpened += 1; },
     });
@@ -647,6 +649,49 @@ test('closing the window releases every renderer stream subscription, including 
       ['start ModelDownload', 'start ModelDownload'], 'a leaked counter would skip this restart');
     replacement.destroy();
     await activation;
+  } finally {
+    for (const window of harness.windows) if (!window.destroyed) window.destroy();
+    harness.timers.clear();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('main forwards transport loss of every update stream to its renderer error channel', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pumas-main-stream-errors-'));
+  mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+  const errorListeners = new Map();
+  class FixtureBridge {
+    isRunning() { return true; }
+    async start() {}
+    async stop() {}
+    async call() { return {}; }
+  }
+  const streams = {
+    ModelLibrary: 'model-library', ModelDownload: 'model-download', RuntimeProfile: 'runtime-profile',
+    ServingStatus: 'serving-status', StatusTelemetry: 'status-telemetry',
+  };
+  for (const stream of Object.keys(streams)) {
+    FixtureBridge.prototype[`start${stream}UpdateStream`] = function (_listener, onError) {
+      errorListeners.set(stream, onError);
+    };
+    FixtureBridge.prototype[`stop${stream}UpdateStream`] = function () {};
+  }
+  const harness = createMainHarness({ root, bridgeRuntime: { module: { PythonBridge: FixtureBridge } } });
+  try {
+    harness.ready();
+    await setImmediate();
+    for (const channel of ['model-download', 'runtime-profile', 'serving-status', 'status-telemetry']) {
+      harness.handlers.get(`${channel}:subscribe`)(harness.appSender());
+    }
+    const contents = harness.windows[0].webContents;
+    for (const [stream, channel] of Object.entries(streams)) {
+      const onError = errorListeners.get(stream);
+      assert.equal(typeof onError, 'function', `${stream} must be started with an error listener`);
+      onError(`${stream} stream ended`);
+      assert.deepEqual(JSON.parse(JSON.stringify(contents.sent.at(-1))), [`${channel}:error`, { message: `${stream} stream ended` }]);
+    }
+    errorListeners.get('ModelLibrary')('x'.repeat(5000));
+    assert.equal(contents.sent.at(-1)[1].message.length, 1024, 'messages stay within the renderer contract');
   } finally {
     for (const window of harness.windows) if (!window.destroyed) window.destroy();
     harness.timers.clear();

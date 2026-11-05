@@ -105,6 +105,7 @@ impl OnnxRuntimeSession {
             execution_provider: self.execution_provider,
             embedding_dimensions: self.embedding_dimensions,
             state: OnnxSessionState::Loaded,
+            max_input_tokens: self.max_input_tokens(),
         }
     }
 

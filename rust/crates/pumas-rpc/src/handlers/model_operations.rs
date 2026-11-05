@@ -601,14 +601,22 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         .as_ref()
         .and_then(|r| semantic_task_evidence(&r.metadata));
     let model_type = record.as_ref().map(|r| r.model_type.as_str());
+    let onnx_session =
+        match served.provider {
+            RuntimeProviderId::OnnxRuntime => state
+                .onnx_session_manager
+                .list()
+                .await
+                .ok()
+                .and_then(|models| {
+                    models
+                        .into_iter()
+                        .find(|model| model.model_id.as_str() == served.model_id)
+                }),
+            _ => None,
+        };
     let runtime_ready = match served.provider {
-        RuntimeProviderId::OnnxRuntime => {
-            state.onnx_session_manager.list().await.is_ok_and(|models| {
-                models
-                    .iter()
-                    .any(|model| model.model_id.as_str() == served.model_id)
-            })
-        }
+        RuntimeProviderId::OnnxRuntime => onnx_session.is_some(),
         RuntimeProviderId::Torch => match served.endpoint_url.as_ref() {
             Some(endpoint) => {
                 openai_gateway::check_live_torch_image_runtime(state, served, endpoint)
@@ -679,7 +687,12 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![InputFormat::Text, InputFormat::TextBatch],
                     vec![OutputFormat::EmbeddingsFloat32],
                     Some(OpenAiGatewayEndpoint::Embeddings),
-                    embedding_bounds(served.provider),
+                    embedding_bounds(
+                        served.provider,
+                        onnx_session
+                            .as_ref()
+                            .and_then(|session| session.max_input_tokens),
+                    ),
                 ),
                 Capability::ImageGeneration => (
                     SemanticTask::TextToImage,
@@ -893,12 +906,17 @@ fn semantic_match(
         None => None,
     }
 }
-/// The in-process ONNX runtime has fixed batch and tokenizer limits. Proxied
-/// providers enforce their own (context and batch size) and report violations.
-fn embedding_bounds(provider: RuntimeProviderId) -> Vec<OptionBound> {
+/// The in-process ONNX runtime has fixed batch and tokenizer limits, plus the
+/// loaded model's own per-input token limit when its config declares one.
+/// Proxied providers enforce their own (context and batch size) and report
+/// violations.
+fn embedding_bounds(
+    provider: RuntimeProviderId,
+    max_input_tokens: Option<usize>,
+) -> Vec<OptionBound> {
     if provider == RuntimeProviderId::OnnxRuntime {
         let limits = pumas_library::OnnxEmbeddingRequest::LIMITS;
-        vec![
+        let mut bounds = vec![
             bound(OptionName::Dimensions, 1., limits.max_dimensions as f64),
             bound(OptionName::InputCount, 1., limits.max_inputs as f64),
             bound(
@@ -906,7 +924,11 @@ fn embedding_bounds(provider: RuntimeProviderId) -> Vec<OptionBound> {
                 0.,
                 limits.max_input_chars as f64,
             ),
-        ]
+        ];
+        if let Some(max_input_tokens) = max_input_tokens {
+            bounds.push(bound(OptionName::InputTokens, 1., max_input_tokens as f64));
+        }
+        bounds
     } else {
         vec![bound(OptionName::Dimensions, 1., u32::MAX as f64)]
     }

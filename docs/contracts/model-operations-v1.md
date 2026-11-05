@@ -178,7 +178,10 @@ accept optional positive `dimensions`; when the provider ignores it (llama.cpp,
 Ollama), Pumas keeps the leading values and renormalizes (Matryoshka
 truncation), and a request for more dimensions than the model produces fails.
 The in-process ONNX adapter has fixed batch, length and dimension limits,
-which its descriptor reports. Proxied providers enforce their own context and
+which its descriptor reports, plus the loaded model's own per-input token
+limit (`input_tokens`, including special tokens) when the model config declares
+`max_position_embeddings` or `n_positions`; an input over it is refused with
+the limit named. Proxied providers enforce their own context and
 batch limits and their reported reason reaches the caller. Image inputs share
 decode-safety bounds (8 MiB per image and 16 MiB per request, 4 images, 4096 px
 per side, 4 megapixels per image; `image_messages` also 128 messages and 128

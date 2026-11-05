@@ -94,6 +94,30 @@ fn closed_requests_reject_unknown_fields_and_incoherent_formats() {
     }
 }
 #[test]
+fn onnx_embedding_bounds_advertise_the_model_input_token_limit() {
+    let options = |bounds: Vec<OptionBound>| {
+        bounds
+            .into_iter()
+            .map(|bound| serde_json::to_value(bound).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let with_limit = options(embedding_bounds(RuntimeProviderId::OnnxRuntime, Some(510)));
+    assert!(with_limit.contains(&serde_json::json!(
+        {"option":"input_tokens","minimum":1.0,"maximum":510.0}
+    )));
+    // A config without a positional limit advertises none, and proxied
+    // providers enforce (and report) their own context.
+    for bounds in [
+        embedding_bounds(RuntimeProviderId::OnnxRuntime, None),
+        embedding_bounds(RuntimeProviderId::LlamaCpp, Some(510)),
+    ] {
+        assert!(options(bounds)
+            .iter()
+            .all(|bound| bound["option"] != "input_tokens"));
+    }
+}
+
+#[test]
 fn request_ids_are_correlation_and_embedding_bounds_belong_to_the_provider() {
     let mut r = request();
     r.request_id = " ".into();

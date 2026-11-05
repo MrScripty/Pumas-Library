@@ -272,6 +272,10 @@ pub struct OnnxSessionStatus {
     pub execution_provider: OnnxExecutionProvider,
     pub embedding_dimensions: usize,
     pub state: OnnxSessionState,
+    /// The per-input token limit derived from the model config
+    /// (`max_position_embeddings` or `n_positions`), when it declares one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

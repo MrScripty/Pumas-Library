@@ -621,6 +621,9 @@ pub enum OptionName {
     MessageCount,
     /// Content parts across one request.
     ContentParts,
+    /// Tokens per input, including special tokens, from the served model's
+    /// own positional limit.
+    InputTokens,
 }
 
 #[cfg(test)]

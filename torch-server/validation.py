@@ -60,7 +60,10 @@ def validate_model_path(value: str, *, field: str = "model_path") -> str:
     approved_roots = list(_configured_model_roots())
     if approved_roots and not any(_is_relative_to(path, root) for root in approved_roots):
         roots = ", ".join(str(root) for root in approved_roots)
-        raise ValueError(f"{field} must be inside an approved model root: {roots}")
+        raise ValueError(
+            f"{field} must be inside an approved model root: {roots}. Models imported "
+            "by external reference after Torch started need a Torch restart"
+        )
 
     return str(path)
 

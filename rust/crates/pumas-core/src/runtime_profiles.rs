@@ -71,6 +71,7 @@ use tokio::sync::broadcast;
 
 use launch_specs::derive_managed_profile_launch_specs;
 pub use launch_specs::{torch_api_token, TORCH_API_TOKEN_HEADER};
+pub(crate) use launch_specs::{torch_model_roots, TORCH_MODEL_ROOTS_ENV};
 pub use launch_strategy::{
     RuntimeProfileBinaryLaunchKind, RuntimeProfileInProcessRuntimeKind,
     RuntimeProfileLaunchStrategy,

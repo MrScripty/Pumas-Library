@@ -151,9 +151,14 @@ async fn incompatible_preflight_cannot_reserve_and_abandoned_authority_cannot_be
 async fn replaced_claim_cannot_be_started_or_cancelled_by_stale_authority() {
     // Explicit rendezvous corruption fixture; no historical successor is fabricated.
     for cancel in [false, true] {
-        let (_temp, root, registry) = fixture();
+        let (temp, root, registry) = fixture();
         let authority = reserve(&root, registry.clone()).await;
-        registry.register_instance(&root, 123456, 1).unwrap();
+        crate::support::inject_foreign_ready_instance(
+            &temp.path().join("registry.db"),
+            &root,
+            123456,
+            1,
+        );
         let successor = registry.get_instance(&root).unwrap().unwrap();
         if cancel {
             assert!(authority.cancel().is_err());

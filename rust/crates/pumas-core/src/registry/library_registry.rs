@@ -962,7 +962,13 @@ impl LibraryRegistry {
         Ok(rows > 0)
     }
 
-    /// Register a running instance for a library path.
+    /// Register a running instance for a library path, bypassing the claim
+    /// protocol (`try_claim_instance` then `mark_instance_ready`).
+    ///
+    /// Test fixture only: it can overwrite a live owner's row, so it exists
+    /// only in unit tests and `test-support` builds.
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
     pub fn register_instance(&self, path: &Path, pid: u32, port: u16) -> Result<()> {
         let conn = self.lock_conn()?;
         let canonical = Self::canonicalize_library_path(path)?;
@@ -1009,7 +1015,12 @@ impl LibraryRegistry {
         Ok(())
     }
 
-    /// Unregister a running instance for a library path.
+    /// Remove any instance row for a library path, bypassing generation
+    /// fencing (`release_ready_instance` is the owner's release path).
+    ///
+    /// Test fixture only, like [`Self::register_instance`].
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
     pub fn unregister_instance(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
         let canonical = Self::lookup_path(path);

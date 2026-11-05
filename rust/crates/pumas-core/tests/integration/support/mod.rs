@@ -48,3 +48,47 @@ where
         }
     }
 }
+
+/// Overwrite the registry's instance row for `root` with a fabricated ready
+/// owner, bypassing the claim protocol.
+///
+/// Corruption fixture only: it writes the row directly with SQL because the
+/// library deliberately exposes no public way to do this.
+pub fn inject_foreign_ready_instance(
+    db_path: &std::path::Path,
+    root: &std::path::Path,
+    pid: u32,
+    port: u16,
+) {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let library_path = root.canonicalize().unwrap().to_string_lossy().to_string();
+    conn.execute(
+        "INSERT INTO instances (
+             library_path, pid, port, started_at, version, status, claim_token,
+             transport_kind, endpoint, connection_token
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, 'ready', NULL, 'loopback_tcp', ?6, ?7)
+         ON CONFLICT(library_path) DO UPDATE SET
+             pid=excluded.pid,
+             port=excluded.port,
+             started_at=excluded.started_at,
+             version=excluded.version,
+             status=excluded.status,
+             claim_token=NULL,
+             transport_kind=excluded.transport_kind,
+             endpoint=excluded.endpoint,
+             connection_token=excluded.connection_token",
+        rusqlite::params![
+            library_path,
+            pid,
+            port,
+            chrono::Utc::now().to_rfc3339(),
+            env!("CARGO_PKG_VERSION"),
+            format!("127.0.0.1:{port}"),
+            uuid::Uuid::new_v4().to_string(),
+        ],
+    )
+    .unwrap();
+}

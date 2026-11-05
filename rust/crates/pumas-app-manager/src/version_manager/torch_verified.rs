@@ -1,10 +1,12 @@
 //! Torch runtime combinations Pumas has verified, kept as evidence.
 //!
 //! A record says which Torch release, build, Python and adapters worked
-//! together, with which package versions, and when. It never constrains an
-//! installation: packages are resolved when the user installs, so a
-//! selection matches a record only when its resolved packages still carry the
-//! recorded versions.
+//! together, with which package versions, and when. It does not constrain an
+//! installation unless the user opts into its versions: packages are
+//! otherwise resolved when the user installs. "Verified" is a version match:
+//! a selection matches a record only when its resolved packages include every
+//! recorded package at the recorded version. It is not a hash or provenance
+//! claim; install integrity comes from the per-install hash lock.
 
 use super::TorchArtifact;
 use serde::Deserialize;
@@ -109,9 +111,44 @@ pub(crate) fn verified_torch_runtimes() -> Vec<TorchVerifiedRuntime> {
     RECORDS.clone()
 }
 
-/// Whether a resolved or installed runtime is a verified combination: the
-/// selection matches a record and every recorded package it contains has the
-/// recorded version. Torch must be among the artifacts.
+/// pip constraints pinning the recorded package versions of the verified
+/// combination that matches this exact selection, or `None` when no record
+/// matches it.
+pub(crate) fn verified_constraints(
+    tag: &str,
+    build: &str,
+    python: &str,
+    adapter: &str,
+) -> Option<String> {
+    constraints_for(&RECORDS, tag, build, python, adapter)
+}
+
+fn constraints_for(
+    records: &[TorchVerifiedRuntime],
+    tag: &str,
+    build: &str,
+    python: &str,
+    adapter: &str,
+) -> Option<String> {
+    let record = records.iter().find(|record| {
+        record.tag == tag
+            && record.build == build
+            && record.python == python
+            && record.adapters.iter().any(|recorded| recorded == adapter)
+    })?;
+    Some(
+        record
+            .packages
+            .iter()
+            .map(|package| format!("{}=={}\n", package.name, package.version))
+            .collect(),
+    )
+}
+
+/// Whether a resolved or installed runtime is a verified combination: a
+/// version match. The selection matches a record, and every recorded package
+/// is among the artifacts at the recorded version; a recorded package that is
+/// absent fails the match.
 pub(crate) fn is_verified(
     tag: &str,
     build: &str,
@@ -142,9 +179,10 @@ fn matches(
                 && record.build == build
                 && record.python == python
                 && record.adapters.iter().any(|recorded| recorded == adapter)
-                && record.packages.iter().all(|package| {
-                    version_of(&package.name).is_none_or(|version| version == package.version)
-                })
+                && record
+                    .packages
+                    .iter()
+                    .all(|package| version_of(&package.name) == Some(package.version.as_str()))
         })
 }
 
@@ -175,41 +213,72 @@ mod tests {
         .is_err());
     }
 
+    /// Every package a record names, at its recorded version, plus an
+    /// unrecorded transitive dependency that a match ignores.
+    fn installed_as_recorded(record: &TorchVerifiedRuntime) -> Vec<TorchArtifact> {
+        record
+            .packages
+            .iter()
+            .map(|package| artifact(&package.name, &package.version))
+            .chain([artifact("filelock", "3.20.0")])
+            .collect()
+    }
+
     #[test]
-    fn a_selection_is_verified_only_with_the_recorded_package_versions() {
+    fn a_selection_is_verified_only_as_a_version_match_of_every_recorded_package() {
         let source = include_str!("../../../../../torch-server/runtime/verified-runtimes.json");
         let records = parse(source, "linux-x86_64").unwrap();
-        let recorded = [
-            artifact("torch", "2.9.1+cu130"),
-            artifact("diffusers", "0.37.0"),
-            artifact("Pillow", "12.1.0"),
-            artifact("filelock", "3.20.0"),
-        ];
+        let record_for = |adapter: &str| {
+            records
+                .iter()
+                .find(|record| record.adapters.iter().any(|recorded| recorded == adapter))
+                .unwrap()
+        };
+        let flux2 = installed_as_recorded(record_for("flux2"));
+        let nunchaku = installed_as_recorded(record_for("nunchaku"));
         let check = |tag, build, python, adapter, artifacts: &[TorchArtifact]| {
             matches(&records, tag, build, python, adapter, artifacts)
         };
-        assert!(check("v2.9.1", "cu130", "python3.12", "flux2", &recorded));
+        assert!(check("v2.9.1", "cu130", "python3.12", "flux2", &flux2));
         assert!(check(
             "v2.9.1",
             "cu130",
             "python3.12",
             "nunchaku",
-            &recorded
+            &nunchaku
         ));
-        assert!(!check("v2.9.1", "cu130", "python3.12", "none", &recorded));
-        assert!(!check("v2.9.1", "cpu", "python3.12", "flux2", &recorded));
-        assert!(!check("v2.9.1", "cu130", "python3.13", "flux2", &recorded));
-        assert!(!check("v2.10.0", "cu130", "python3.12", "flux2", &recorded));
+        // A Flux 2 install has no Nunchaku wheel, so it cannot match that record.
+        assert!(!check("v2.9.1", "cu130", "python3.12", "nunchaku", &flux2));
+        assert!(!check("v2.9.1", "cu130", "python3.12", "none", &flux2));
+        assert!(!check("v2.9.1", "cpu", "python3.12", "flux2", &flux2));
+        assert!(!check("v2.9.1", "cu130", "python3.13", "flux2", &flux2));
+        assert!(!check("v2.10.0", "cu130", "python3.12", "flux2", &flux2));
 
-        let mut newer = recorded.to_vec();
-        newer[2] = artifact("pillow", "13.0.0");
+        let mut newer = flux2.clone();
+        let pillow = newer.iter().position(|item| item.name == "pillow").unwrap();
+        newer[pillow] = artifact("Pillow", "13.0.0");
         assert!(!check("v2.9.1", "cu130", "python3.12", "flux2", &newer));
-        assert!(!check(
-            "v2.9.1",
-            "cu130",
-            "python3.12",
-            "flux2",
-            &recorded[1..]
-        ));
+
+        // An absent recorded package fails the match.
+        let mut missing = flux2.clone();
+        missing.retain(|item| item.name != "diffusers");
+        assert!(!check("v2.9.1", "cu130", "python3.12", "flux2", &missing));
+    }
+
+    #[test]
+    fn verified_constraints_pin_exactly_the_matching_record() {
+        let source = include_str!("../../../../../torch-server/runtime/verified-runtimes.json");
+        let records = parse(source, "linux-x86_64").unwrap();
+        let constraints =
+            constraints_for(&records, "v2.9.1", "cu130", "python3.12", "nunchaku").unwrap();
+        assert!(constraints.contains("torch==2.9.1+cu130\n"));
+        assert!(constraints.contains("nunchaku==1.2.0+torch2.9\n"));
+        assert!(
+            !constraints_for(&records, "v2.9.1", "cu130", "python3.12", "flux2")
+                .unwrap()
+                .contains("nunchaku")
+        );
+        assert!(constraints_for(&records, "v2.9.1", "auto", "python3.12", "flux2").is_none());
+        assert!(constraints_for(&records, "v2.9.1", "cu130", "python3.12", "none").is_none());
     }
 }

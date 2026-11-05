@@ -9,6 +9,17 @@ runtime management on 2026-09-24, retaining the existing Linux support. On
 2026-09-25, the owner authorized Pumas-managed CPython provisioning and removed
 the requirement for a host-installed Python interpreter or a user Python choice.
 
+**Amendment (2026-11-05, audit remediation S4):** The fixed v2.9.1 bundled
+preset, its retained-lock path, `validate_runtime.py`, and the
+`bundledPresetAvailable` capability were removed in PR #87; statements below
+that describe them as current are superseded. Verified combinations
+(`torch-server/runtime/verified-runtimes.json`) replace the preset as evidence:
+a runtime is verified when its packages are a version match for a record. Every
+dynamic install is again hash-gated: the resolver resolves once into a
+per-install hash lock that Pumas validates, then pip installs exactly that lock
+with `--require-hashes --no-deps --no-index`, and staged files are compared by
+SHA-256. A user may opt into a verified record's versions as constraints.
+
 **Status review (2026-11-04, v0.8.0):** Still `Active`; no slice of this plan
 has landed since 2026-09-29, and every remaining gate below is still open. The
 v0.8.0 desktop packages contain this manager source, but v0.8.0 qualification
@@ -141,8 +152,8 @@ The existing Linux AppImage install report above uses the earlier path, so it
 does not accept this change. Focused source checks cover local admission,
 installer retries, staging integrity, cancellation, and progress. The rebuilt
 local package passes artifact and extracted-backend health checks, but a
-packaged direct-install run remains pending. The fixed bundled adapter preset
-continues to use its separate retained-lock resolution path.
+packaged direct-install run remains pending. (The fixed bundled adapter preset
+and its retained-lock path were later removed; see the 2026-11-05 amendment.)
 
 **Remaining gates:** Exercise the direct-install flow through the local Linux
 package, then run packaged Windows/macOS Torch installation and provider
@@ -262,12 +273,10 @@ CPU unless a Windows-specific driver rule and required evidence are added to
 this contract; exact NVIDIA CUDA wheels may remain explicit advanced choices.
 
 Stable upstream tag discovery remains global and independent of this support
-matrix; install choices are limited to exact compatible host tuples. The
-bundled v2.9.1 Linux preset is Linux-only. The manager will expose an explicit
-`bundledPresetAvailable` host capability, true only for Linux x86_64 when its
-managed CPython 3.12 provider artifact is available; the desktop must use that
-result instead of the release tag alone. Windows and macOS use the retained
-dynamic preview and wheel lock.
+matrix; install choices are limited to exact compatible host tuples. (Superseded
+2026-11-05: the bundled v2.9.1 Linux preset and its `bundledPresetAvailable`
+capability were removed; every target uses the dynamic preview and the
+per-install hash lock.)
 
 On every supported target, Core Torch runtime (`none`) is the default dependency
 profile. Linux may offer Pumas' FLUX.2 profile as an explicit advanced choice;
@@ -315,9 +324,9 @@ every release or platform.
 - The desktop remains a presentation of manager-returned exact choices. It must
   not infer OS support, invent builds, select a mismatched interpreter, or
   interpret MPS as an image adapter. It never requires a Python selector and
-  reports the manager-selected interpreter after resolution. It uses manager-provided
-  `bundledPresetAvailable` and `defaultAdapter` capabilities rather than
-  enabling the Linux bundled preset merely because the selected tag is v2.9.1.
+  reports the manager-selected interpreter after resolution. It uses the
+  manager-provided `defaultAdapter` capability (`bundledPresetAvailable` was
+  removed with the preset on 2026-11-05).
 
 ### Composed-design review
 
@@ -459,7 +468,8 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
   `.github/workflows/build.yml` and any new native Torch smoke script it creates,
   plus plan/inventory, shared schemas and generated files if contract changes
   prove necessary, final integration, and commit. The manager owns
-  `bundledPresetAvailable` and `defaultAdapter` in its runtime-options result;
+  `defaultAdapter` in its runtime-options result (`bundledPresetAvailable` was
+  removed with the preset on 2026-11-05);
   no generated RPC contract changes are admitted unless needed to represent
   another required capability. Root owns plan/inventory, shared schemas and
   generated files if contract changes prove necessary, final integration, and
@@ -527,10 +537,10 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
 - Preserve isolated staging/publication ordering, official-source and
   post-install hash/file verification, explicit selection/defaulting, cleanup
   draining, owned generation stop, loopback exposure, and typed install errors.
-  Dynamic Torch installs no longer require a pre-install hash-locked preview;
-  the generated requirements file records the completed install for provenance
-  and repeatability, but is not the former `pip --require-hashes` gate. The
-  fixed bundled preset remains a separate lock-based path.
+  Dynamic Torch installs no longer require a pre-install hash-locked preview.
+  Since 2026-11-05 the install itself is hash-gated: the resolver writes a
+  per-install hash lock, Pumas validates it, and pip installs exactly that lock
+  with `--require-hashes --no-deps`. The fixed bundled preset was removed.
 - Preview identifiers remain cryptographically random on every target. Use the
   already locked `getrandom 0.3.4` at the app-manager boundary instead of the
   Linux-only `/dev/urandom` path; RNG failure is a typed error, never a weak

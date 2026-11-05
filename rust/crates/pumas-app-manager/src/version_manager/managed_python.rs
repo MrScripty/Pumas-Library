@@ -762,7 +762,16 @@ fn extract_binary(pin: UvPin, archive: &[u8], output: &Path) -> ProviderResult<(
                     "Pinned uv ZIP entry was invalid",
                 )
             })?;
-            if entry.name() != expected && entry.name() != pin.binary {
+            let selected = {
+                let name = entry.name().map_err(|_| {
+                    ManagedPythonFailure::new(
+                        ManagedPythonFailureKind::ArtifactIntegrity,
+                        "Pinned uv ZIP entry name was invalid",
+                    )
+                })?;
+                name == expected || name == pin.binary
+            };
+            if !selected {
                 continue;
             }
             if found || !entry.is_file() {

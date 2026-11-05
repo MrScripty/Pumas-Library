@@ -3462,7 +3462,10 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn extract_zip(archive_path: &Path, extract_dir: &Path) -> Result<()> {
+    /// Extracts a ZIP archive below `extract_dir`. A root or drive prefix is
+    /// dropped from an entry's name; an entry whose name would still leave
+    /// that directory, such as one starting with `..`, rejects the archive.
+    pub(super) fn extract_zip(archive_path: &Path, extract_dir: &Path) -> Result<()> {
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open zip archive: {}", e),
             path: Some(archive_path.to_path_buf()),
@@ -3486,7 +3489,13 @@ impl VersionInstaller {
 
             let outpath = match file.enclosed_name() {
                 Some(path) => extract_dir.join(path),
-                None => continue,
+                None => {
+                    return Err(PumasError::InstallationFailed {
+                        message: format!(
+                            "Zip entry {i} has no safe path inside the extraction directory"
+                        ),
+                    })
+                }
             };
 
             if file.is_dir() {
@@ -4227,6 +4236,60 @@ mod tests {
                 payload
             );
         }
+    }
+
+    /// Writes a one-entry ZIP whose stored name is `name`. The writer
+    /// normalizes names, so `name` replaces a same-length placeholder in both
+    /// the local and central headers.
+    fn zip_with_raw_entry_name(path: &Path, placeholder: &str, name: &str) {
+        use std::io::Write;
+        use zip::{write::SimpleFileOptions, ZipWriter};
+
+        let mut archive = std::io::Cursor::new(Vec::new());
+        let mut writer = ZipWriter::new(&mut archive);
+        writer
+            .start_file(placeholder, SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"payload").unwrap();
+        writer.finish().unwrap();
+        let mut bytes = archive.into_inner();
+        let mut replaced = 0;
+        for start in 0..=bytes.len() - placeholder.len() {
+            if &bytes[start..start + placeholder.len()] == placeholder.as_bytes() {
+                bytes[start..start + name.len()].copy_from_slice(name.as_bytes());
+                replaced += 1;
+            }
+        }
+        assert_eq!(replaced, 2, "local and central header names");
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn runtime_zip_extraction_rejects_a_parent_relative_entry() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let archive_path = temp.path().join("parent.zip");
+        let output = temp.path().join("extracted");
+        zip_with_raw_entry_name(&archive_path, "xx/escape", "../escape");
+
+        let error = VersionInstaller::extract_zip(&archive_path, &output).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("no safe path inside the extraction directory"),
+            "{error}"
+        );
+        assert!(!temp.path().join("escape").exists());
+    }
+
+    #[test]
+    fn runtime_zip_extraction_keeps_an_absolute_entry_inside() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let archive_path = temp.path().join("absolute.zip");
+        let output = temp.path().join("extracted");
+        zip_with_raw_entry_name(&archive_path, "xabsolute", "/absolute");
+
+        VersionInstaller::extract_zip(&archive_path, &output).unwrap();
+        assert_eq!(std::fs::read(output.join("absolute")).unwrap(), b"payload");
     }
 
     #[test]

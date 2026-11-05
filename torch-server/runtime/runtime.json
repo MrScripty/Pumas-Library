@@ -1,7 +1,0 @@
-{
-  "recipe_id": "torch-runtime-0.1.6",
-  "protocol": 3,
-  "capabilities": ["image_generation"],
-  "python": "3.12",
-  "platform": "linux-x86_64"
-}

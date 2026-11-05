@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 c4e3bf23ab179263cdc371a0932f7c97bc24df80ffbb370c04a3d1873205ec09. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 59524bc69abaf4b0690c8d9bae8cbe120dfe36ca15d7816b6a3ccc7865fe8cba. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -24,7 +24,6 @@ export declare function validateGetBackendSetupParams(value: unknown): boolean;
 export declare function validateGetHfDownloadDetailsParams(value: unknown): boolean;
 export declare function validateGetReleaseDependenciesOutcome(value: unknown): boolean;
 export declare function validateGetReleaseDependenciesParams(value: unknown): boolean;
-export declare function validateGetTorchPreviewReportParams(value: unknown): boolean;
 export declare function validateGetTorchReleaseOptionsParams(value: unknown): boolean;
 export declare function validateGetTorchRuntimeProbeParams(value: unknown): boolean;
 export declare function validateGithubCacheStatusOutcome(value: unknown): boolean;
@@ -119,10 +118,11 @@ export declare function validateTorchRuntimePreviewOutcome(value: unknown): bool
 export declare function validateTorchRuntimePreviewQualification(value: unknown): boolean;
 export declare function validateTorchRuntimePreviewRejectionReason(value: unknown): boolean;
 export declare function validateTorchRuntimeProbeOutcome(value: unknown): boolean;
-export declare function validateTorchRuntimeSelection(value: unknown): boolean;
 export declare function validateTorchTrialCleanup(value: unknown): boolean;
 export declare function validateTorchTrialHealthStatus(value: unknown): boolean;
 export declare function validateTorchTrialStartupStatus(value: unknown): boolean;
+export declare function validateTorchVerifiedPackage(value: unknown): boolean;
+export declare function validateTorchVerifiedRuntime(value: unknown): boolean;
 export declare function validateTrialTorchRuntimeOutcome(value: unknown): boolean;
 export declare function validateTrialTorchRuntimeParams(value: unknown): boolean;
 export declare function validateUpdateInferenceSettingsOutcome(value: unknown): boolean;

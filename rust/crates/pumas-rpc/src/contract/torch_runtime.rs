@@ -20,10 +20,11 @@ pub(crate) struct TorchRuntimeOptionsOutcome {
     default_build: String,
     pythons: Vec<TorchPythonChoice>,
     adapters: Vec<String>,
-    bundled_preset_available: bool,
     /// One of `adapters`.
     default_adapter: String,
-    preset: TorchRuntimeSelection,
+    /// Combinations verified on this platform. Evidence, not install pins:
+    /// choosing one still resolves current package versions.
+    verified: Vec<TorchVerifiedRuntime>,
     installed: Vec<TorchInstalledRuntime>,
 }
 
@@ -34,13 +35,29 @@ pub(crate) struct TorchPythonChoice {
     label: String,
 }
 
+/// A Torch release, build, Python and adapters that worked together, with
+/// the package versions present and when it was verified.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
-pub(crate) struct TorchRuntimeSelection {
+pub(crate) struct TorchVerifiedRuntime {
     tag: String,
     build: String,
     python: String,
-    adapter: String,
+    adapters: Vec<String>,
+    /// ISO date of the verification.
+    verified_on: String,
+    /// What the verification exercised.
+    scope: String,
+    source_commit: String,
+    packages: Vec<TorchVerifiedPackage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchVerifiedPackage {
+    name: String,
+    version: String,
 }
 
 /// An installed runtime; a field is null when its recipe does not record it.
@@ -62,12 +79,6 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
         if !options.adapters.contains(&options.default_adapter) {
             return Err(invalid_domain_outcome("Torch default adapter"));
         }
-        let selection = |s: domain::TorchRuntimeSelection| TorchRuntimeSelection {
-            tag: s.tag,
-            build: s.build,
-            python: s.python,
-            adapter: s.adapter,
-        };
         Ok(Self {
             builds: options.builds,
             default_build: options.default_build,
@@ -80,9 +91,28 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
                 })
                 .collect(),
             adapters: options.adapters,
-            bundled_preset_available: options.bundled_preset_available,
             default_adapter: options.default_adapter,
-            preset: selection(options.preset),
+            verified: options
+                .verified
+                .into_iter()
+                .map(|record| TorchVerifiedRuntime {
+                    tag: record.tag,
+                    build: record.build,
+                    python: record.python,
+                    adapters: record.adapters,
+                    verified_on: record.verified_on,
+                    scope: record.scope,
+                    source_commit: record.source_commit,
+                    packages: record
+                        .packages
+                        .into_iter()
+                        .map(|package| TorchVerifiedPackage {
+                            name: package.name,
+                            version: package.version,
+                        })
+                        .collect(),
+                })
+                .collect(),
             installed: options
                 .installed
                 .into_iter()
@@ -313,15 +343,21 @@ pub(crate) fn torch_runtime_fixtures() -> serde_json::Result<serde_json::Value> 
             id: "auto".into(),
             label: "Select automatically".into(),
         }],
-        adapters: vec!["none".into(), "flux2".into()],
-        bundled_preset_available: true,
+        adapters: vec!["none".into(), "flux2".into(), "nunchaku".into()],
         default_adapter: "none".into(),
-        preset: TorchRuntimeSelection {
+        verified: vec![TorchVerifiedRuntime {
             tag: "v2.9.1".into(),
             build: "cu130".into(),
             python: "python3.12".into(),
-            adapter: "bundled".into(),
-        },
+            adapters: vec!["flux2".into(), "nunchaku".into()],
+            verified_on: "2026-09-23".into(),
+            scope: "CUDA execution and adapter imports; no model loaded".into(),
+            source_commit: "5d373bf8791c43f1b995f4ba51a17da1610a6686".into(),
+            packages: vec![TorchVerifiedPackage {
+                name: "diffusers".into(),
+                version: "0.37.0".into(),
+            }],
+        }],
         installed: vec![
             TorchInstalledRuntime {
                 tag: "v2.9.1".into(),
@@ -437,14 +473,20 @@ mod tests {
             default_build: "auto".into(),
             pythons: Vec::new(),
             adapters: vec!["none".into()],
-            bundled_preset_available: false,
             default_adapter: "none".into(),
-            preset: domain::TorchRuntimeSelection {
+            verified: vec![domain::TorchVerifiedRuntime {
                 tag: "v2.9.1".into(),
                 build: "cu130".into(),
                 python: "python3.12".into(),
-                adapter: "bundled".into(),
-            },
+                adapters: vec!["nunchaku".into()],
+                verified_on: "2026-09-23".into(),
+                scope: "adapter imports".into(),
+                source_commit: "5d373bf8".into(),
+                packages: vec![domain::TorchVerifiedPackage {
+                    name: "pillow".into(),
+                    version: "12.1.0".into(),
+                }],
+            }],
             installed: vec![domain::TorchInstalledRuntime {
                 tag: "v2.10.0".into(),
                 build: None,
@@ -459,6 +501,9 @@ mod tests {
         assert_eq!(wire["defaultAdapter"], "none");
         assert_eq!(wire["installed"][0]["qualification"], "unverified");
         assert!(wire["installed"][0]["build"].is_null());
+        assert_eq!(wire["verified"][0]["verifiedOn"], "2026-09-23");
+        assert_eq!(wire["verified"][0]["sourceCommit"], "5d373bf8");
+        assert_eq!(wire["verified"][0]["packages"][0]["version"], "12.1.0");
 
         let unoffered = domain::TorchRuntimeOptions {
             default_adapter: "flux2".into(),

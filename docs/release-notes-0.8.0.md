@@ -46,6 +46,16 @@ runtime profiles keep working. (A change of model family can still move it.)
 The first time 0.8.0 opens a library it updates the library's classification
 rules in place; the next refresh re-detects categories without moving anything.
 
+### Torch runtimes are add-ons you choose
+
+Pumas no longer installs Torch from a fixed package lock. The fixed v2.9.1
+preset is replaced by **Verified combinations**: the install dialog offers each
+one as a shortcut (for example *cu130 · Python 3.12 · Nunchaku*), and
+installing it resolves current package versions. A runtime is marked verified
+only when its installed packages still match the versions that were verified.
+Nunchaku Z-Image is now a regular adapter choice. Runtimes installed from the
+old preset keep working.
+
 ### Clearer startup and recovery
 
 - If the backend cannot start, the recovery screen shows the actual reason.

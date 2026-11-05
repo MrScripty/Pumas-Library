@@ -13,9 +13,6 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::RwLock;
 
-const TORCH_SHA256: &str = "e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b";
-const TORCHVISION_SHA256: &str = "6939dd403cc28ab0a46f53e6c86e2e852cf65771c1b0ddd09c44c541a1cdbad9";
-
 fn release(tag: &str, prerelease: bool, assets: Vec<GitHubAsset>) -> GitHubRelease {
     GitHubRelease {
         tag_name: tag.to_string(),
@@ -30,50 +27,6 @@ fn release(tag: &str, prerelease: bool, assets: Vec<GitHubAsset>) -> GitHubRelea
         total_size: None,
         archive_size: None,
         dependencies_size: None,
-    }
-}
-
-fn official_wheel_url(url: &str) -> bool {
-    url.starts_with("https://download.pytorch.org/")
-        || url.starts_with("https://download-r2.pytorch.org/")
-}
-
-#[test]
-fn v291_resolves_only_to_its_immutable_independent_recipe() {
-    let recipe = torch_recipe_for_tag("v2.9.1").expect("v2.9.1 is supported");
-    assert_eq!(recipe.release_tag, "v2.9.1");
-    assert_eq!(recipe.recipe_id, "torch-upstream-2.9.1-r1");
-    assert_ne!(recipe.recipe_id, recipe.release_tag);
-    assert_eq!(recipe.torch_version, "2.9.1+cu130");
-
-    assert!(official_wheel_url(recipe.torch_wheel_url));
-    assert!(official_wheel_url(recipe.torchvision_wheel_url));
-    assert!(recipe
-        .torch_wheel_url
-        .contains("/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl"));
-    assert!(recipe
-        .torchvision_wheel_url
-        .contains("/cu130/torchvision-0.24.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl"));
-    assert_eq!(recipe.torch_wheel_sha256, TORCH_SHA256);
-    assert_eq!(recipe.torchvision_wheel_sha256, TORCHVISION_SHA256);
-    for hash in [recipe.torch_wheel_sha256, recipe.torchvision_wheel_sha256] {
-        assert_eq!(hash.len(), 64);
-        assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    }
-    assert!(!recipe
-        .torch_wheel_url
-        .to_ascii_lowercase()
-        .contains("pumas"));
-    assert!(!recipe
-        .torchvision_wheel_url
-        .to_ascii_lowercase()
-        .contains("pumas"));
-
-    for unsupported in ["v2.10.0", "v2.9.0", "2.9.1"] {
-        assert!(
-            torch_recipe_for_tag(unsupported).is_none(),
-            "unexpected recipe for {unsupported}"
-        );
     }
 }
 
@@ -105,19 +58,18 @@ fn official_release_metadata_does_not_need_pumas_bundle_assets() {
 }
 
 #[test]
-fn embedded_sidecar_and_lock_materialize_outside_the_checkout() {
+fn embedded_sidecar_materializes_outside_the_checkout_without_a_package_lock() {
     let destination = TempDir::new().unwrap();
     let checkout = std::env::current_dir().unwrap();
     assert!(destination.path().starts_with(std::env::temp_dir()));
     assert!(!destination.path().starts_with(&checkout));
 
-    write_embedded_torch_runtime(destination.path()).unwrap();
+    write_embedded_torch_sidecar(destination.path()).unwrap();
 
     for required in [
         "serve.py",
-        "validate_runtime.py",
-        "requirements.txt",
-        "runtime.json",
+        "resolve_runtime.py",
+        "probe_runtime.py",
         "nunchaku_compat.py",
         "control_api.py",
         "device_manager.py",
@@ -140,20 +92,11 @@ fn embedded_sidecar_and_lock_materialize_outside_the_checkout() {
             "embedded runtime file is empty: {required}"
         );
     }
-
-    let lock = std::fs::read_to_string(destination.path().join("requirements.txt")).unwrap();
-    assert!(lock.contains("--hash=sha256:"));
-    assert!(lock.contains(TORCH_SHA256));
-    assert!(lock.contains(TORCHVISION_SHA256));
-    assert!(!lock.to_ascii_lowercase().contains("github.com/pumas"));
-
-    let recipe: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(destination.path().join("runtime.json")).unwrap())
-            .unwrap();
-    assert_eq!(recipe["recipe_id"], "torch-upstream-2.9.1-r1");
-    assert_eq!(recipe["python"], "3.12");
-    assert_eq!(recipe["platform"], "linux-x86_64");
-    assert_eq!(recipe["capabilities"][0], "image_generation");
+    // Packages are resolved per installation; the sidecar carries no lock,
+    // preset validator or preset recipe.
+    for absent in ["requirements.txt", "validate_runtime.py", "runtime.json"] {
+        assert!(!destination.path().join(absent).exists(), "{absent}");
+    }
 }
 
 #[tokio::test]
@@ -310,16 +253,13 @@ fn mock_runtime_for_publication(
     std::fs::create_dir_all(python.parent().unwrap()).map_err(PumasError::from)?;
     std::fs::write(
         runtime.join("runtime.json"),
-        r#"{"recipe_id":"torch-upstream-2.9.1-r1"}"#,
+        r#"{"recipe_id":"upstream-install-v2.9.1-cu130-3.12-none"}"#,
     )
     .map_err(PumasError::from)?;
     std::fs::write(runtime.join("serve.py"), "# isolated publication fixture\n")
         .map_err(PumasError::from)?;
-    std::fs::write(
-        runtime.join("requirements.txt"),
-        "# isolated publication fixture\n",
-    )
-    .map_err(PumasError::from)?;
+    std::fs::write(runtime.join("resolution.json"), r#"{"torch":"2.9.1+cu130","artifacts":[{"name":"torch","version":"2.9.1+cu130","url":"https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl","sha256":"e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b"}]}"#)
+        .map_err(PumasError::from)?;
     std::fs::write(python, "# fake interpreter\n").map_err(PumasError::from)?;
     Ok(runtime)
 }

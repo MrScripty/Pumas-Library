@@ -128,11 +128,12 @@ errors; tracebacks and filesystem paths are never forwarded:
 
 ## Runtime recipe relationship
 
-The runtime recipe (`torch-server/runtime/runtime.json`, `recipe_id`
-`torch-runtime-0.1.6`) pins both the validated dependency set (CPython 3.12,
-Linux x86_64, sm_120 CUDA) and protocol/capabilities (`3` plus
-`image_generation`). `validate_runtime.py` fails qualification unless the
-recipe and the bundled live sidecar agree exactly on both values.
+The sidecar's `/health` reports protocol `3` and the `image_generation`
+capability. `TorchClient` in `pumas-app-manager` admits only that protocol and
+requires the capability before it routes image requests. No runtime recipe
+pins a dependency set: each install records its resolved packages, and
+`torch-server/runtime/verified-runtimes.json` records verified combinations as
+evidence only.
 
 ## Verification locations
 
@@ -141,7 +142,8 @@ recipe and the bundled live sidecar agree exactly on both values.
 - Gateway adaptation and error mapping:
   `rust/crates/pumas-rpc/src/handlers/openai_gateway.rs`,
   `openai_gateway_images.rs`, and `openai_gateway_tests.rs`
-- Protocol/recipe agreement: `torch-server/validate_runtime.py`
+- Protocol agreement: `rust/crates/pumas-app-manager/src/torch_client.rs`
+  handshake tests and `torch-server/tests/test_image_provider_boundary.py`
 - Real GPU and browser evidence: the completed diffusion serving plan's
   reports (`nunchaku.md`, `flux2.md`, `tuldok.md`, `release-acceptance.md`),
   kept in Git history: `git show 78c52fcf:docs/plans/torch-diffusion-serving/reports/`

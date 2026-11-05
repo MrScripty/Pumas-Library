@@ -5,7 +5,7 @@ import {
   decodeInstallationProgressOutcome,
   decodeTorchRuntimePreviewOutcome,
 } from '../generated/desktop-contract';
-import type { TorchReleaseOptionsOutcome, TorchRuntimeOptions, TorchRuntimePreviewOutcome, TorchRuntimePreviewRequest } from '../types/torch-install';
+import type { TorchReleaseOptionsOutcome, TorchRuntimeOptions, TorchRuntimePreviewOutcome, TorchRuntimePreviewRequest, TorchVerifiedRuntime } from '../types/torch-install';
 
 type ReadySelection = Extract<TorchRuntimePreviewOutcome, { status: 'ready' }>;
 
@@ -24,9 +24,15 @@ vi.mock('../api/adapter', () => ({
 const options: TorchRuntimeOptions = {
   builds: ['cpu', 'cu130'], defaultBuild: 'auto',
   pythons: [], adapters: ['none'], defaultAdapter: 'none',
-  bundledPresetAvailable: false,
-  preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+
+  verified: [],
   installed: [],
+};
+
+const verifiedRecord: TorchVerifiedRuntime = {
+  tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2', 'nunchaku'],
+  verifiedOn: '2026-09-23', scope: 'Adapter imports passed.', sourceCommit: '5d373bf8',
+  packages: [{ name: 'diffusers', version: '0.37.0' }],
 };
 
 function readySelection(request: TorchRuntimePreviewRequest): ReadySelection {
@@ -59,6 +65,11 @@ describe('TorchInstallPreview', () => {
     expect(decodeTorchRuntimePreviewOutcome(readySelection({
       tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none',
     }))).toMatchObject({ status: 'valid', value: { status: 'ready' } });
+  });
+
+  it('rejects the removed resolved preview outcome at the generated decoder', () => {
+    const ready = readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
+    expect(decodeTorchRuntimePreviewOutcome({ status: 'resolved', preview: ready.preview })).toMatchObject({ status: 'invalid' });
   });
 
   it('accepts the resolving progress stage through the generated desktop RPC decoder', () => {
@@ -223,34 +234,38 @@ describe('TorchInstallPreview', () => {
     expect(getReleaseOptions).not.toHaveBeenCalled();
   });
 
-  it('keeps the historical fixed preset distinct and submits its exact interpreter tuple', async () => {
-    getOptions.mockResolvedValue({ ...options, bundledPresetAvailable: true });
+  it('offers a verified combination as a shortcut that still resolves current packages', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2', 'nunchaku'], verified: [verifiedRecord] });
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
-    const presetButton = await screen.findByRole('button', { name: 'Fixed v2.9.1 preset' });
-    expect(presetButton).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(presetButton);
-    expect(screen.getByText(/This tuple has historical qualification/)).toBeInTheDocument();
+    const shortcut = await screen.findByRole('button', { name: 'cu130 · python3.12 · Nunchaku Z-Image generation' });
+    expect(shortcut).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(shortcut);
+    expect(shortcut).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/Verified on 2026-09-23 with diffusers 0.37.0/)).toHaveTextContent('Installing resolves current package versions');
+    expect(screen.getByRole('radio', { name: 'Nunchaku Z-Image generation' })).toBeChecked();
     fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' });
-    expect(presetButton).toBeDisabled();
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'nunchaku' });
   });
 
-  it('does not expose platform-unavailable adapters or a preset for another release', async () => {
-    getOptions.mockResolvedValue({ ...options, bundledPresetAvailable: true });
-    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+  it('does not offer verified combinations for another release or an unavailable adapter', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'], verified: [verifiedRecord] });
+    const { unmount } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
     await screen.findByText('Advanced setup');
-    expect(screen.queryByRole('option', { name: 'Pumas FLUX.2 image dependencies' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Fixed v2.9.1 preset' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Verified combinations' })).not.toBeInTheDocument();
+    unmount();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={vi.fn()} />);
+    expect(await screen.findByRole('button', { name: 'cu130 · python3.12 · FLUX.2 image generation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Nunchaku/ })).not.toBeInTheDocument();
   });
 
-  it('rejects a ready token that changes the requested preset Python', async () => {
-    getOptions.mockResolvedValue({ ...options, bundledPresetAvailable: true });
+  it('rejects a ready token that changes the requested verified Python', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'], verified: [verifiedRecord] });
     const onInstall = vi.fn();
     getSelection.mockImplementation(async (request) => readySelection({ ...request, python: 'auto' }));
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Fixed v2.9.1 preset' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'cu130 · python3.12 · FLUX.2 image generation' }));
     fireEvent.click(await readyInstallButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();
@@ -270,15 +285,5 @@ describe('TorchInstallPreview', () => {
     expect(onInstall).not.toHaveBeenCalled();
     rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
     await waitFor(() => expect(getOptions).toHaveBeenCalledTimes(2));
-  });
-
-  it('does not treat a legacy resolved artifact preview as a quick selection token', async () => {
-    const onInstall = vi.fn();
-    const ready = readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
-    getSelection.mockResolvedValueOnce({ status: 'resolved', preview: ready.preview });
-    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await readyInstallButton());
-    expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
-    expect(onInstall).not.toHaveBeenCalled();
   });
 });

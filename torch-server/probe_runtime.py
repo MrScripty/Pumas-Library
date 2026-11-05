@@ -250,7 +250,7 @@ def probe(root: Path) -> dict:
         key = "nunchaku_z_image" if adapter == "nunchaku" else "flux2_klein"
         capabilities[key] = (
             adapter_import_probe(modules, symbols)
-            if selected in (adapter, "bundled")
+            if selected == adapter
             else {"status": "not selected", "scope": "optional adapter"}
         )
     capabilities["cohere_asr"] = (
@@ -291,13 +291,7 @@ def probe(root: Path) -> dict:
     elif selected == "cohere-asr":
         adapter_status = capabilities["cohere_asr"]["status"]
     else:
-        adapter_keys = (
-            ("nunchaku_z_image", "flux2_klein")
-            if selected == "bundled"
-            else ("nunchaku_z_image",)
-            if selected == "nunchaku"
-            else ("flux2_klein",)
-        )
+        adapter_keys = ("nunchaku_z_image",) if selected == "nunchaku" else ("flux2_klein",)
         adapter_status = (
             "unavailable"
             if any(capabilities[key]["status"] == "unavailable" for key in adapter_keys)

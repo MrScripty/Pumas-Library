@@ -2,7 +2,7 @@ import { ExternalLink, FileText } from 'lucide-react';
 import type { VersionRelease } from '../hooks/useVersions';
 import { formatVersionDate } from '../utils/installationFormatters';
 import { IconButton } from './ui';
-import type { TorchInstalledConfig } from '../types/torch-install';
+import type { TorchInstalledConfig, TorchVerifiedRuntime } from '../types/torch-install';
 
 interface VersionListItemInfoProps {
   appId?: string;
@@ -13,6 +13,7 @@ interface VersionListItemInfoProps {
   release: VersionRelease;
   isInstalled?: boolean;
   torchInstalledConfig?: TorchInstalledConfig;
+  torchVerified?: readonly TorchVerifiedRuntime[];
   onOpenLogPath: (path: string) => void;
   onOpenUrl: (url: string) => void;
 }
@@ -26,6 +27,7 @@ export function VersionListItemInfo({
   release,
   isInstalled = false,
   torchInstalledConfig,
+  torchVerified = [],
   onOpenLogPath,
   onOpenUrl,
 }: VersionListItemInfoProps) {
@@ -70,9 +72,9 @@ export function VersionListItemInfo({
                 torchInstalledConfig
                   ? `Installed ${torchInstalledConfig.build ?? 'unknown build'} · ${torchInstalledConfig.python ?? 'unknown Python'} · ${torchInstalledConfig.adapter ?? 'unknown adapter'} · ${torchInstalledConfig.qualification}`
                   : 'Installed build details unavailable; inspect saved checks for this version.'
-              ) : release.tagName === 'v2.9.1'
-                ? 'Qualified preset: Python 3.12, CUDA 13.0, bundled image dependencies'
-                : 'Unverified release · choose an official build and installed Python, then review exact wheel hashes'}
+              ) : torchVerified.length > 0
+                ? `Verified combination: ${torchVerified.map((record) => `${record.build} · ${record.python} · ${record.adapters.join(', ')} (${record.verifiedOn})`).join('; ')} · packages are resolved when installed`
+                : 'Unverified release · packages are resolved when installed'}
               {!isInstalled && <div>Managed binaries require Linux x86_64 and stable releases. This flow installs official binary wheels only; source compilation is a separate unsupported path. Installation does not select or start this version.</div>}
             </div>
           )}

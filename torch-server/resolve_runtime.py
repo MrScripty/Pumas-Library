@@ -317,14 +317,18 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
     return {"files": sorted(files, key=lambda item: item["path"])}
 
 
+# Image adapters name their packages without versions: pip resolves current
+# releases at install time, the exact versions and hashes are recorded with
+# the runtime, and the install probe checks the adapter imports. Verified
+# combinations are evidence, not install pins (runtime/verified-runtimes.json).
 IMAGE = (
     "torchvision",
-    "diffusers==0.37.0",
-    "transformers==4.57.6",
-    "accelerate==1.12.0",
-    "peft==0.18.1",
-    "sentencepiece==0.2.1",
-    "protobuf==6.33.4",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "peft",
+    "sentencepiece",
+    "protobuf",
 )
 # Native dependency profile only; this does not qualify model execution.
 COHERE_ASR = (

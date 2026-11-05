@@ -64,10 +64,15 @@ torch-server/.venv/bin/pip install -r torch-server/requirements-dev.txt
 torch-server/.venv/bin/python torch-server/serve.py --host 127.0.0.1 --port 8400 --max-models 4
 ```
 
-These commands are for direct development only. The managed `v2.9.1` known-good
-preset uses `runtime/requirements.lock`, including its official hash-pinned
-Torch and torchvision wheels. The shared VersionManager discovers stable
-upstream releases independently of that preset. A Torch release does not
+These commands are for direct development only. Managed installs use no fixed
+package lock: each resolves current package versions when it is installed and
+records the exact versions and hashes it received. Pumas does not choose those
+versions for the user, so it does not own their advisories.
+`runtime/verified-runtimes.json` records combinations Pumas has verified, with
+the package versions present at the time. It is evidence, never an install
+constraint: the install dialog offers each record as a shortcut, and an
+installed runtime is reported as verified only when its packages still carry
+the recorded versions. A Torch release does not
 declare one Python version for every install: its official wheels declare
 compatible Python ABI and platform tags. For an upstream release, Pumas
 provisions the newest stable native CPython candidate from its pinned provider
@@ -95,18 +100,9 @@ so no Pumas-hosted Torch release bundle is required. Adapter dependencies are
 outside the core automatic install; an unavailable adapter affects its feature,
 not the installation of Torch itself.
 
-Create candidate assets with:
-
-```bash
-python3 scripts/package-torch-runtime.py --output /tmp/pumas-torch-assets
-```
-
-This script creates the local qualification archive used by earlier candidate
-tests; the shared manager no longer downloads that archive. Managed installation
-downloads the official pinned wheels and other hash-locked dependencies only
-after the user selects a supported upstream release. Model weights remain
-library-owned. Candidate `torch-runtime-0.1.6` remains unpublished and is not the
-default runtime. Existing installed `0.1.x` entries remain available.
+Managed installation downloads official binary wheels only after the user
+selects a supported upstream release. Model weights remain library-owned.
+Existing installed `0.1.x` entries remain available.
 
 Version rules:
 
@@ -118,10 +114,10 @@ Version rules:
   starting and stopping are separate explicit operations.
 - One Torch version serves at a time. Unload its models and stop the Torch
   process before changing its runtime.
-- The bundled `v2.9.1` preset (CUDA 13.0, CPython 3.12, Linux x86_64, with an
-  embedded hash-pinned lock) is a separately qualified exception; other
-  `v2.9.1` tuples do not inherit it. Nunchaku is pinned to `1.2.0+torch2.9` and
-  runs only on that tuple.
+- Nunchaku is installed from its project's `1.2.0+torch2.9` wheel, which is
+  built only for Torch 2.9.1, CUDA 13.0, CPython 3.12 and Linux x86_64, so the
+  `nunchaku` adapter installs only there. Runtimes installed by the former
+  fixed `v2.9.1` preset keep working and are reported as verified.
 - XPU builds are not offered, and Torch is never built from source.
 
 Not yet supported: native NVFP4 encoder serving, LLaDA, image adapters outside

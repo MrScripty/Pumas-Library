@@ -337,10 +337,6 @@ pub(crate) enum RpcCommand {
         adapter: String,
     },
     #[cfg(feature = "inference-plugins")]
-    GetTorchPreviewReport {
-        preview_id: String,
-    },
-    #[cfg(feature = "inference-plugins")]
     GetTorchRuntimeProbe {
         tag: String,
     },
@@ -578,8 +574,6 @@ impl RpcCommand {
             #[cfg(feature = "inference-plugins")]
             Self::PreviewTorchRuntime { .. } => "preview_torch_runtime",
             #[cfg(feature = "inference-plugins")]
-            Self::GetTorchPreviewReport { .. } => "get_torch_preview_report",
-            #[cfg(feature = "inference-plugins")]
             Self::GetTorchRuntimeProbe { .. } => "get_torch_runtime_probe",
             #[cfg(feature = "inference-plugins")]
             Self::TrialTorchRuntime { .. } => "trial_torch_runtime",
@@ -741,8 +735,6 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     TorchRuntimePreview(TorchRuntimePreviewOutcome),
     #[cfg(feature = "inference-plugins")]
-    TorchPreviewReport(Value),
-    #[cfg(feature = "inference-plugins")]
     TorchRuntimeProbe(TorchRuntimeProbeOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchRuntimeTrial(TrialTorchRuntimeOutcome),
@@ -864,8 +856,6 @@ impl RpcOutcome {
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
-            #[cfg(feature = "inference-plugins")]
-            Self::TorchPreviewReport(value) => Ok(value),
             #[cfg(feature = "inference-plugins")]
             Self::TorchRuntimeOptions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -4304,9 +4294,6 @@ pub(crate) enum TorchRuntimePreviewOutcome {
     Ready {
         preview: TorchRuntimePreview,
     },
-    Resolved {
-        preview: TorchRuntimePreview,
-    },
     Rejected {
         reason: TorchRuntimePreviewRejectionReason,
         message: &'static str,
@@ -4452,9 +4439,6 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
             TorchPreviewOutcome::Ready { preview } => Self::Ready {
                 preview: preview.try_into()?,
             },
-            TorchPreviewOutcome::Resolved { preview } => Self::Resolved {
-                preview: preview.try_into()?,
-            },
             TorchPreviewOutcome::Rejected { reason, message } => {
                 let reason = match reason {
                     TorchPreviewRejectionReason::Unsupported => {
@@ -4522,18 +4506,6 @@ mod torch_preview_contract_tests {
         assert_eq!(ready["preview"]["qualification"], "unverified");
         assert_eq!(ready["preview"]["build"], "auto");
         assert_eq!(ready.as_object().unwrap().len(), 2);
-
-        let resolved = serde_json::to_value(TorchRuntimePreviewOutcome::Resolved {
-            preview: torch_runtime_preview_fixture(),
-        })
-        .unwrap();
-        assert_eq!(resolved["status"], "resolved");
-        assert_eq!(resolved["preview"]["previewId"], "retained-preview-id");
-        assert_eq!(
-            resolved["preview"]["artifacts"][0]["sha256"],
-            "a".repeat(64)
-        );
-        assert_eq!(resolved.as_object().unwrap().len(), 2);
 
         for (reason, code) in [
             (
@@ -4701,7 +4673,7 @@ mod torch_preview_contract_tests {
                 expires_in_seconds: 1800,
             };
             let projected =
-                TorchRuntimePreviewOutcome::try_from(TorchPreviewOutcome::Resolved { preview })
+                TorchRuntimePreviewOutcome::try_from(TorchPreviewOutcome::Ready { preview })
                     .unwrap();
             assert_eq!(
                 serde_json::to_value(projected).unwrap()["preview"]["qualification"],
@@ -4719,8 +4691,7 @@ mod torch_preview_contract_tests {
             expires_in_seconds: 1800,
         };
         assert!(
-            TorchRuntimePreviewOutcome::try_from(TorchPreviewOutcome::Resolved { preview })
-                .is_err()
+            TorchRuntimePreviewOutcome::try_from(TorchPreviewOutcome::Ready { preview }).is_err()
         );
     }
 
@@ -4737,14 +4708,7 @@ mod torch_preview_contract_tests {
         assert!(schema["schemas"]["TorchRuntimePreviewQualification"].is_object());
         assert!(schema["schemas"]["TorchRuntimePreviewRejectionReason"].is_object());
         let fixtures = desktop_contract_fixtures().unwrap();
-        assert_eq!(
-            fixtures["torch_runtime_preview_resolved"]["status"],
-            "resolved"
-        );
-        assert_eq!(
-            fixtures["torch_runtime_preview_resolved"]["preview"]["qualification"],
-            "qualified"
-        );
+        assert_eq!(fixtures["torch_runtime_preview_ready"]["status"], "ready");
         assert_eq!(
             fixtures["torch_runtime_preview_validation_failed"]["reason"],
             "validation_failed"
@@ -4755,15 +4719,6 @@ mod torch_preview_contract_tests {
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
 fn default_torch_adapter() -> String {
     "none".into()
-}
-
-#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
-pub(crate) struct GetTorchPreviewReportParams {
-    #[serde(alias = "previewId")]
-    preview_id: String,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -6857,14 +6812,6 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     build: params.build,
                     python: params.python,
                     adapter: params.adapter,
-                }
-            })
-        }
-        #[cfg(feature = "inference-plugins")]
-        "get_torch_preview_report" => {
-            parse_params::<GetTorchPreviewReportParams>(params).map(|params| {
-                RpcCommand::GetTorchPreviewReport {
-                    preview_id: params.preview_id,
                 }
             })
         }

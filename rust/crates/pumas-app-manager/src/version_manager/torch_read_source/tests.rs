@@ -24,7 +24,7 @@ impl Installed {
         let versions = launcher.path().join(AppId::Torch.versions_dir_name());
         let runtime = versions.join("synthetic");
         std::fs::create_dir_all(&runtime).unwrap();
-        installer::write_embedded_torch_runtime(&runtime).unwrap();
+        installer::write_embedded_torch_sidecar(&runtime).unwrap();
         let depot = launcher
             .path()
             .join("launcher-data/managed-python/python")
@@ -151,35 +151,19 @@ fn interpreter_and_dependency_replacement_refuse_retained_validation() {
 }
 
 #[test]
-fn installer_removed_validation_script_is_optional_but_remaining_code_is_required() {
+fn embedded_sidecar_code_is_required_and_other_python_is_refused() {
     let installed = Installed::new();
-    std::fs::remove_file(installed.runtime.join("validate_runtime.py")).unwrap();
-    let owner = installed
-        .capture()
-        .expect("direct installer removes its validation script");
-    assert!(!owner.manifest().any(
-        |(role, file)| role == RuntimeReadRole::Sidecar && file.path() == "validate_runtime.py"
-    ));
-    drop(owner);
-    std::fs::remove_file(installed.runtime.join("owned_audio.py")).unwrap();
-    assert!(installed.capture().is_err());
-}
-
-#[test]
-fn retained_validation_script_is_owned_without_matching_embedded_bytes() {
-    let installed = Installed::new();
-    let owner = installed.capture().unwrap();
-    assert!(owner.manifest().any(
-        |(role, file)| role == RuntimeReadRole::Sidecar && file.path() == "validate_runtime.py"
-    ));
-    drop(owner);
+    drop(installed.capture().expect("embedded sidecar code is owned"));
+    // The former preset's validator is not embedded sidecar code.
     std::fs::write(
         installed.runtime.join("validate_runtime.py"),
         b"unreported validation code",
     )
     .unwrap();
-    let current = installed.capture().unwrap();
-    current.validate().unwrap();
+    assert!(installed.capture().is_err());
+    std::fs::remove_file(installed.runtime.join("validate_runtime.py")).unwrap();
+    std::fs::remove_file(installed.runtime.join("owned_audio.py")).unwrap();
+    assert!(installed.capture().is_err());
 }
 
 #[test]
@@ -291,7 +275,6 @@ manifest = namespace['installed_file_manifest'](target, [{'name': name, 'version
         manifest_bytes,
     )
     .unwrap();
-    std::fs::remove_file(installed.runtime.join("validate_runtime.py")).unwrap();
     // Bind static capture back to the fixture-owned depot only after all real
     // venv processes have exited. No command runs the synthetic interpreter.
     std::fs::remove_file(&python).unwrap();

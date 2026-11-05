@@ -1,5 +1,10 @@
 # ADR 0002: Torch Image Provider Protocol
 
+> Amended 2026-11-05: the fixed v2.9.1 preset, its `runtime.json` recipe and
+> `validate_runtime.py` were removed. The protocol is checked by `TorchClient`'s
+> handshake, and verified combinations are evidence in
+> `torch-server/runtime/verified-runtimes.json`. The decision below is unchanged.
+
 - Status: Accepted and implemented
 - Date: 2026-09-18
 

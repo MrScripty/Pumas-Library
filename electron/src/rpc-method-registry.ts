@@ -46,7 +46,6 @@ export const RPC_METHOD_REGISTRY = {
     'get_torch_runtime_options',
     'get_torch_release_options',
     'preview_torch_runtime',
-    'get_torch_preview_report',
     'get_torch_runtime_probe',
     'trial_torch_runtime',
     'stop_runtime_profile_if_generation',

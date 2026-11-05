@@ -81,8 +81,8 @@ describe('Torch desktop projection', () => {
       builds: ['cpu', 'cu130'], defaultBuild: 'auto',
       pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
       adapters: ['none', 'flux2'],
-      bundledPresetAvailable: true, defaultAdapter: 'none',
-      preset: { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+      defaultAdapter: 'none',
+      verified: [],
       installed: [
         { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },
         { tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'flux2', qualification: 'unverified' },

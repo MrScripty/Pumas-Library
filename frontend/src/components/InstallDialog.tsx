@@ -22,7 +22,7 @@ import { InstallDialogFrame } from './InstallDialogFrame';
 import { TorchInstallPreview } from './TorchInstallPreview';
 import { TorchRuntimeProbePanel } from './TorchRuntimeProbePanel';
 import { api } from '../api/adapter';
-import type { TorchInstalledConfig } from '../types/torch-install';
+import type { TorchInstalledConfig, TorchVerifiedRuntime } from '../types/torch-install';
 import {
   filterVersions,
   getErrorMessage,
@@ -87,6 +87,7 @@ export function InstallDialog({
   const [torchPreviewTag, setTorchPreviewTag] = useState<string | null>(null);
   const [torchProbeTag, setTorchProbeTag] = useState<string | null>(null);
   const [torchInstalledConfigs, setTorchInstalledConfigs] = useState<readonly TorchInstalledConfig[]>([]);
+  const [torchVerifiedRuntimes, setTorchVerifiedRuntimes] = useState<readonly TorchVerifiedRuntime[]>([]);
   const cancellationRef = useRef(false);
   const installedKey = installedVersions.join('\0');
 
@@ -94,10 +95,15 @@ export function InstallDialog({
     if (!isOpen || appId !== 'torch') return;
     let active = true;
     setTorchInstalledConfigs([]);
+    setTorchVerifiedRuntimes([]);
     void api.get_torch_runtime_options().then((options) => {
-      if (active) setTorchInstalledConfigs(options.installed);
+      if (!active) return;
+      setTorchInstalledConfigs(options.installed);
+      setTorchVerifiedRuntimes(options.verified);
     }).catch(() => {
-      if (active) setTorchInstalledConfigs([]);
+      if (!active) return;
+      setTorchInstalledConfigs([]);
+      setTorchVerifiedRuntimes([]);
     });
     return () => { active = false; };
   }, [appId, installedKey, isOpen]);
@@ -286,6 +292,7 @@ export function InstallDialog({
         installNetworkStatus={installNetworkStatus}
         installedVersions={installedVersions}
         torchInstalledConfigs={torchInstalledConfigs}
+        torchVerifiedRuntimes={torchVerifiedRuntimes}
         installingVersion={installingVersion}
         isLoading={isLoading}
         isRateLimited={isRateLimited}

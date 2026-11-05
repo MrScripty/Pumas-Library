@@ -5,6 +5,32 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+/// Write a ready instance row directly, as an unrelated owner would have.
+/// The library exposes no claim-bypassing writer outside test builds, and
+/// this file is also compiled by a harness that links the library without
+/// them.
+fn inject_ready_instance(db_path: &Path, root: &Path, pid: u32, port: u16) {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.busy_timeout(Duration::from_secs(5)).unwrap();
+    conn.execute(
+        "INSERT INTO instances (
+             library_path, pid, port, started_at, version, status, claim_token,
+             transport_kind, endpoint, connection_token
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, 'ready', NULL, 'loopback_tcp', ?6, ?7)",
+        rusqlite::params![
+            root.canonicalize().unwrap().to_string_lossy().to_string(),
+            pid,
+            port,
+            chrono::Utc::now().to_rfc3339(),
+            env!("CARGO_PKG_VERSION"),
+            format!("127.0.0.1:{port}"),
+            uuid::Uuid::new_v4().to_string(),
+        ],
+    )
+    .unwrap();
+}
+
 fn assert_busy(root: &Path) {
     assert!(matches!(
         PhysicalStoreLease::try_acquire(root),
@@ -51,8 +77,8 @@ fn aliases_and_different_registries_share_exclusion_without_changing_rows() {
     std::os::unix::fs::symlink(&root, &alias).unwrap();
     let first_registry = LibraryRegistry::open_at(&temp.path().join("first.db")).unwrap();
     let second_registry = LibraryRegistry::open_at(&temp.path().join("second.db")).unwrap();
-    first_registry.register_instance(&root, 1, 1234).unwrap();
-    second_registry.register_instance(&alias, 2, 2345).unwrap();
+    inject_ready_instance(&temp.path().join("first.db"), &root, 1, 1234);
+    inject_ready_instance(&temp.path().join("second.db"), &alias, 2, 2345);
     let first_before = first_registry.get_instance(&root).unwrap().unwrap();
     let second_before = second_registry.get_instance(&alias).unwrap().unwrap();
 
@@ -221,7 +247,7 @@ fn observed_sigkill_releases_os_lock_without_registry_reclamation() {
     std::fs::create_dir(&root).unwrap();
     let registry =
         crate::registry::LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
-    registry.register_instance(&root, 999_999_999, 1).unwrap();
+    inject_ready_instance(&temp.path().join("registry.db"), &root, 999_999_999, 1);
     let before = registry.get_instance(&root).unwrap().unwrap();
     // Works both in the core unit suite and the focused source-path harness.
     let fixture = format!(

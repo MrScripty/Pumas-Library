@@ -9,8 +9,11 @@
 //! spawned task. The `PrimaryState` is shared via `Arc` and uses internal
 //! synchronization (RwLock) for mutable access.
 
+#[cfg(test)]
+use super::protocol::read_frame;
 use super::protocol::{
-    read_frame, write_frame, IpcError, IpcRequest, IpcResponse, LocalIpcCommand, LocalIpcOperation,
+    read_frame_within, write_frame, FrameRead, IpcError, IpcRequest, IpcResponse, LocalIpcCommand,
+    LocalIpcOperation,
 };
 use crate::config::RegistryConfig;
 use crate::model_library::ModelLibraryUpdateSubscriber;
@@ -26,9 +29,51 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
+use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 type ConnectionTasks = Arc<Mutex<Vec<JoinHandle<()>>>>;
+
+/// How long a client has to finish a frame once its first byte arrived.
+/// Idle connections between frames are kept: local clients hold one
+/// connection open for their lifetime.
+const FRAME_COMPLETION_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a refused connection gets to receive its refusal frame.
+const REFUSAL_DELIVERY_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Admission limits for one server.
+#[derive(Debug, Clone, Copy)]
+struct ConnectionLimits {
+    max_connections: usize,
+    frame_completion: Duration,
+}
+
+impl Default for ConnectionLimits {
+    fn default() -> Self {
+        Self {
+            max_connections: RegistryConfig::MAX_IPC_CONNECTIONS,
+            frame_completion: FRAME_COMPLETION_TIMEOUT,
+        }
+    }
+}
+
+/// Send a connection-level error (null id) and close, without waiting
+/// longer than `REFUSAL_DELIVERY_TIMEOUT` on an unresponsive peer. Remaining
+/// client bytes are drained first so closing does not reset the refusal.
+async fn refuse_connection(mut stream: TcpStream, error: IpcError) {
+    use tokio::io::AsyncReadExt;
+    let Ok(payload) = serde_json::to_vec(&IpcResponse::error(None, error)) else {
+        return;
+    };
+    let _ = tokio::time::timeout(REFUSAL_DELIVERY_TIMEOUT, async {
+        write_frame(&mut stream, &payload).await?;
+        stream.shutdown().await?;
+        let mut sink = [0u8; 1024];
+        while stream.read(&mut sink).await? > 0 {}
+        Ok::<_, PumasError>(())
+    })
+    .await;
+}
 
 struct ActiveConnectionGuard {
     active_connections: Arc<AtomicUsize>,
@@ -196,6 +241,13 @@ impl IpcServer {
     /// Returns a handle that can be used to get the port and shut down the server.
     /// The server runs in background tokio tasks.
     pub async fn start<D: IpcDispatch>(dispatch: Arc<D>) -> Result<IpcServerHandle> {
+        Self::start_with_limits(dispatch, ConnectionLimits::default()).await
+    }
+
+    async fn start_with_limits<D: IpcDispatch>(
+        dispatch: Arc<D>,
+        limits: ConnectionLimits,
+    ) -> Result<IpcServerHandle> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         let port = addr.port();
@@ -211,6 +263,7 @@ impl IpcServer {
         let task_handle = tokio::spawn(Self::accept_loop(
             listener,
             dispatch,
+            limits,
             shutdown_rx,
             conn_shutdown_rx,
             active_connections,
@@ -230,9 +283,11 @@ impl IpcServer {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn accept_loop<D: IpcDispatch>(
         listener: TcpListener,
         dispatch: Arc<D>,
+        limits: ConnectionLimits,
         mut shutdown_rx: oneshot::Receiver<()>,
         conn_shutdown_rx: watch::Receiver<bool>,
         active_connections: Arc<AtomicUsize>,
@@ -249,12 +304,17 @@ impl IpcServer {
                     match accept_result {
                         Ok((stream, peer_addr)) => {
                             let current = active_connections.load(Ordering::Relaxed);
-                            if current >= RegistryConfig::MAX_IPC_CONNECTIONS {
+                            if current >= limits.max_connections {
                                 warn!(
                                     "Rejecting IPC connection from {}: at max capacity ({})",
                                     peer_addr,
-                                    RegistryConfig::MAX_IPC_CONNECTIONS
+                                    limits.max_connections
                                 );
+                                // Tell the client why instead of a silent EOF.
+                                tokio::spawn(refuse_connection(
+                                    stream,
+                                    IpcError::at_capacity(limits.max_connections),
+                                ));
                                 continue;
                             }
 
@@ -266,7 +326,7 @@ impl IpcServer {
 
                             let handle = tokio::spawn(async move {
                                 debug!("IPC connection from {}", peer_addr);
-                                match AssertUnwindSafe(Self::handle_connection(stream, &*dispatch, &mut conn_shutdown)).catch_unwind().await {
+                                match AssertUnwindSafe(Self::handle_connection(stream, &*dispatch, &mut conn_shutdown, limits.frame_completion)).catch_unwind().await {
                                     Ok(Ok(())) => {},
                                     Ok(Err(error)) => debug!("IPC connection {} ended: {}", peer_addr, error),
                                     Err(_) => { failed.store(true, Ordering::Release); },
@@ -288,6 +348,7 @@ impl IpcServer {
         mut stream: TcpStream,
         dispatch: &D,
         shutdown_rx: &mut watch::Receiver<bool>,
+        frame_completion: Duration,
     ) -> Result<()> {
         let (mut reader, mut writer) = stream.split();
 
@@ -297,10 +358,23 @@ impl IpcServer {
             }
             // Wait for either a frame or a shutdown signal
             let frame = tokio::select! {
-                result = read_frame(&mut reader) => {
+                result = read_frame_within(&mut reader, frame_completion) => {
                     match result? {
-                        Some(f) => f,
-                        None => return Ok(()), // Clean disconnect
+                        FrameRead::Frame(f) => f,
+                        FrameRead::Closed => return Ok(()), // Clean disconnect
+                        FrameRead::Stalled => {
+                            // Free the slot held by a peer that stopped mid-frame.
+                            let response = IpcResponse::error(
+                                None,
+                                IpcError::stalled_frame(frame_completion),
+                            );
+                            let _ = tokio::time::timeout(
+                                REFUSAL_DELIVERY_TIMEOUT,
+                                write_frame(&mut writer, &serde_json::to_vec(&response)?),
+                            )
+                            .await;
+                            return Ok(());
+                        }
                     }
                 }
                 _ = shutdown_rx.changed() => {
@@ -517,7 +591,11 @@ mod tests {
     }
 
     async fn start_test_server() -> Option<IpcServerHandle> {
-        match IpcServer::start(Arc::new(ContractDispatch)).await {
+        start_test_server_with(ConnectionLimits::default()).await
+    }
+
+    async fn start_test_server_with(limits: ConnectionLimits) -> Option<IpcServerHandle> {
+        match IpcServer::start_with_limits(Arc::new(ContractDispatch), limits).await {
             Ok(handle) => Some(handle),
             Err(PumasError::Io {
                 source: Some(err), ..
@@ -571,6 +649,102 @@ mod tests {
             serde_json::from_value(response.result.unwrap()).unwrap();
         assert_eq!(snapshot.cursor, "model-library-updates:0");
 
+        handle.shutdown();
+    }
+
+    #[tokio::test]
+    async fn connection_over_capacity_is_refused_with_a_reason() {
+        let Some(mut handle) = start_test_server_with(ConnectionLimits {
+            max_connections: 1,
+            ..ConnectionLimits::default()
+        })
+        .await
+        else {
+            return;
+        };
+        let held = TcpStream::connect(handle.addr()).await.unwrap();
+        // Let the server admit the first connection before the second.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let client = crate::ipc::IpcClient::connect(handle.addr(), std::process::id())
+            .await
+            .unwrap();
+        let error = timeout(
+            Duration::from_secs(5),
+            client.call(
+                LocalIpcOperation::ModelLibrarySelectorSnapshot,
+                serde_json::json!({
+                    "request": { "limit": 25 },
+                    "connection_token": "test-connection-token",
+                }),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("limit of 1 concurrent connections"),
+            "{message}"
+        );
+        drop(held);
+        handle.shutdown();
+    }
+
+    #[tokio::test]
+    async fn stalled_frame_is_closed_with_a_reason_but_idle_connections_stay_open() {
+        let Some(mut handle) = start_test_server_with(ConnectionLimits {
+            frame_completion: Duration::from_millis(200),
+            ..ConnectionLimits::default()
+        })
+        .await
+        else {
+            return;
+        };
+        // Idle between frames: still served after more than the deadline.
+        let mut idle = TcpStream::connect(handle.addr()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let request = IpcRequest::new(
+            LocalIpcOperation::ModelLibrarySelectorSnapshot,
+            serde_json::json!({
+                "request": { "limit": 25 },
+                "connection_token": "test-connection-token",
+            }),
+            1,
+        );
+        let (mut reader, mut writer) = idle.split();
+        write_frame(&mut writer, &serde_json::to_vec(&request).unwrap())
+            .await
+            .unwrap();
+        let response: IpcResponse = serde_json::from_slice(
+            &super::super::protocol::read_frame(&mut reader)
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(response.error.is_none());
+
+        // A frame started and never finished is closed with a reason.
+        let mut stalled = TcpStream::connect(handle.addr()).await.unwrap();
+        stalled.write_all(&[0, 0]).await.unwrap();
+        let (mut reader, _writer) = stalled.split();
+        let response: IpcResponse = serde_json::from_slice(
+            &timeout(
+                Duration::from_secs(5),
+                super::super::protocol::read_frame(&mut reader),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(response.id.is_none());
+        assert!(response
+            .error
+            .unwrap()
+            .message
+            .contains("not completed within"));
         handle.shutdown();
     }
 

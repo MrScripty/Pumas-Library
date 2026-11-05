@@ -64,7 +64,9 @@ If its dependent libraries require an OS loader path, supply that only to the
 invocation; do not change system loader configuration. `ORT_LIB_PATH` and
 `ORT_PREFER_DYNAMIC_LINK` belonged to build-time linking and are not runtime
 selectors in this mode. The binding retains its process-wide loaded library;
-runtime replacement requires restarting the process. Applications embedding
+runtime replacement requires restarting the process: a load whose verified
+library differs from the one ORT already adopted (or whose file changed after
+verification) is refused with that reason. Applications embedding
 Pumas keep ownership of ORT environment settings and must select the same
 library before any other direct ORT calls.
 

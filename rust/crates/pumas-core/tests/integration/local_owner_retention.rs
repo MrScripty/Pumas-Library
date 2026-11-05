@@ -150,12 +150,17 @@ async fn stale_description_or_replaced_physical_root_cannot_admit_retention() {
 
 #[tokio::test]
 async fn stale_retention_release_cannot_remove_an_administratively_replaced_generation() {
-    let (_temp, root, registry) = fixture();
+    let (temp, root, registry) = fixture();
     let api = owner(&root, registry.clone()).await;
     let description = api.instance_description().unwrap();
     let guard = api.retain_local_owner(&description).unwrap();
-    // Explicit corruption fixture; this API is not a qualified takeover path.
-    registry.register_instance(&root, 999999999, 1).unwrap();
+    // Explicit corruption fixture; no public API is a qualified takeover path.
+    crate::support::inject_foreign_ready_instance(
+        &temp.path().join("registry.db"),
+        &root,
+        999999999,
+        1,
+    );
     let replacement = registry.get_instance(&root).unwrap().unwrap();
     assert!(api.retain_local_owner(&description).is_err());
     guard.release().await.unwrap();

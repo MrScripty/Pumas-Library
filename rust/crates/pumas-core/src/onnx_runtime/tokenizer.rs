@@ -2,10 +2,12 @@ use std::path::PathBuf;
 
 use tokenizers::Tokenizer;
 
-use super::{package::resolve_package_file, OnnxEmbeddingRequest, OnnxModelPath, OnnxRuntimeError};
+use super::{
+    package::resolve_package_file, OnnxEmbeddingRequest, OnnxInputTokenLimit, OnnxModelPath,
+    OnnxRuntimeError,
+};
 
 const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
-const MAX_EMBEDDING_TOKENS_PER_INPUT: usize = 8_192;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OnnxTokenizedInput {
@@ -44,19 +46,44 @@ impl OnnxTokenizer {
         &self.tokenizer_path
     }
 
+    /// Tokenize every input without a model token limit.
     pub fn tokenize_request(
         &self,
         request: &OnnxEmbeddingRequest,
     ) -> Result<OnnxTokenizedBatch, OnnxRuntimeError> {
+        self.tokenize_request_within(request, None)
+    }
+
+    /// Tokenize every input and refuse, with a reason naming the input, its
+    /// token count and the model's limit, any input longer than `limit`.
+    pub fn tokenize_request_within(
+        &self,
+        request: &OnnxEmbeddingRequest,
+        limit: Option<&OnnxInputTokenLimit>,
+    ) -> Result<OnnxTokenizedBatch, OnnxRuntimeError> {
         let mut inputs = Vec::with_capacity(request.input.len());
         let mut total_tokens = 0usize;
 
-        for text in &request.input {
+        for (index, text) in request.input.iter().enumerate() {
             let encoding = self.tokenizer.encode(text.as_str(), true).map_err(|_| {
                 OnnxRuntimeError::validation("input", "embedding input could not be tokenized")
             })?;
             let token_count = encoding.get_ids().len();
             validate_token_count(token_count)?;
+            if let Some(limit) = limit {
+                if token_count > limit.max_tokens {
+                    return Err(OnnxRuntimeError::validation(
+                        "input",
+                        format!(
+                            "embedding input {index} has {token_count} tokens, but model {} \
+                             accepts at most {} tokens per input (config.json {})",
+                            request.model_id.as_str(),
+                            limit.max_tokens,
+                            limit.source
+                        ),
+                    ));
+                }
+            }
             total_tokens = total_tokens.checked_add(token_count).ok_or_else(|| {
                 OnnxRuntimeError::backend("ONNX token count exceeds supported size")
             })?;
@@ -80,14 +107,6 @@ fn validate_token_count(token_count: usize) -> Result<(), OnnxRuntimeError> {
         return Err(OnnxRuntimeError::validation(
             "input",
             "tokenized embedding input must contain at least one token",
-        ));
-    }
-    if token_count > MAX_EMBEDDING_TOKENS_PER_INPUT {
-        return Err(OnnxRuntimeError::validation(
-            "input",
-            format!(
-                "tokenized embedding input must contain at most {MAX_EMBEDDING_TOKENS_PER_INPUT} tokens"
-            ),
         ));
     }
     Ok(())

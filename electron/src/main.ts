@@ -37,7 +37,7 @@ import {
   validateApiCallPayload,
   validateExternalUrl,
 } from './ipc-validation';
-import { resolveBackendBinaryPath } from './backend-path';
+import { isIgnoredPackagedOverride, resolveBackendBinaryPath } from './backend-path';
 import { PythonBridge } from './python-bridge';
 import { LibraryUpgradeCoordinator, runLibraryMetadataUpgrade } from './library-upgrade';
 import { isS3ImportMethod, receiveS3ImportRpc } from './s3-import-rpc';
@@ -868,14 +868,18 @@ async function initializeBackend(): Promise<void> {
   backendInitializationPromise = (async () => {
     log.info('Initializing backend bridge...');
 
-    const rustBinaryPath = resolveBackendBinaryPath({
-      defaultBuildProfile: isDevServerLaunch() ? 'debug' : 'release',
+    const backendPathOptions = {
+      defaultBuildProfile: isDevServerLaunch() ? 'debug' as const : 'release' as const,
       isPackaged: app.isPackaged,
       overridePath: process.env.PUMAS_RPC_BINARY,
       platform: process.platform,
       resourcesPath: process.resourcesPath,
       sourceRoot: path.join(__dirname, '..', '..'),
-    });
+    };
+    if (isIgnoredPackagedOverride(backendPathOptions)) {
+      log.warn('Ignoring PUMAS_RPC_BINARY: a packaged desktop runs only the backend it shipped with.');
+    }
+    const rustBinaryPath = resolveBackendBinaryPath(backendPathOptions);
 
     const launcherRootResolution = resolveLauncherRoot({
       appImagePath: process.env.APPIMAGE,

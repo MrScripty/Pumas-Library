@@ -106,6 +106,16 @@ merges them with the Rust export, so main, preload and the frontend share one
 generated type and validator; a name declared by both sources is an error.
 These declarations ship with their consumers and stay closed.
 
+The response and stream validators generated from the Rust export are closed
+as well (`additionalProperties: false`): the desktop and its backend ship and
+upgrade as one unit. A packaged desktop ignores `PUMAS_RPC_BINARY` and always
+runs the `pumas-rpc` in its own resources (`src/backend-path.ts`), so a newer
+backend is never paired with older validators; the override remains for
+source checkouts (`./launcher.sh`). An additive backend field reaches the
+desktop only after regeneration. The "additive changes are non-breaking" rule
+applies to external RPC consumers, whose clients ignore unknown fields; it
+does not apply to this bundled pairing.
+
 Update streams (model library, downloads, runtime profiles, serving status and
 status telemetry) are declared by the backend and decoded in preload. Each
 subscription takes a required `onError`: a payload that fails its contract is
@@ -116,7 +126,7 @@ put a field's value in a rejection reason.
 The backend's startup diagnostic is the exception to closed declarations. Rust
 writes one `PUMAS_STARTUP_FAILURE=` line holding a `StartupFailureFrame`
 (`pumas-rpc/src/startup_failure.rs`) for every fatal startup error, with a
-bounded `detail`. Electron may run a backend from another build, so the frame's
+bounded `detail`. An unpackaged Electron may run a backend from another build, so the frame's
 schema is open: readers ignore unknown fields and treat an unknown `reason` as
 `backend-unavailable`. The detail reaches the recovery screen as the startup
 state's `detail`.

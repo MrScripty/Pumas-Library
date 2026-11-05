@@ -27,7 +27,7 @@ test('display scope is stable, root-specific, and unavailable without valid iden
   assert.notEqual(readLibraryDisplayScope(second), scope);
   fs.writeFileSync(marker(first), identity.replace('714afbd9', '814afbd9'));
   assert.notEqual(readLibraryDisplayScope(first), scope);
-  for (const invalid of ['{}', '{', identity.replace(':1', ':2'), identity.replace('714afbd9', 'not-uuid'), identity.replace('{', '{"schema_version":0,'), ' '.repeat(1025)]) {
+  for (const invalid of ['{}', '{', identity.replace(':1', ':2'), identity.replace('714afbd9', 'not-uuid'), `{"schema_version":0,${identity.slice(1)}`, ' '.repeat(1025)]) {
     fs.writeFileSync(marker(first), invalid);
     assert.equal(readLibraryDisplayScope(first), null);
   }

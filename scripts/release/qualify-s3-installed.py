@@ -103,6 +103,7 @@ class Source(http.server.ThreadingHTTPServer):
     def __init__(self, cert, key, mode, authenticated, token):
         super().__init__(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(cert, key)
         self.socket = context.wrap_socket(self.socket, server_side=True)
         self.mode, self.authenticated, self.token = mode, authenticated, token
@@ -180,7 +181,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not (head and source.mode == "unknown" and primary):
                 self.send_header("Content-Length", str(len(body) - start))
             self.send_header("Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT")
-            self.send_header("x-amz-version-id", version)
+            # The allowlist check above admits only these two versions.
+            self.send_header("x-amz-version-id", "weights-v1" if primary else "data-v2")
             self.send_header("ETag", '"selected"')
             self.send_header("Connection", "close")
             if not head:

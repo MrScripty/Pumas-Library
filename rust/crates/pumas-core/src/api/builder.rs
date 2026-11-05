@@ -203,7 +203,10 @@ fn start_primary_background_work(
                     model_card_json: None,
                     license_status: None,
                 };
-                match client.start_download(&request, &item.model_dir, None).await {
+                match client
+                    .start_recovered_download(&request, &item.model_dir)
+                    .await
+                {
                     Ok(id) => {
                         tracing::info!(
                             "Started interrupted download recovery {} for repo {}",

@@ -21,7 +21,7 @@ import urllib.parse
 MAX_DESCRIPTION = 64 * 1024
 MAX_RPC = 1024 * 1024
 MAX_OPERATION = 32 * 1024 * 1024
-DESCRIPTOR_SCHEMA_SHA256 = "eb25783123d38de5ff6aedf4cfa69de8f4f5f5c60799768b1b90da258b85f922"
+DESCRIPTOR_SCHEMA_SHA256 = "c586a54fd8c0524dfcbae00dd298d5ee06bb70675c78e871b8a82a77c7ba5316"
 
 # Concrete representations from the pinned producer contract, not model or
 # capability names. A pair describes formats to choose, never payload admission.
@@ -101,13 +101,27 @@ def _descriptor_context(build_info, contract_version):
         "pumas.model-operations.image-to-text")), "required descriptor/lifecycle contracts absent")
 
 
+def _enum_values(schema, name):
+    """Closed string values of a schema definition.
+
+    The producer emits plain variants as `enum` and documented variants as
+    `oneOf` entries carrying `enum` or `const`.
+    """
+    definition = schema["$defs"][name]
+    variants = definition.get("oneOf", [definition])
+    values = []
+    for variant in variants:
+        values.extend(variant["enum"] if "enum" in variant else [variant["const"]])
+    return values
+
+
 def _descriptor_value(value, schema):
     def object_fields(item, required):
         # The producer schema allows extra properties; retain every one.
         _require(type(item) is dict and set(required) <= item.keys(), "missing descriptor fields")
 
     def enum(item, name):
-        _require(type(item) is str and item in schema["$defs"][name]["enum"],
+        _require(type(item) is str and item in _enum_values(schema, name),
                  "unknown descriptor discriminant")
 
     object_fields(value, schema["required"])
@@ -158,7 +172,7 @@ def select_capability(descriptors, *, build_info, contract_version, input_modali
              "unsupported generic modality")
     _require(type(stream) is bool, "explicit Boolean streaming requirement required")
     _require(semantic_task is None or (type(semantic_task) is str
-             and semantic_task in schema["$defs"]["SemanticTask"]["enum"]), "unknown semantic task")
+             and semantic_task in _enum_values(schema, "SemanticTask")), "unknown semantic task")
     # Clone through the bytes decoder so results do not alias caller data.
     # JSON compatibility and the size bound are host policies.
     encoded = json.dumps(descriptors, allow_nan=False).encode()

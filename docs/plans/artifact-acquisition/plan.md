@@ -42,7 +42,7 @@ The initial production consumers are the existing Hugging Face model workflow, t
 
 The complete acquisition plan includes HTTP, the current Hugging Face resolution path, exact package-file acquisition, and S3-compatible object retrieval. It is more than a URL download utility. Full acceptance requires the real source/consumer, restart, desktop, and affected platform evidence named below. The first accepted gate can unblock runtime work before the complete acquisition roadmap is accepted.
 
-Source intent: `docs/breif/s3-model-fetch.md` and `docs/breif/intent-discovery-distribution.md`. They remain explanatory intent; this plan owns current execution sequencing. Existing model intent APIs remain the normal model-facing interface. Runtime archives and wheels do not become models to reuse them.
+Source intent: `docs/brief/s3-model-fetch.md` and `docs/brief/intent-discovery-distribution.md`. They remain explanatory intent; this plan owns current execution sequencing. Existing model intent APIs remain the normal model-facing interface. Runtime archives and wheels do not become models to reuse them.
 
 ### Included boundaries
 

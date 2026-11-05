@@ -4,7 +4,7 @@
 `rust/crates/pumas-core/src/model_library/hf/metadata/model_info_cache.rs` and
 its `budget` and `local_discovery` modules. Direction and the parts not yet
 built (shared online cache, bulk index, other catalogs) live in the
-[HF cache brief](../breif/hf-cache.md).
+[HF cache brief](../brief/hf-cache.md).
 
 Pumas keeps anonymous Hugging Face model-detail responses on disk so repeated
 lookups and offline browsing do not have to call the Hub. A cached detail is a

@@ -43,19 +43,20 @@ impl DependencyManager {
         }
     }
 
-    /// Get the version directory path.
-    fn version_path(&self, tag: &str) -> PathBuf {
-        self.launcher_root
+    /// Get the version directory path; the tag must be one directory name.
+    fn version_path(&self, tag: &str) -> Result<PathBuf> {
+        super::validate_version_tag(tag)?;
+        Ok(self
+            .launcher_root
             .join(self.app_id.versions_dir_name())
-            .join(tag)
+            .join(tag))
     }
 
     /// Get the venv python path for a version.
-    fn venv_python(&self, tag: &str) -> PathBuf {
-        self.version_path(tag)
-            .join("venv")
-            .join("bin")
-            .join("python")
+    fn venv_python(&self, tag: &str) -> Result<PathBuf> {
+        Ok(pumas_library::platform::paths::venv_python(
+            &self.version_path(tag)?,
+        ))
     }
 
     async fn read_requirements_file(&self, requirements_path: &Path) -> Result<String> {
@@ -70,14 +71,14 @@ impl DependencyManager {
 
     /// Check dependencies for a version.
     pub async fn check_dependencies(&self, tag: &str) -> Result<DependencyStatus> {
-        let version_path = self.version_path(tag);
+        let version_path = self.version_path(tag)?;
         if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
             });
         }
 
-        let venv_python = self.venv_python(tag);
+        let venv_python = self.venv_python(tag)?;
         if !path_exists(&venv_python).await? {
             return Ok(DependencyStatus {
                 installed: vec![],
@@ -165,7 +166,7 @@ impl DependencyManager {
 
     /// Get installed packages using pip list.
     async fn get_installed_packages(&self, tag: &str) -> Result<Vec<String>> {
-        let venv_python = self.venv_python(tag);
+        let venv_python = self.venv_python(tag)?;
 
         // Try JSON format first
         let output = tokio::process::Command::new(&venv_python)
@@ -225,27 +226,35 @@ impl DependencyManager {
                 message: "Torch dependencies belong to its validated runtime bundle. Install another runtime version through version management; in-place dependency repair is unsupported.".to_string(),
             });
         }
-        let version_path = self.version_path(tag);
+        let version_path = self.version_path(tag)?;
         if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
             });
         }
 
-        // Create venv if needed
-        if !path_exists(&self.venv_python(tag)).await? {
-            self.create_venv(tag).await?;
-        }
-
+        // Nothing is created for a version that declares no Python
+        // dependencies, such as a native Ollama or llama.cpp runtime.
         let requirements_path = version_path.join("requirements.txt");
         if !path_exists(&requirements_path).await? {
             info!("No requirements.txt found for {}", tag);
             return Ok(true);
         }
 
+        // Dependencies go only into the version's own environment. Pumas
+        // never builds one from whatever `python3` is first on PATH.
+        if !path_exists(&self.venv_python(tag)?).await? {
+            return Err(PumasError::DependencyFailed {
+                message: format!(
+                    "{tag} has no Python environment of its own; Pumas does not create one from a system interpreter"
+                ),
+            });
+        }
+
         // Parse requirements for progress tracking
         let requirements_content = self.read_requirements_file(&requirements_path).await?;
         let packages = self.parse_requirements(&requirements_content);
+        let hash_locked = requirements_content.contains("--hash=");
 
         // Try to get or build constraints file
         let constraints_path = constraints_manager
@@ -260,66 +269,38 @@ impl DependencyManager {
             &requirements_path,
             constraints_path.as_ref(),
             &packages,
+            hash_locked,
             progress_tx,
         )
         .await
     }
 
-    /// Create a virtual environment.
-    async fn create_venv(&self, tag: &str) -> Result<()> {
-        let version_path = self.version_path(tag);
-        let venv_dir = version_path.join("venv");
-
-        info!("Creating virtual environment for {}", tag);
-
-        let output = tokio::process::Command::new("python3")
-            .args(["-m", "venv", venv_dir.to_string_lossy().as_ref()])
-            .current_dir(&version_path)
-            .output()
-            .await
-            .map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to create venv: {}", e),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::InstallationFailed {
-                message: format!("Venv creation failed: {}", stderr),
-            });
-        }
-
-        // Ensure pip is available
-        let venv_python = self.venv_python(tag);
-        let _ = tokio::process::Command::new(&venv_python)
-            .args(["-m", "ensurepip", "--upgrade"])
-            .output()
-            .await;
-
-        let _ = tokio::process::Command::new(&venv_python)
-            .args(["-m", "pip", "install", "--upgrade", "pip"])
-            .output()
-            .await;
-
-        Ok(())
-    }
-
     /// Install dependencies with progress tracking.
+    ///
+    /// pip runs isolated (`python -I`, `pip --isolated`), so neither the
+    /// user's site packages, `PIP_*` environment nor pip configuration can
+    /// redirect the install. A hash-locked requirements file is installed
+    /// with `--require-hashes`, and then nothing unhashed is added to it.
     async fn install_with_progress(
         &self,
         tag: &str,
         requirements_path: &PathBuf,
         constraints_path: Option<&PathBuf>,
         packages: &[String],
+        hash_locked: bool,
         progress_tx: Option<mpsc::Sender<ProgressUpdate>>,
     ) -> Result<bool> {
-        let venv_python = self.venv_python(tag);
-        let version_path = self.version_path(tag);
+        let venv_python = self.venv_python(tag)?;
+        let version_path = self.version_path(tag)?;
 
         info!("Installing {} packages for {}", packages.len(), tag);
 
         // Build command
+        fs::create_dir_all(&self.pip_cache_dir).await.ok();
         let mut cmd = tokio::process::Command::new(&venv_python);
-        cmd.args(["-m", "pip", "install", "-r"])
+        cmd.args(["-I", "-m", "pip", "--isolated", "install", "--cache-dir"])
+            .arg(&self.pip_cache_dir)
+            .arg("-r")
             .arg(requirements_path);
 
         // Add constraints if available
@@ -327,12 +308,12 @@ impl DependencyManager {
             cmd.args(["-c"]).arg(constraints);
         }
 
-        // Add global packages
-        cmd.args(["setproctitle"]);
-
-        // Set environment
-        fs::create_dir_all(&self.pip_cache_dir).await.ok();
-        cmd.env("PIP_CACHE_DIR", &self.pip_cache_dir);
+        if hash_locked {
+            cmd.arg("--require-hashes");
+        } else {
+            // Add global packages
+            cmd.args(["setproctitle"]);
+        }
         cmd.current_dir(&version_path);
 
         // Set up for streaming output
@@ -422,7 +403,7 @@ impl DependencyManager {
 
     /// Get the Python version for a venv.
     pub async fn get_python_version(&self, tag: &str) -> Result<Option<String>> {
-        let venv_python = self.venv_python(tag);
+        let venv_python = self.venv_python(tag)?;
         if !path_exists(&venv_python).await? {
             return Ok(None);
         }
@@ -512,7 +493,7 @@ optional-package
     #[tokio::test]
     async fn torch_dependency_repair_cannot_mutate_an_installed_runtime() {
         let (manager, temp) = create_test_manager();
-        let version = manager.version_path("candidate");
+        let version = manager.version_path("candidate").unwrap();
         fs::create_dir_all(&version).await.unwrap();
         fs::write(version.join("requirements.txt"), "torch==2.9.1")
             .await
@@ -545,5 +526,76 @@ optional-package
 
         let version = manager.get_python_version("missing-version").await.unwrap();
         assert_eq!(version, None);
+    }
+
+    fn native_manager(temp: &TempDir) -> DependencyManager {
+        DependencyManager::new(
+            temp.path().to_path_buf(),
+            AppId::Ollama,
+            temp.path().join("pip-cache"),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_tag_that_leaves_the_versions_directory_is_refused() {
+        let temp = TempDir::new().unwrap();
+        let manager = native_manager(&temp);
+        // A directory the escaping tag would otherwise reach.
+        let outside = temp.path().join("x");
+        fs::create_dir_all(&outside).await.unwrap();
+        fs::write(outside.join("requirements.txt"), "requests\n")
+            .await
+            .unwrap();
+        let constraints = ConstraintsManager::new(temp.path().join("constraints"));
+        for tag in ["../x", "..", ".", "", "a/b", "a\\b", "/abs"] {
+            assert!(
+                matches!(
+                    manager.install_dependencies(tag, &constraints, None).await,
+                    Err(PumasError::Validation { field, .. }) if field == "tag"
+                ),
+                "{tag:?}"
+            );
+            assert!(manager.check_dependencies(tag).await.is_err(), "{tag:?}");
+        }
+        assert!(!outside.join("venv").exists());
+    }
+
+    #[tokio::test]
+    async fn a_version_without_requirements_gets_no_environment() {
+        let temp = TempDir::new().unwrap();
+        let manager = native_manager(&temp);
+        let version = manager.version_path("v0.5.1").unwrap();
+        fs::create_dir_all(&version).await.unwrap();
+        let constraints = ConstraintsManager::new(temp.path().join("constraints"));
+
+        assert!(manager
+            .install_dependencies("v0.5.1", &constraints, None)
+            .await
+            .unwrap());
+        assert!(!version.join("venv").exists());
+        assert!(!temp.path().join("pip-cache").exists());
+    }
+
+    #[tokio::test]
+    async fn requirements_without_an_owned_environment_are_refused_not_built_from_path_python() {
+        let temp = TempDir::new().unwrap();
+        let manager = native_manager(&temp);
+        let version = manager.version_path("v0.5.1").unwrap();
+        fs::create_dir_all(&version).await.unwrap();
+        fs::write(version.join("requirements.txt"), "requests\n")
+            .await
+            .unwrap();
+        let constraints = ConstraintsManager::new(temp.path().join("constraints"));
+
+        let error = manager
+            .install_dependencies("v0.5.1", &constraints, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("no Python environment of its own"),
+            "{error}"
+        );
+        assert!(!version.join("venv").exists());
     }
 }

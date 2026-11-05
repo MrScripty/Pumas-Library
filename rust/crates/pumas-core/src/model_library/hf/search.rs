@@ -315,7 +315,10 @@ impl HuggingFaceClient {
                 "automatic-speech-recognition" | "audio" => "automatic-speech-recognition",
                 _ => kind,
             };
-            url.push_str(&format!("&pipeline_tag={}", pipeline_tag));
+            url.push_str(&format!(
+                "&pipeline_tag={}",
+                urlencoding::encode(pipeline_tag)
+            ));
         }
 
         // Execute request

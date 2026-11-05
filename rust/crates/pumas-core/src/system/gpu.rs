@@ -297,7 +297,13 @@ impl GpuMonitor for NoOpGpuMonitor {
 }
 
 /// Create the appropriate GPU monitor for the current system.
+///
+/// A build without the `gpu-monitor` feature never probes or runs
+/// `nvidia-smi` and reports GPU monitoring as unavailable.
 pub fn create_gpu_monitor() -> Box<dyn GpuMonitor> {
+    if !cfg!(feature = "gpu-monitor") {
+        return Box::new(NoOpGpuMonitor);
+    }
     let nvidia_monitor = NvidiaSmiMonitor::default();
     if nvidia_monitor.is_available() {
         Box::new(nvidia_monitor)
@@ -309,6 +315,12 @@ pub fn create_gpu_monitor() -> Box<dyn GpuMonitor> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "gpu-monitor"))]
+    #[test]
+    fn disabled_gpu_monitor_feature_reports_monitoring_unavailable() {
+        assert!(!create_gpu_monitor().is_available());
+    }
 
     #[test]
     fn test_no_op_monitor() {

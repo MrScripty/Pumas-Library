@@ -1,8 +1,8 @@
 //! WebSource trait system for extensible network source management.
 //!
 //! Provides a unified interface for web sources (GitHub, HuggingFace, etc.)
-//! that integrates with NetworkManager for connectivity checking, circuit
-//! breaking, and caching strategies.
+//! that integrates with NetworkManager for connectivity checking and circuit
+//! breaking.
 
 use async_trait::async_trait;
 use std::time::Duration;
@@ -24,27 +24,14 @@ pub trait WebSourceId: Send + Sync {
 pub trait CacheStrategy: Send + Sync {
     /// Default time-to-live for cache entries.
     fn default_ttl(&self) -> Duration;
-
-    /// Whether to use stale cache data when network is unavailable.
-    ///
-    /// Defaults to true for offline-first behavior.
-    fn allow_stale_on_offline(&self) -> bool {
-        true
-    }
-
-    /// Maximum age for stale cache data before it's considered unusable.
-    ///
-    /// `None` means no limit - any stale data is acceptable when offline.
-    fn max_stale_age(&self) -> Option<Duration> {
-        None
-    }
 }
 
 /// Main trait for web sources that can be registered with NetworkManager.
 ///
 /// Implement this trait to integrate a new web source with the network
-/// management system. This provides automatic connectivity checking,
-/// circuit breaker integration, and cache fallback behavior.
+/// management system. This provides connectivity checking and circuit
+/// breaker integration. Sources own their cache reads; no shared path
+/// substitutes stale cache data for a failed request.
 #[async_trait]
 pub trait WebSource: WebSourceId + CacheStrategy + Send + Sync {
     /// Check if this source has any cached data for a given key.
@@ -119,9 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_strategy_defaults() {
-        let source = MockSource;
-        assert!(source.allow_stale_on_offline());
-        assert!(source.max_stale_age().is_none());
+    fn test_cache_strategy_ttl() {
+        assert_eq!(MockSource.default_ttl(), Duration::from_secs(300));
     }
 }

@@ -612,6 +612,49 @@ fn validate_download_provenance_revision(
     Ok(())
 }
 
+/// The revision an orphaned partial download must resume under.
+#[derive(Debug, PartialEq, Eq)]
+enum RecoveryRevision {
+    /// Existing provenance names this revision; resuming under any other one
+    /// would mix representations, and the provenance guard refuses it.
+    Recorded(DownloadRevision),
+    /// No provenance exists, so the current upstream commit must be resolved.
+    Unrecorded,
+}
+
+/// Select the recovery revision from existing destination provenance.
+///
+/// A recorded commit is reused. Provenance that records `main`, or none at
+/// all, keeps the legacy revision because its bytes were fetched from a
+/// mutable ref and cannot be claimed for a later commit.
+fn recovery_revision_from_provenance(
+    metadata: Option<&serde_json::Value>,
+    marker: Option<&serde_json::Value>,
+) -> Result<RecoveryRevision> {
+    if metadata.is_none() && marker.is_none() {
+        return Ok(RecoveryRevision::Unrecorded);
+    }
+    let recorded = [
+        metadata.and_then(|value| value.get("upstream_revision")),
+        marker
+            .and_then(|value| value.get("selected_artifact"))
+            .and_then(|selected| selected.get("revision")),
+    ];
+    for value in recorded.into_iter().flatten() {
+        if value.is_null() {
+            continue;
+        }
+        let revision = value.as_str().ok_or_else(|| PumasError::Validation {
+            field: "revision".into(),
+            message: "Existing download provenance contains a non-string revision".into(),
+        })?;
+        if revision != "main" {
+            return DownloadRevision::from_commit(revision).map(RecoveryRevision::Recorded);
+        }
+    }
+    Ok(RecoveryRevision::Recorded(DownloadRevision::legacy_main()))
+}
+
 #[derive(Clone)]
 struct CancellationPersistence {
     store: Arc<DownloadPersistence>,
@@ -3783,6 +3826,11 @@ impl HuggingFaceClient {
     /// Returns a download ID for tracking progress.
     /// For multi-shard models or "all files" requests, all files are downloaded
     /// sequentially under a single download ID.
+    ///
+    /// This entry point downloads the mutable `main` ref without resolving an
+    /// immutable commit, so its files are recorded with a weak revision.
+    /// Library callers start downloads through `PumasApi::start_hf_download`,
+    /// which pins a commit first.
     pub async fn start_download(
         &self,
         request: &DownloadRequest,
@@ -3814,6 +3862,66 @@ impl HuggingFaceClient {
                 .await
         })
         .await
+    }
+
+    /// Restart an orphaned partial download in its existing directory.
+    ///
+    /// The revision comes from the directory's own provenance when it records
+    /// one, so retained partial files resume under the commit they were
+    /// fetched from. A directory with no provenance resolves the current
+    /// upstream commit before any transfer starts.
+    pub(crate) async fn start_recovered_download(
+        &self,
+        request: &DownloadRequest,
+        dest_dir: &Path,
+    ) -> Result<String> {
+        let client = self.clone_for_invocation();
+        let request = request.clone();
+        let dest_dir = dest_dir.to_path_buf();
+        self.run_download_invocation(move |context| async move {
+            client
+                .start_recovered_download_admitted(&context, &request, &dest_dir)
+                .await
+        })
+        .await
+    }
+
+    async fn start_recovered_download_admitted(
+        &self,
+        context: &TaskContext,
+        request: &DownloadRequest,
+        dest_dir: &Path,
+    ) -> Result<String> {
+        let (protected_context, destination, _) = self
+            .preflight_download_destination(context, dest_dir)
+            .await?;
+        let recorded = protected_context
+            .run_fallible_blocking_named("read recovery revision provenance", move || {
+                let (metadata, marker) = destination.read_download_provenance()?;
+                recovery_revision_from_provenance(metadata.as_ref(), marker.as_ref())
+            })
+            .await
+            .map_err(|error| error.into_pumas_error("Recovery provenance observation failed"))??;
+        let revision = match recorded {
+            RecoveryRevision::Recorded(revision) => revision,
+            RecoveryRevision::Unrecorded => {
+                let resolver = self.clone_for_invocation();
+                let repo_id = request.repo_id.clone();
+                protected_context
+                    .run_fallible_async_named("resolve recovery revision", move || async move {
+                        resolver.resolve_download_revision(&repo_id, None).await
+                    })
+                    .await
+                    .map_err(|error| {
+                        error.into_pumas_error("Recovery revision resolution failed")
+                    })??
+            }
+        };
+        let selection = self
+            .resolve_download_selection_in_context(&protected_context, request, revision)
+            .await?;
+        self.start_download_admitted_with_selection(&protected_context, selection, dest_dir, None)
+            .await
     }
 
     pub(crate) async fn resolve_download_selection_in_invocation(
@@ -4899,9 +5007,8 @@ impl HuggingFaceClient {
             .await;
         }
 
-        let max_attempts = NetworkConfig::hf_download_max_retries();
+        let (max_attempts, max_retry_elapsed) = NetworkConfig::hf_download_retry_bounds()?;
         let retry_limit = retry_limit(max_attempts);
-        let max_retry_elapsed = NetworkConfig::hf_download_max_retry_elapsed();
         let retry_policy = crate::acquisition::AcquisitionRetryPolicy {
             attempts: retry_limit,
             elapsed: max_retry_elapsed,
@@ -23211,6 +23318,190 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[test]
+    fn recovery_revision_reuses_recorded_commit_and_keeps_recorded_main() {
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        let commit = DownloadRevision::from_commit(COMMIT).unwrap();
+        let marker = |revision: serde_json::Value| json!({ "repo_id": "acme/model", "selected_artifact": { "revision": revision } });
+
+        assert_eq!(
+            recovery_revision_from_provenance(None, None).unwrap(),
+            RecoveryRevision::Unrecorded
+        );
+        assert_eq!(
+            recovery_revision_from_provenance(None, Some(&marker(json!(COMMIT)))).unwrap(),
+            RecoveryRevision::Recorded(commit.clone())
+        );
+        assert_eq!(
+            recovery_revision_from_provenance(
+                Some(&json!({ "upstream_revision": COMMIT })),
+                Some(&json!({ "repo_id": "acme/model" })),
+            )
+            .unwrap(),
+            RecoveryRevision::Recorded(commit)
+        );
+        for legacy in [
+            marker(json!("main")),
+            marker(serde_json::Value::Null),
+            json!({ "repo_id": "acme/model" }),
+        ] {
+            assert_eq!(
+                recovery_revision_from_provenance(None, Some(&legacy)).unwrap(),
+                RecoveryRevision::Recorded(DownloadRevision::legacy_main())
+            );
+        }
+        for invalid in [marker(json!(7)), marker(json!("not-a-commit"))] {
+            assert!(matches!(
+                recovery_revision_from_provenance(None, Some(&invalid)),
+                Err(PumasError::Validation { .. })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn orphan_recovery_resumes_retained_partial_at_recorded_commit() {
+        assert_orphan_recovery_resumes_retained_partial(true).await;
+    }
+
+    #[tokio::test]
+    async fn orphan_recovery_without_provenance_resolves_a_commit_before_resuming() {
+        assert_orphan_recovery_resumes_retained_partial(false).await;
+    }
+
+    /// A partial whose tracking state was lost resumes under an immutable
+    /// commit: the one its marker records, or a freshly resolved one.
+    async fn assert_orphan_recovery_resumes_retained_partial(recorded_marker: bool) {
+        use tokio::io::AsyncWriteExt;
+
+        const COMMIT: &str = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
+        const PAYLOAD: &[u8] = b"partial-done";
+
+        let temp = TempDir::new().unwrap();
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(temp.path().join("library"))
+                .await
+                .unwrap(),
+        );
+        let destination = library.build_model_path("vision", "acme", "model");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("model.onnx.part"), b"partial").unwrap();
+        if recorded_marker {
+            std::fs::write(
+                destination.join(".pumas_download"),
+                serde_json::to_vec(&json!({
+                    "repo_id": "acme/model",
+                    "selected_artifact": { "revision": COMMIT },
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            if !recorded_marker {
+                let (mut resolve, _) = listener.accept().await.unwrap();
+                let request = read_pinned_test_request(&mut resolve).await;
+                assert!(
+                    request.starts_with("GET /api/models/acme/model/revision/main HTTP/1.1"),
+                    "{request}"
+                );
+                let body = format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#);
+                resolve
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            let (mut resumed, _) = listener.accept().await.unwrap();
+            let request = read_pinned_test_request(&mut resumed).await;
+            assert!(
+                request.starts_with(&format!(
+                    "GET /acme/model/resolve/{COMMIT}/model.onnx HTTP/1.1"
+                )),
+                "{request}"
+            );
+            assert!(
+                request.to_ascii_lowercase().contains("range: bytes=7-"),
+                "the retained partial must be resumed, not replaced: {request}"
+            );
+            resumed
+                .write_all(
+                    b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 7-11/12\r\nConnection: close\r\n\r\n-done",
+                )
+                .await
+                .unwrap();
+        });
+
+        let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        client
+            .configure_download_destination_root(library.library_root())
+            .unwrap();
+        client.set_persistence(Arc::new(DownloadPersistence::new(temp.path())));
+        let importer = importer_with_authority_for_test(library.clone(), &client).await;
+        client.set_download_importer(importer);
+        client.set_test_download_base_url(base_url);
+        *client.auth_token.write().await = None;
+        cache_pinned_repo_tree(
+            &client,
+            "acme/model",
+            &revision,
+            vec![LfsFileInfo {
+                filename: "model.onnx".into(),
+                size: PAYLOAD.len() as u64,
+                sha256: hex::encode(sha2::Sha256::digest(PAYLOAD)),
+            }],
+            Vec::new(),
+        );
+        let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
+        request.model_type = Some("vision".into());
+        request.pipeline_tag = Some("image-classification".into());
+
+        let download_id = client
+            .start_recovered_download(&request, &destination)
+            .await
+            .unwrap();
+        assert_eq!(
+            client.downloads.read().await[&download_id]
+                .revision
+                .as_str(),
+            COMMIT
+        );
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                client.observe_finished_download_tasks().await;
+                if client.get_download_status(&download_id).await == Some(DownloadStatus::Completed)
+                    && !client.download_tasks.contains(&download_id)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(
+            std::fs::read(destination.join("model.onnx")).unwrap(),
+            PAYLOAD
+        );
+        assert_eq!(
+            library
+                .load_metadata(&destination)
+                .unwrap()
+                .unwrap()
+                .upstream_revision
+                .as_deref(),
+            Some(COMMIT)
+        );
     }
 
     #[tokio::test]

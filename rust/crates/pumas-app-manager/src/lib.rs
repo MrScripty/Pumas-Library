@@ -11,6 +11,7 @@
 
 pub mod api_proxy;
 pub mod ollama_client;
+mod provider_http;
 pub mod torch_client;
 pub mod version_manager;
 

@@ -63,6 +63,10 @@ size, without setuid, setgid or sticky bits, and the stage is checked for
 escaping links and special files before the launch binary is accepted. That
 binary must be a regular file, not a link.
 
+Provider clients that may reach a remote runtime profile keep the user's
+`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` for remote hosts but never proxy a
+loopback host, so local prompts and models do not leave the machine.
+
 ## Dependency and Release Evidence
 
 Authoritative dependency inputs are the checked-in Cargo and pnpm lockfiles plus

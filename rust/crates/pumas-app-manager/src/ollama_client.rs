@@ -18,7 +18,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+
+use crate::provider_http::{bypass_proxy_for_loopback, is_loopback_url, parse_provider_url};
 
 mod naming;
 
@@ -44,6 +46,47 @@ fn net_err(msg: String) -> PumasError {
         message: msg,
         cause: None,
     }
+}
+
+/// Bytes read from an Ollama error response before the rest is discarded,
+/// matching the RPC gateway's bound for a provider's own error reason.
+const ERROR_BODY_READ_BYTES: usize = 64 * 1024;
+
+/// Characters of an Ollama error reason embedded in a Pumas error: enough for
+/// Ollama's one-line `{"error": "..."}` messages, short enough that a large or
+/// hostile upstream body cannot flood logs and RPC replies.
+const ERROR_REASON_CHARS: usize = 512;
+
+/// Ollama's reason for an unsuccessful response: its `error` field when the
+/// body is JSON, otherwise the body text, read and embedded within bounds.
+async fn error_reason(response: reqwest::Response) -> String {
+    use futures::StreamExt;
+    let mut bytes = Vec::new();
+    let mut truncated = false;
+    let mut body = response.bytes_stream();
+    while let Some(Ok(chunk)) = body.next().await {
+        let room = ERROR_BODY_READ_BYTES - bytes.len();
+        if chunk.len() > room {
+            bytes.extend_from_slice(&chunk[..room]);
+            truncated = true;
+            break;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let text = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| value.get("error")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned());
+    let mut reason: String = text
+        .trim()
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(ERROR_REASON_CHARS)
+        .collect();
+    if truncated || text.trim().chars().count() > ERROR_REASON_CHARS {
+        reason.push_str("...");
+    }
+    reason
 }
 
 /// A model registered in Ollama, as returned by `GET /api/tags`.
@@ -104,21 +147,24 @@ pub struct OllamaHttpClients {
 }
 
 impl OllamaHttpClients {
+    /// Build the shared clients. A loopback Ollama is always reached
+    /// directly; a configured remote Ollama keeps the environment's proxies.
     pub fn new() -> Result<Self> {
-        let client = reqwest::Client::builder()
+        let builder = || bypass_proxy_for_loopback(reqwest::Client::builder());
+        let client = builder()
             .timeout(API_TIMEOUT)
             .user_agent("pumas-library")
             .build()
             .map_err(|err| net_err(format!("failed to build Ollama API client: {err}")))?;
 
-        let upload_client = reqwest::Client::builder()
+        let upload_client = builder()
             .connect_timeout(Duration::from_secs(10))
             // No total timeout -- large blob uploads can take a while.
             .user_agent("pumas-library")
             .build()
             .map_err(|err| net_err(format!("failed to build Ollama upload client: {err}")))?;
 
-        let create_client = reqwest::Client::builder()
+        let create_client = builder()
             .timeout(CREATE_TIMEOUT)
             .user_agent("pumas-library")
             .build()
@@ -133,19 +179,50 @@ impl OllamaHttpClients {
 }
 
 impl OllamaClient {
-    /// Create a new client targeting the given base URL.
+    /// Create a client for an Ollama on this machine.
     ///
-    /// If `base_url` is `None`, defaults to `http://127.0.0.1:11434`.
-    pub fn new(base_url: Option<&str>) -> Self {
-        let http_clients = OllamaHttpClients::new().expect("failed to build Ollama HTTP clients");
-        Self::with_http_clients(base_url, http_clients)
+    /// If `base_url` is `None`, defaults to `http://127.0.0.1:11434`. The URL
+    /// must be http(s) on a loopback host; a remote Ollama is reached through
+    /// a configured runtime profile endpoint with [`Self::with_http_clients`].
+    pub fn new(base_url: Option<&str>) -> Result<Self> {
+        let url = parse_provider_url(base_url.unwrap_or(default_base_url()), "Ollama")?;
+        if !is_loopback_url(&url) {
+            return Err(PumasError::Config {
+                message: format!(
+                    "Ollama base URL host {} is not loopback; configure a remote Ollama as a runtime profile endpoint",
+                    url.host_str().unwrap_or_default()
+                ),
+            });
+        }
+        Ok(Self::with_http_clients(base_url, OllamaHttpClients::new()?))
     }
 
+    /// Create a client for a configured endpoint, which may be a remote
+    /// Ollama (a supported runtime profile configuration). Callers pass a
+    /// validated endpoint such as a `RuntimeEndpointUrl`. A plain-http remote
+    /// endpoint is accepted but logged, since its traffic is unencrypted.
     pub fn with_http_clients(base_url: Option<&str>, http_clients: OllamaHttpClients) -> Self {
         let base_url = base_url
             .unwrap_or(default_base_url())
             .trim_end_matches('/')
             .to_string();
+        // Clients are built per request, so each endpoint is reported once.
+        static WARNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+            std::sync::OnceLock::new();
+        if let Ok(url) = reqwest::Url::parse(&base_url) {
+            if url.scheme() == "http"
+                && !is_loopback_url(&url)
+                && WARNED
+                    .get_or_init(Default::default)
+                    .lock()
+                    .is_ok_and(|mut warned| warned.insert(base_url.clone()))
+            {
+                warn!(
+                    "Ollama endpoint {} is a non-loopback host over plain http; prompts and models are sent unencrypted",
+                    url.host_str().unwrap_or_default()
+                );
+            }
+        }
 
         Self {
             base_url,
@@ -169,7 +246,7 @@ impl OllamaClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
+            let body = error_reason(response).await;
             return Err(net_err(format!("Ollama API returned {}: {}", status, body)));
         }
 
@@ -257,7 +334,7 @@ impl OllamaClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
+            let body = error_reason(response).await;
             return Err(net_err(format!(
                 "Ollama create API returned {}: {}",
                 status, body
@@ -348,7 +425,7 @@ impl OllamaClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
+            let body = error_reason(response).await;
             return Err(net_err(format!(
                 "Ollama blob upload returned {}: {}",
                 status, body
@@ -415,7 +492,7 @@ impl OllamaClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
+            let body = error_reason(response).await;
             return Err(net_err(format!(
                 "Ollama load returned {}: {}",
                 status, body
@@ -450,7 +527,7 @@ impl OllamaClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
+            let body = error_reason(response).await;
             return Err(net_err(format!(
                 "Ollama unload returned {}: {}",
                 status, body
@@ -475,7 +552,7 @@ impl OllamaClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
+            let body = error_reason(response).await;
             return Err(net_err(format!("Ollama API returned {}: {}", status, body)));
         }
 
@@ -506,7 +583,7 @@ impl OllamaClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body: String = response.text().await.unwrap_or_default();
+            let body = error_reason(response).await;
             return Err(net_err(format!(
                 "Ollama delete API returned {}: {}",
                 status, body
@@ -539,4 +616,78 @@ async fn compute_sha256_async(path: &Path) -> Result<String> {
     })
     .await
     .map_err(|e| net_err(format!("SHA256 computation task failed: {}", e)))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn new_requires_a_loopback_http_endpoint() {
+        assert!(OllamaClient::new(None).is_ok());
+        assert!(OllamaClient::new(Some("http://localhost:11434")).is_ok());
+        assert!(OllamaClient::new(Some("http://[::1]:11434/")).is_ok());
+        for refused in [
+            "http://192.168.1.20:11434",
+            "https://ollama.example.com",
+            "ftp://127.0.0.1",
+            "not a url",
+        ] {
+            assert!(OllamaClient::new(Some(refused)).is_err(), "{refused}");
+        }
+        let error = OllamaClient::new(Some("http://192.168.1.20:11434"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("not loopback"), "{error}");
+    }
+
+    #[test]
+    fn configured_remote_endpoints_remain_supported() {
+        let client = OllamaClient::with_http_clients(
+            Some("http://192.168.1.20:11434/"),
+            OllamaHttpClients::new().unwrap(),
+        );
+        assert_eq!(client.base_url, "http://192.168.1.20:11434");
+    }
+
+    #[tokio::test]
+    async fn upstream_error_bodies_are_bounded_in_errors() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for body in [
+                serde_json::json!({ "error": "model \"x\" not found" }).to_string(),
+                "e\n".repeat(1 << 20),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request).await;
+                let _ = stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await;
+                let _ = stream.write_all(body.as_bytes()).await;
+            }
+        });
+        let client = OllamaClient::new(Some(&base)).unwrap();
+
+        let error = client.list_models().await.unwrap_err().to_string();
+        assert!(
+            error.ends_with("500 Internal Server Error: model \"x\" not found"),
+            "{error}"
+        );
+
+        let error = client.list_models().await.unwrap_err().to_string();
+        assert!(error.len() < 1024, "{} bytes", error.len());
+        assert!(error.ends_with("..."), "{error}");
+        assert!(!error.contains('\n'));
+        server.await.unwrap();
+    }
 }

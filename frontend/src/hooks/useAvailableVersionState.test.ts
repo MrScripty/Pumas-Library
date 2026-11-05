@@ -192,4 +192,46 @@ describe('useAvailableVersionState', () => {
 
     expect(getGithubCacheStatusMock).not.toHaveBeenCalled();
   });
+
+  it('reloads a listing served from an expired cache once the refresh completes', async () => {
+    const stale = { has_cache: true, is_valid: false, is_fetching: false, age_seconds: 7200, last_fetched: null, releases_count: 1 };
+    const fresh = { ...stale, is_valid: true, age_seconds: 1 };
+    const { result } = renderHook(() => useAvailableVersionState({
+      isEnabled: true,
+      resolvedAppId: 'ollama',
+      trackAvailableVersions: true,
+    }));
+    // Listing reads the expired cache; the refresh then starts and ends
+    // between polls, so no poll ever sees it fetching.
+    getGithubCacheStatusMock.mockReset();
+    getGithubCacheStatusMock.mockResolvedValueOnce(stale).mockResolvedValue(fresh);
+    await act(async () => {
+      await result.current.fetchAvailableVersions(false);
+    });
+    expect(getAvailableVersionsMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(getAvailableVersionsMock).toHaveBeenCalledTimes(2);
+    expect(getAvailableVersionsMock).toHaveBeenLastCalledWith(false, 'ollama');
+    await act(async () => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect(getAvailableVersionsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reload a listing served from a valid cache', async () => {
+    const { result } = renderHook(() => useAvailableVersionState({
+      isEnabled: true,
+      resolvedAppId: 'ollama',
+      trackAvailableVersions: true,
+    }));
+    await act(async () => {
+      await result.current.fetchAvailableVersions(false);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    expect(getAvailableVersionsMock).toHaveBeenCalledTimes(1);
+  });
 });

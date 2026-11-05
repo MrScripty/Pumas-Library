@@ -824,7 +824,7 @@ impl VersionManager {
     ) -> Result<Vec<pumas_library::network::GitHubRelease>> {
         let mut releases = self
             .github_client
-            .get_releases_for_app(self.app_id, force_refresh)
+            .get_releases_for_app_listing(self.app_id, force_refresh)
             .await?;
         if self.app_id == AppId::Torch {
             releases.retain(installer::is_torch_runtime_release);

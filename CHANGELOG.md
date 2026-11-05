@@ -125,6 +125,15 @@ downloads and known limitations.
 - A failed Torch startup trial reports why the managed launch failed.
 - A desktop update that fails validation is no longer dropped silently, which
   had left views stale; the reason is reported and the view reloads.
+- Version managers list stable releases only, and of each major.minor only
+  its newest patch (`v1.1.3` hides `v1.1.2`; `v1.2.0` stays listed). Installed
+  versions are always listed. A tag with a pre-release part (`v0.21.3-rc0`) is
+  a pre-release even when GitHub does not flag it, so it no longer counted as
+  the newest patch.
+- Opening a version manager after its release cache is an hour old shows the
+  cached list at once and refreshes it in the background, instead of waiting
+  for GitHub. The new-version indicator compares the newest stable release, not
+  whichever release GitHub lists first (for llama.cpp, a pre-release build).
 
 ### Security
 

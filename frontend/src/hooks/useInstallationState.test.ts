@@ -135,16 +135,12 @@ describe('useInstallationState', () => {
       result.current.setHoveredTag('v1.2.3');
       result.current.setCancelHoverTag('v1.2.3');
       result.current.setShowCompletedItems(true);
-      result.current.setShowInstalled(false);
-      result.current.setShowPreReleases(false);
     });
 
     expect(result.current.viewMode).toBe('details');
     expect(result.current.hoveredTag).toBe('v1.2.3');
     expect(result.current.cancelHoverTag).toBe('v1.2.3');
     expect(result.current.showCompletedItems).toBe(true);
-    expect(result.current.showInstalled).toBe(false);
-    expect(result.current.showPreReleases).toBe(false);
 
     const nextProps: StateProps = {
       installingVersion: null,
@@ -157,7 +153,5 @@ describe('useInstallationState', () => {
     expect(result.current.hoveredTag).toBe('v1.2.3');
     expect(result.current.cancelHoverTag).toBe('v1.2.3');
     expect(result.current.showCompletedItems).toBe(true);
-    expect(result.current.showInstalled).toBe(false);
-    expect(result.current.showPreReleases).toBe(false);
   });
 });

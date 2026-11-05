@@ -4943,6 +4943,7 @@ pub(crate) struct RuntimeStopSkipped {
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
 impl RuntimeStopOutcome {
+    #[cfg(any(feature = "export-contract", test))]
     pub(crate) fn new(success: bool) -> Self {
         Self {
             success,

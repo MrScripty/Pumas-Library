@@ -2,7 +2,7 @@
 
 use super::{ArtifactManifest, ManifestValidationError};
 use crate::error::{PumasError, Result};
-use futures::{stream::BoxStream, StreamExt};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use reqwest::header::{
     ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_RANGE, ETAG, IF_MATCH, RANGE,
 };
@@ -133,7 +133,9 @@ pub(crate) struct HttpResumeEvidence {
 /// streams one selected representation.
 #[async_trait::async_trait]
 pub(crate) trait HttpArtifactSink: Send {
-    async fn write_all(&mut self, bytes: &[u8]) -> Result<()>;
+    /// Append the chunks, in order, as one write effect. The sink owns them,
+    /// so it needs no copy of the payload.
+    async fn write_all(&mut self, chunks: Vec<bytes::Bytes>) -> Result<()>;
     async fn flush(&mut self) -> Result<()>;
 }
 
@@ -386,6 +388,23 @@ pub(crate) async fn stream_http_artifact(
     }
 }
 
+/// Received body chunks that are already buffered are coalesced into one sink
+/// write of up to about this many bytes. A chunk is never held back waiting
+/// for more network data, so every byte reported as progress is written.
+const HTTP_WRITE_BATCH_BYTES: usize = 1024 * 1024;
+
+fn checked_body_length(downloaded: u64, chunk: &[u8], total: Option<u64>) -> Result<u64> {
+    let next = downloaded
+        .checked_add(chunk.len() as u64)
+        .ok_or_else(|| invalid_response("HTTP artifact byte count overflowed"))?;
+    if total.is_some_and(|total| next > total) {
+        return Err(invalid_response(
+            "HTTP artifact body exceeded its selected representation length",
+        ));
+    }
+    Ok(next)
+}
+
 async fn stream_artifact_body(
     response: HttpArtifactResponse,
     requested_resume_from: u64,
@@ -399,17 +418,24 @@ async fn stream_artifact_body(
         0
     };
     let mut body = response.body;
+    // An item read while coalescing that ends the batch (an error, the end of
+    // the body, or a chunk that fails the length check) is handled next, in
+    // the same order as if it had been read on its own.
+    let mut deferred = None;
     loop {
-        let next = tokio::select! {
-            biased;
-            _ = host.pause_requested() => {
-                if host.cancel_requested() {
-                    return Ok(HttpBodyOutcome::Cancelled);
+        let next = match deferred.take() {
+            Some(next) => next,
+            None => tokio::select! {
+                biased;
+                _ = host.pause_requested() => {
+                    if host.cancel_requested() {
+                        return Ok(HttpBodyOutcome::Cancelled);
+                    }
+                    sink.flush().await?;
+                    return Ok(HttpBodyOutcome::Paused);
                 }
-                sink.flush().await?;
-                return Ok(HttpBodyOutcome::Paused);
-            }
-            next = body.next() => next,
+                next = body.next() => next,
+            },
         };
         let Some(chunk) = next else {
             break;
@@ -422,15 +448,30 @@ async fn stream_artifact_body(
             return Ok(HttpBodyOutcome::Paused);
         }
         let chunk = chunk?;
-        let next_downloaded = downloaded
-            .checked_add(chunk.len() as u64)
-            .ok_or_else(|| invalid_response("HTTP artifact byte count overflowed"))?;
-        if total.is_some_and(|total| next_downloaded > total) {
-            return Err(invalid_response(
-                "HTTP artifact body exceeded its selected representation length",
-            ));
+        let mut next_downloaded = checked_body_length(downloaded, &chunk, total)?;
+        let mut batch_bytes = chunk.len();
+        let mut batch = vec![chunk];
+        while batch_bytes < HTTP_WRITE_BATCH_BYTES {
+            match body.next().now_or_never() {
+                None => break,
+                Some(Some(Ok(more))) => match checked_body_length(next_downloaded, &more, total) {
+                    Ok(length) => {
+                        next_downloaded = length;
+                        batch_bytes += more.len();
+                        batch.push(more);
+                    }
+                    Err(_) => {
+                        deferred = Some(Some(Ok(more)));
+                        break;
+                    }
+                },
+                Some(other) => {
+                    deferred = Some(other);
+                    break;
+                }
+            }
         }
-        sink.write_all(&chunk).await?;
+        sink.write_all(batch).await?;
         downloaded = next_downloaded;
         host.record_progress(downloaded).await?;
     }
@@ -671,12 +712,16 @@ mod tests {
     struct TestSink {
         bytes: Vec<u8>,
         flushed: bool,
+        writes: usize,
     }
 
     #[async_trait::async_trait]
     impl HttpArtifactSink for TestSink {
-        async fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
-            self.bytes.extend_from_slice(bytes);
+        async fn write_all(&mut self, chunks: Vec<bytes::Bytes>) -> Result<()> {
+            self.writes += 1;
+            for chunk in chunks {
+                self.bytes.extend_from_slice(&chunk);
+            }
             Ok(())
         }
 
@@ -1337,6 +1382,114 @@ mod tests {
         ));
         assert_eq!(sink.bytes, b"abc");
         let _ = server.await.unwrap();
+    }
+
+    fn ready_body(
+        items: Vec<Result<bytes::Bytes>>,
+        total_size: Option<u64>,
+    ) -> HttpArtifactResponse {
+        HttpArtifactResponse {
+            body: futures::stream::iter(items).boxed(),
+            resumed: false,
+            total_size,
+            resource: "fixture".into(),
+            strong_etag: None,
+            deadline: None,
+        }
+    }
+
+    fn idle_host() -> TestHost {
+        TestHost {
+            pause: false,
+            cancel: false,
+            progress: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_chunks_coalesce_into_bounded_writes_without_reordering() {
+        const CHUNK: usize = 16 * 1024;
+        let chunks: Vec<bytes::Bytes> = (0..100u8)
+            .map(|seed| bytes::Bytes::from(vec![seed; CHUNK]))
+            .collect();
+        let expected: Vec<u8> = chunks.iter().flat_map(|chunk| chunk.to_vec()).collect();
+        let total = expected.len() as u64;
+        let mut sink = TestSink::default();
+        let mut host = idle_host();
+
+        let outcome = stream_artifact_body(
+            ready_body(chunks.into_iter().map(Ok).collect(), Some(total)),
+            0,
+            &mut sink,
+            &mut host,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome, HttpBodyOutcome::Complete { downloaded: total });
+        assert_eq!(sink.bytes, expected);
+        let per_batch = (HTTP_WRITE_BATCH_BYTES / CHUNK) as u64;
+        assert_eq!(
+            sink.writes, 2,
+            "100 ready 16 KiB chunks fit two 1 MiB batches"
+        );
+        assert_eq!(
+            host.progress,
+            [per_batch * CHUNK as u64, total],
+            "progress is recorded once per written batch"
+        );
+        assert!(sink.flushed);
+    }
+
+    #[tokio::test]
+    async fn coalescing_writes_accepted_bytes_before_a_buffered_error_or_overflow() {
+        let mut sink = TestSink::default();
+        let mut host = idle_host();
+        let error = stream_artifact_body(
+            ready_body(
+                vec![
+                    Ok(bytes::Bytes::from_static(b"abc")),
+                    Ok(bytes::Bytes::from_static(b"def")),
+                    Err(PumasError::Network {
+                        message: "fixture body failed".into(),
+                        cause: None,
+                    }),
+                ],
+                Some(9),
+            ),
+            0,
+            &mut sink,
+            &mut host,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, PumasError::Network { .. }));
+        assert_eq!(sink.bytes, b"abcdef");
+        assert_eq!(host.progress, [6]);
+
+        let mut sink = TestSink::default();
+        let mut host = idle_host();
+        let error = stream_artifact_body(
+            ready_body(
+                vec![
+                    Ok(bytes::Bytes::from_static(b"abc")),
+                    Ok(bytes::Bytes::from_static(b"def")),
+                ],
+                Some(4),
+            ),
+            0,
+            &mut sink,
+            &mut host,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            PumasError::Validation { message, .. }
+                if message == "HTTP artifact body exceeded its selected representation length"
+        ));
+        assert_eq!(sink.bytes, b"abc");
+        assert_eq!(host.progress, [3]);
     }
 
     #[tokio::test]

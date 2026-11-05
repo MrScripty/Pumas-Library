@@ -142,13 +142,30 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
   assert.match(headless, new RegExp(`Verify inference-disabled release backend\\n        if: ${escapedVersionTagGuard}`));
 
   const frontend = job('build-frontend');
-  for (const step of ['Build library-only renderer', 'Build default renderer']) {
-    assert.match(frontend, new RegExp(`${step}\\n        if: ${escapedVersionTagGuard}`));
-  }
   assert.match(
     frontend,
     new RegExp(`uses: actions/upload-artifact@[0-9a-f]{40}(?: # \\S+)?\\n        if: ${escapedVersionTagGuard}`),
   );
+});
+
+test('both renderer variants build and are checked on every trigger, apart from the packaging input', () => {
+  const frontend = job('build-frontend');
+  const steps = [
+    ['Build library-only renderer', 'pnpm --dir frontend build:library-only --outDir "${{ runner.temp }}/frontend-library-only" --emptyOutDir'],
+    ['Verify library-only renderer excludes inference plugins', 'node scripts/release/check-frontend-variant.mjs "${{ runner.temp }}/frontend-library-only" library-only'],
+    ['Build default renderer', 'pnpm --dir frontend build'],
+    ['Verify default renderer includes inference plugins', 'node scripts/release/check-frontend-variant.mjs frontend/dist default'],
+  ];
+  let previous = -1;
+  for (const [name, run] of steps) {
+    const step = `      - name: ${name}\n        run: ${run}\n`;
+    assert.ok(frontend.includes(step), `${name} must run unguarded`);
+    assert.ok(frontend.indexOf(step) > previous, `${name} is out of order`);
+    previous = frontend.indexOf(step);
+  }
+  // The uploaded packaging input is the default renderer, never library-only.
+  assert.match(frontend, /name: frontend-dist\n          path: frontend\/dist\//);
+  assert.ok(previous < frontend.indexOf('uses: actions/upload-artifact@'));
 });
 
 

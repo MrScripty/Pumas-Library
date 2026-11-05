@@ -500,13 +500,16 @@ jobs:
       - run: pnpm --dir frontend lint
       - run: pnpm --dir frontend check:types
       - run: pnpm --dir frontend test:run
+      # Both renderer variants build on every trigger. The library-only bundle
+      # goes to its own directory so it never mixes with the packaging input.
       - name: Build library-only renderer
-        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
-        run: pnpm --dir frontend build:library-only
-      # Restore the default renderer before publishing the packaging input.
+        run: pnpm --dir frontend build:library-only --outDir "${{ runner.temp }}/frontend-library-only" --emptyOutDir
+      - name: Verify library-only renderer excludes inference plugins
+        run: node scripts/release/check-frontend-variant.mjs "${{ runner.temp }}/frontend-library-only" library-only
       - name: Build default renderer
-        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
         run: pnpm --dir frontend build
+      - name: Verify default renderer includes inference plugins
+        run: node scripts/release/check-frontend-variant.mjs frontend/dist default
       - run: pnpm --dir electron lint
       - run: pnpm --dir electron validate
       - run: npm run test:launcher

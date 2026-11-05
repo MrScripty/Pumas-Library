@@ -72,8 +72,10 @@ cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-fe
 pnpm --dir frontend lint
 pnpm --dir frontend check:types
 pnpm --dir frontend test:run
-pnpm --dir frontend build:library-only
+pnpm --dir frontend build:library-only --outDir /tmp/pumas-library-only --emptyOutDir
+node scripts/release/check-frontend-variant.mjs /tmp/pumas-library-only library-only
 pnpm --dir frontend build
+node scripts/release/check-frontend-variant.mjs frontend/dist default
 pnpm --dir electron lint
 pnpm --dir electron validate
 node electron/node_modules/electron/install.js

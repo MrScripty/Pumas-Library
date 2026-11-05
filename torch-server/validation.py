@@ -14,6 +14,7 @@ MAX_LOADED_MODELS_LIMIT = 16
 LAN_ALLOW_ENV = "PUMAS_TORCH_ALLOW_LAN"
 API_TOKEN_ENV = "PUMAS_TORCH_API_TOKEN"
 MODEL_ROOTS_ENV = "PUMAS_TORCH_MODEL_ROOTS"
+PARENT_PID_ENV = "PUMAS_TORCH_PARENT_PID"
 
 _MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,127}$")
 _CUDA_DEVICE_RE = re.compile(r"^cuda(?::[0-9]+)?$")
@@ -33,20 +34,36 @@ def validate_model_name(value: str) -> str:
     return model_name
 
 
-def validate_model_path(value: str) -> str:
-    """Resolve and validate a model path supplied at the API boundary."""
+class ModelLoadRefusal(ValueError):
+    """A curated, caller-safe reason why the sidecar refuses to load a model.
+
+    Raised only by sidecar code with messages written for the caller. Library
+    errors (transformers, diffusers, torch) stay plain exceptions so their raw
+    text, which can carry resolved paths, reaches the log and not the response.
+    """
+
+
+def validate_model_path(value: str, *, field: str = "model_path") -> str:
+    """Resolve and validate a model path supplied at the API boundary.
+
+    When the launcher configures ``PUMAS_TORCH_MODEL_ROOTS`` the resolved path
+    (symlinks followed) must sit inside one of those roots.
+    """
     raw_path = value.strip()
     if not raw_path:
-        raise ValueError("model_path must not be empty")
+        raise ValueError(f"{field} must not be empty")
 
     path = Path(raw_path).expanduser().resolve(strict=False)
     if not path.exists():
-        raise ValueError(f"model_path does not exist: {path}")
+        raise ValueError(f"{field} does not exist: {path}")
 
     approved_roots = list(_configured_model_roots())
     if approved_roots and not any(_is_relative_to(path, root) for root in approved_roots):
         roots = ", ".join(str(root) for root in approved_roots)
-        raise ValueError(f"model_path must be inside an approved model root: {roots}")
+        raise ValueError(
+            f"{field} must be inside an approved model root: {roots}. Models imported "
+            "by external reference after Torch started need a Torch restart"
+        )
 
     return str(path)
 
@@ -141,6 +158,20 @@ def token_matches(provided_token: str | None, expected_token: str | None) -> boo
     if provided_token is None:
         return False
     return hmac.compare_digest(provided_token, expected_token)
+
+
+def configured_parent_pid() -> int | None:
+    """Return the launcher's process id, if the launcher supplied one.
+
+    Absent means a standalone run with no parent watchdog. A malformed value is
+    a launcher configuration error and is refused rather than ignored.
+    """
+    raw = os.environ.get(PARENT_PID_ENV, "").strip()
+    if not raw:
+        return None
+    if not raw.isdigit() or int(raw) <= 1:
+        raise ValueError(f"{PARENT_PID_ENV} must be a process id greater than 1")
+    return int(raw)
 
 
 def _configured_model_roots() -> Iterable[Path]:

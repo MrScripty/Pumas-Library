@@ -31,6 +31,14 @@ cleanup actually finishes; a lost response remains uncertain and is never
 automatically replayed. See the shared
 [generation lifetime](../docs/contracts/generation-lifetime.md).
 
+Image admission happens under the device lease, before any denoising. Each
+adapter declares the largest output its recipe supports (`max_pixels`) and its
+peak device memory per output pixel. A request above the adapter's limit is
+refused with `400 dimensions_exceed_limit` (its detail carries
+`max_pixels`); a request whose pixels exceed free
+GPU memory (`torch.cuda.mem_get_info`) divided by that per-pixel estimate is
+refused with `507 out_of_memory`. Both reasons name the limit and the value.
+
 The text routes accept the following request subset:
 
 - an exact set of known fields;
@@ -40,14 +48,45 @@ The text routes accept the following request subset:
 - one nonempty completion prompt of at most 1,000,000 characters;
 - `temperature` from 0 through 2 and `top_p` above 0 through 1, with `top_p=1`
   required when `temperature=0`;
-- `max_tokens` from 1 through 4,096; and
+- `max_tokens` of at least 1; and
 - `stream=false` and `stop=null` only.
 
 Unknown fields, streaming, stop sequences, other chat roles or content forms,
 multiple completion prompts, and values outside those bounds are rejected.
-Current response usage remains placeholder data, terminal reasons are not yet
-fully truthful, and synchronous text inference does not yet have an accepted work,
-cancellation, overload, or shutdown owner.
+The character and message counts are request-body safety bounds, not model
+limits. The model limit is the loaded model's own context: the tokenized prompt
+plus `max_tokens` must fit its `max_position_embeddings` (or the equivalent
+config field). A request that does not fit is refused with
+`400 context_length_exceeded` naming both lengths; input is never truncated.
+
+Text generation runs on a worker thread under the slot's device lease, the
+same lease image generation and loading use, so `/health` and the control
+routes keep answering during a long generation. Work queued behind a held lease
+is refused with `409 runtime_busy`. A client disconnect or owner cancellation
+stops decoding at the next token through a stopping criterion; the lease is
+released only after the worker returns (`499 cancelled`). CUDA out-of-memory
+empties the allocator cache and is refused with `507 out_of_memory`.
+Response usage remains placeholder data and terminal reasons are not yet fully
+truthful.
+
+Refusals from the text, image and control routes carry
+`detail: {"code": ..., "message": ...}`. The codes are stable; the messages are
+written for the caller. Library error text, which can carry resolved paths,
+is written to the runtime log, and the response says only that loading or
+generation failed. Control codes: `slot_limit_reached`, `slot_limit_conflict`,
+`slot_loading`, `runtime_busy`, `owned_model`, `slot_not_found`,
+`model_rejected` (a sidecar refusal with its reason), `model_unloadable` (a
+library refusal), `out_of_memory`, `cancelled` and `internal_error`.
+
+`/api/load` accepts `model_type` only from the implemented set
+(`text-generation`, `dllm`, `sherry`, `cohere-asr`, `nunchaku-z-image-turbo`,
+`flux2-klein-9b-kv-fp8`); omitting it detects a text type from `config.json`.
+`pipeline_path` is required by, and only accepted with, an image adapter, and
+`vae_path` only with Klein. `model_path`, `pipeline_path` and `vae_path` are
+resolved (symlinks followed) and must sit inside a root listed in
+`PUMAS_TORCH_MODEL_ROOTS`. Before Z-Image is loaded, every `(library, class)`
+pair in its `model_index.json` is checked against the adapter's allowlist,
+because Diffusers imports and instantiates whatever the index names.
 
 `ModelManager` owns loaded model slots and eviction. `DeviceManager` owns
 device discovery and selection. Loader modules own framework-specific loading;
@@ -128,17 +167,38 @@ Linux, and upgrading in place between two upstream Torch tags.
 
 ## Network Safety
 
-Loopback is the default. Binding to a non-loopback address requires both:
+When Pumas launches the sidecar it sets, through the environment and never
+argv:
+
+- `PUMAS_TORCH_API_TOKEN`: a random token generated once per Pumas backend
+  process and never persisted. All routes except `/health` then require it
+  through `X-Pumas-Torch-Token` or a bearer authorization header; a request
+  without it is refused with `401 unauthorized`. Every Pumas Torch client sends
+  it, never follows redirects, and bypasses proxies for loopback sidecars.
+  The managed token replaces any `PUMAS_TORCH_API_TOKEN` in the user's own
+  environment.
+- `PUMAS_TORCH_MODEL_ROOTS`: the library's model root plus the directory of
+  every external-reference model the library knows about at launch. Model and
+  component paths outside them are refused. The set is read at launch: a model
+  imported by external reference while Torch runs is refused, with that
+  reason, until the Torch profile is restarted.
+- `PUMAS_TORCH_PARENT_PID`: the launching process. A watchdog thread polls its
+  identity (pid plus start time) once a second; when the launcher is gone the
+  server stops itself, then exits forcibly if in-flight workers have not
+  finished within 10 seconds. Polling is used instead of `PR_SET_PDEATHSIG`,
+  which fires when the spawning thread exits rather than the process.
+
+A direct development run without these variables has no token, no root
+confinement and no watchdog, and stays on loopback. Binding to a non-loopback
+address requires both:
 
 ```bash
 PUMAS_TORCH_ALLOW_LAN=1
 PUMAS_TORCH_API_TOKEN=<secret>
 ```
 
-All non-health routes then require the token through
-`X-Pumas-Torch-Token` or a bearer authorization header. Do not expose a local
-model server to an untrusted network merely because it has a token; also apply
-host firewall and network controls.
+Do not expose a local model server to an untrusted network merely because it
+has a token; also apply host firewall and network controls.
 
 ## Verification
 
@@ -176,7 +236,10 @@ diffusion serving plan.
 ## Model-supplied Python code
 
 Text loaders (standard Hugging Face, Sherry, and DLLM) explicitly pass
-`trust_remote_code=False` to both tokenizer and model loading. Downloading,
+`trust_remote_code=False` and `local_files_only=True` to both tokenizer and
+model loading, and `use_safetensors=True` to model loading. A text model
+without `.safetensors` weights is refused with that reason instead of loading
+a pickle checkpoint. Downloading,
 importing, or selecting a model does not authorize executing Python supplied by
 that model repository. [Transformers documents custom-model loading as a separate
 trust decision](https://huggingface.co/docs/transformers/custom_models).

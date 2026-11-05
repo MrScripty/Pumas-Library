@@ -30,13 +30,19 @@ def load_dllm(
 
     logger.info("Loading DLLM model from %s onto %s", path_str, device)
 
-    tokenizer = AutoTokenizer.from_pretrained(path_str, trust_remote_code=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        path_str, trust_remote_code=False, local_files_only=True
+    )
 
     model = AutoModelForCausalLM.from_pretrained(
         path_str,
         torch_dtype="auto",
         device_map=str(device),
         trust_remote_code=False,
+        # Library files only: safetensors weights, never a pickle checkpoint,
+        # and never a network fetch.
+        use_safetensors=True,
+        local_files_only=True,
         low_cpu_mem_usage=True,
     )
 

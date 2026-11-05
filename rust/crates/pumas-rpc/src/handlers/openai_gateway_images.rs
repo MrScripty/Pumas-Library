@@ -130,6 +130,16 @@ pub(super) fn provider_error(failure: &TorchImageError) -> Response {
             "unsupported_model",
             "Selected model does not support image generation",
         ),
+        TorchImageError::DimensionsExceedLimit { max_pixels } => error(
+            StatusCode::BAD_REQUEST,
+            "dimensions_exceed_limit",
+            &match max_pixels {
+                Some(max_pixels) => format!(
+                    "Requested dimensions exceed this model's maximum of {max_pixels} pixels"
+                ),
+                None => "Requested dimensions exceed this model's maximum".to_string(),
+            },
+        ),
         TorchImageError::OutOfMemory => error(
             StatusCode::INSUFFICIENT_STORAGE,
             "out_of_memory",
@@ -266,6 +276,25 @@ mod tests {
             assert_eq!(status, provider_expected_status(&error));
             assert_eq!(body["error"]["code"], code, "{error:?}");
             assert_eq!(body["error"]["message"], message, "{error:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_dimensions_are_refused_with_the_model_limit() {
+        for (max_pixels, message) in [
+            (
+                Some(4_194_304),
+                "Requested dimensions exceed this model's maximum of 4194304 pixels",
+            ),
+            (None, "Requested dimensions exceed this model's maximum"),
+        ] {
+            let response = provider_error(&TorchImageError::DimensionsExceedLimit { max_pixels });
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                    .unwrap();
+            assert_eq!(body["error"]["code"], "dimensions_exceed_limit");
+            assert_eq!(body["error"]["message"], message);
         }
     }
 

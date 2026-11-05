@@ -54,6 +54,8 @@ where
 ///
 /// Corruption fixture only: it writes the row directly with SQL because the
 /// library deliberately exposes no public way to do this.
+// Compiled only where a caller is.
+#[cfg(target_os = "linux")]
 pub fn inject_foreign_ready_instance(
     db_path: &std::path::Path,
     root: &std::path::Path,

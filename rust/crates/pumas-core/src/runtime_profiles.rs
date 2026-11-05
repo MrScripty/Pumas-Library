@@ -70,6 +70,7 @@ use crate::{PumasError, Result};
 use tokio::sync::broadcast;
 
 use launch_specs::derive_managed_profile_launch_specs;
+pub use launch_specs::{torch_api_token, TORCH_API_TOKEN_HEADER};
 pub use launch_strategy::{
     RuntimeProfileBinaryLaunchKind, RuntimeProfileInProcessRuntimeKind,
     RuntimeProfileLaunchStrategy,

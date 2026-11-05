@@ -13,9 +13,16 @@
 //! - `/api/status`  — Server status with resource usage
 //! - `/api/devices` — Available compute devices
 //! - `/api/configure` — Update server configuration
+//!
+//! Every request except `/health` carries this backend's per-process Torch
+//! API token ([`pumas_library::runtime_profiles::torch_api_token`]) in the
+//! `x-pumas-torch-token` header; the managed sidecar refuses requests without
+//! it. Clients never follow redirects, so the token cannot be forwarded to
+//! another origin, and loopback sidecars are reached without any proxy.
 
 use futures::StreamExt;
 use pumas_library::config::AppId;
+use pumas_library::runtime_profiles::{torch_api_token, TORCH_API_TOKEN_HEADER};
 use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
@@ -56,6 +63,69 @@ fn net_err(msg: String) -> PumasError {
     PumasError::Network {
         message: msg,
         cause: None,
+    }
+}
+
+/// Whether a sidecar base URL names a loopback host (`localhost`, 127/8, `::1`).
+fn is_loopback_base_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url) else {
+        return false;
+    };
+    match url.host_str() {
+        Some(host) if host.eq_ignore_ascii_case("localhost") => true,
+        Some(host) => host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback()),
+        None => false,
+    }
+}
+
+/// Shared transport policy for every Torch sidecar client.
+fn sidecar_client_builder(base_url: &str) -> reqwest::ClientBuilder {
+    let mut headers = reqwest::header::HeaderMap::new();
+    let mut token = reqwest::header::HeaderValue::from_str(torch_api_token())
+        .expect("hex Torch API token is a valid header value");
+    token.set_sensitive(true);
+    headers.insert(
+        reqwest::header::HeaderName::from_static(TORCH_API_TOKEN_HEADER),
+        token,
+    );
+    let builder = reqwest::Client::builder()
+        .user_agent("pumas-library")
+        .default_headers(headers)
+        // A redirect would forward the token header to another origin.
+        .redirect(reqwest::redirect::Policy::none());
+    if is_loopback_base_url(base_url) {
+        // A system proxy must never see loopback sidecar traffic or its token.
+        builder.no_proxy()
+    } else {
+        builder
+    }
+}
+
+/// Reason text for a failed sidecar response.
+///
+/// Typed sidecar refusals carry `detail: {code, message}`; their message and
+/// code are surfaced. Any other body is passed through unchanged.
+fn sidecar_reason(body: &str) -> String {
+    let detail = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("detail").cloned());
+    match detail {
+        Some(serde_json::Value::Object(detail)) => {
+            match (
+                detail.get("message").and_then(serde_json::Value::as_str),
+                detail.get("code").and_then(serde_json::Value::as_str),
+            ) {
+                (Some(message), Some(code)) => format!("{message} ({code})"),
+                (Some(message), None) => message.to_string(),
+                _ => body.to_string(),
+            }
+        }
+        Some(serde_json::Value::String(message)) => message,
+        _ => body.to_string(),
     }
 }
 
@@ -679,23 +749,19 @@ impl TorchClient {
             .trim_end_matches('/')
             .to_string();
 
-        let client = reqwest::Client::builder()
+        let client = sidecar_client_builder(&base_url)
             .timeout(API_TIMEOUT)
-            .user_agent("pumas-library")
             .build()
             .expect("failed to build reqwest client");
 
-        let load_client = reqwest::Client::builder()
+        let load_client = sidecar_client_builder(&base_url)
             .timeout(LOAD_TIMEOUT)
-            .user_agent("pumas-library")
             .build()
             .expect("failed to build reqwest load client");
 
-        let image_client = reqwest::Client::builder()
+        let image_client = sidecar_client_builder(&base_url)
             .connect_timeout(GENERATION_CONNECT_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
-            .user_agent("pumas-library")
             .build()
             .expect("failed to build reqwest image client");
 
@@ -872,7 +938,11 @@ impl TorchClient {
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
-            return Err(net_err(format!("Torch API returned {}: {}", status, body)));
+            return Err(net_err(format!(
+                "Torch API returned {}: {}",
+                status,
+                sidecar_reason(&body)
+            )));
         }
 
         let slots_response: SlotsResponse = response
@@ -967,7 +1037,7 @@ impl TorchClient {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
             return Err(PumasError::TorchInference {
-                message: format!("Load returned {}: {}", status, body),
+                message: format!("Load returned {}: {}", status, sidecar_reason(&body)),
             });
         }
 
@@ -1007,7 +1077,7 @@ impl TorchClient {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
             return Err(PumasError::TorchInference {
-                message: format!("Unload returned {}: {}", status, body),
+                message: format!("Unload returned {}: {}", status, sidecar_reason(&body)),
             });
         }
 
@@ -1032,7 +1102,8 @@ impl TorchClient {
             let body: String = response.text().await.unwrap_or_default();
             return Err(net_err(format!(
                 "Torch status API returned {}: {}",
-                status, body
+                status,
+                sidecar_reason(&body)
             )));
         }
 
@@ -1061,7 +1132,8 @@ impl TorchClient {
             let body: String = response.text().await.unwrap_or_default();
             return Err(net_err(format!(
                 "Torch devices API returned {}: {}",
-                status, body
+                status,
+                sidecar_reason(&body)
             )));
         }
 
@@ -1104,7 +1176,8 @@ impl TorchClient {
             let body: String = response.text().await.unwrap_or_default();
             return Err(net_err(format!(
                 "Torch configure API returned {}: {}",
-                status, body
+                status,
+                sidecar_reason(&body)
             )));
         }
 
@@ -1148,6 +1221,83 @@ mod tests {
         assert!(result.is_err());
         backend.await.unwrap();
         assert!(futures::poll!(Box::pin(redirect.accept())).is_pending());
+    }
+
+    /// Accept one request, return its raw head, and answer with `response`.
+    async fn serve_once(
+        listener: tokio::net::TcpListener,
+        response: &'static str,
+    ) -> tokio::task::JoinHandle<String> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let mut bytes = [0; 1024];
+                let count = socket.read(&mut bytes).await.unwrap();
+                assert_ne!(count, 0);
+                request.extend_from_slice(&bytes[..count]);
+            }
+            socket.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&request).to_ascii_lowercase()
+        })
+    }
+
+    #[tokio::test]
+    async fn every_sidecar_request_carries_the_launch_token() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let backend = serve_once(
+            listener,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"slots\":[]}",
+        )
+        .await;
+        let slots = TorchClient::new(Some(&endpoint))
+            .list_slots()
+            .await
+            .unwrap();
+        assert!(slots.is_empty());
+        let request = backend.await.unwrap();
+        assert!(request.starts_with("get /api/slots "));
+        assert!(request.contains(&format!("{TORCH_API_TOKEN_HEADER}: {}", torch_api_token())));
+    }
+
+    #[tokio::test]
+    async fn control_requests_do_not_follow_redirects_and_report_typed_reasons() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let backend = serve_once(
+            listener,
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://192.0.2.1/api/slots\r\nContent-Length: 0\r\n\r\n",
+        )
+        .await;
+        let result = TorchClient::new(Some(&endpoint)).list_slots().await;
+        backend.await.unwrap();
+        assert!(result.unwrap_err().to_string().contains("307"));
+
+        let body = r#"{"detail":{"code":"unauthorized","message":"Missing or invalid x-pumas-torch-token header"}}"#;
+        assert_eq!(
+            sidecar_reason(body),
+            "Missing or invalid x-pumas-torch-token header (unauthorized)"
+        );
+        assert_eq!(sidecar_reason(r#"{"detail":"legacy"}"#), "legacy");
+        assert_eq!(sidecar_reason("plain"), "plain");
+    }
+
+    #[test]
+    fn only_loopback_sidecars_bypass_proxies() {
+        for url in [
+            "http://127.0.0.1:8400",
+            "http://localhost:8400",
+            "http://LOCALHOST",
+            "http://[::1]:8400",
+            "http://127.1.2.3",
+        ] {
+            assert!(is_loopback_base_url(url), "{url}");
+        }
+        for url in ["http://192.168.1.4:8400", "http://example.com", "not a url"] {
+            assert!(!is_loopback_base_url(url), "{url}");
+        }
     }
 
     #[test]

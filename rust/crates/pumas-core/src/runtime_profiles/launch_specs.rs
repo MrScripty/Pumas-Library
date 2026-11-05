@@ -3,6 +3,9 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+use rand::RngExt;
 
 use crate::models::{
     RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeEndpointUrl, RuntimeManagementMode,
@@ -17,6 +20,26 @@ use super::{
 };
 
 const IMPLICIT_RUNTIME_PORT_SPAN: u16 = 10_000;
+
+/// Environment variable carrying the Torch sidecar's API token.
+pub const TORCH_API_TOKEN_ENV: &str = "PUMAS_TORCH_API_TOKEN";
+/// Header every Torch sidecar request except `/health` must carry.
+pub const TORCH_API_TOKEN_HEADER: &str = "x-pumas-torch-token";
+/// Environment variable listing the roots Torch may load model files from.
+pub const TORCH_MODEL_ROOTS_ENV: &str = "PUMAS_TORCH_MODEL_ROOTS";
+/// Environment variable naming the launcher process the sidecar watches.
+pub const TORCH_PARENT_PID_ENV: &str = "PUMAS_TORCH_PARENT_PID";
+
+/// Random API token for Torch sidecars launched by this backend process.
+///
+/// It is generated once per backend process, never persisted, and reaches the
+/// sidecar only through its environment (never argv). Every Torch sidecar this
+/// process launches requires it, so a sidecar left by an earlier backend, or
+/// any other local process, cannot drive the sidecar without it.
+pub fn torch_api_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| hex::encode(rand::rng().random::<[u8; 32]>()))
+}
 
 pub(super) fn derive_managed_profile_launch_specs(
     launcher_root: &Path,
@@ -95,7 +118,13 @@ pub(super) fn derive_managed_profile_launch_specs(
                 port,
                 launch_strategy,
             )?,
-            env_vars: profile_runtime_env_vars(profile, &endpoint_url, port, launch_strategy)?,
+            env_vars: profile_runtime_env_vars(
+                launcher_root,
+                profile,
+                &endpoint_url,
+                port,
+                launch_strategy,
+            )?,
             pid_file: runtime_dir.join("runtime.pid"),
             log_file: runtime_dir.join("runtime.log"),
             health_check_url: if profile.provider == crate::models::RuntimeProviderId::Torch {
@@ -167,6 +196,7 @@ pub(super) fn endpoint_port(endpoint_url: &RuntimeEndpointUrl) -> Option<Runtime
 }
 
 fn profile_runtime_env_vars(
+    launcher_root: &Path,
     profile: &RuntimeProfileConfig,
     endpoint_url: &RuntimeEndpointUrl,
     port: RuntimePort,
@@ -182,6 +212,12 @@ fn profile_runtime_env_vars(
             env_vars.insert("HF_HUB_OFFLINE".into(), "1".into());
             env_vars.insert("TRANSFORMERS_OFFLINE".into(), "1".into());
             env_vars.insert("PYTHONNOUSERSITE".into(), "1".into());
+            env_vars.insert(TORCH_API_TOKEN_ENV.into(), torch_api_token().into());
+            env_vars.insert(
+                TORCH_MODEL_ROOTS_ENV.into(),
+                torch_model_roots(launcher_root)?,
+            );
+            env_vars.insert(TORCH_PARENT_PID_ENV.into(), std::process::id().to_string());
         }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe,
@@ -287,7 +323,26 @@ fn llama_cpp_gpu_layers_arg(device: &RuntimeDeviceSettings) -> Option<i32> {
 }
 
 fn llama_cpp_router_models_dir(launcher_root: &Path) -> PathBuf {
-    launcher_root.join("shared-resources").join("models")
+    library_models_dir(launcher_root)
+}
+
+fn library_models_dir(launcher_root: &Path) -> PathBuf {
+    launcher_root
+        .join(crate::config::PathsConfig::SHARED_RESOURCES_DIR_NAME)
+        .join("models")
+}
+
+/// The roots the Torch sidecar may load from: the library's model directory.
+fn torch_model_roots(launcher_root: &Path) -> Result<String> {
+    let roots = std::env::join_paths([library_models_dir(launcher_root)]).map_err(|err| {
+        PumasError::InvalidParams {
+            message: format!("library model root cannot be passed to Torch: {err}"),
+        }
+    })?;
+    roots.into_string().map_err(|_| PumasError::InvalidParams {
+        message: "library model root is not valid Unicode; Torch cannot confine loads to it"
+            .to_string(),
+    })
 }
 
 fn runtime_host(endpoint_url: &RuntimeEndpointUrl) -> Result<String> {
@@ -362,6 +417,27 @@ mod torch_tests {
         assert!(spec
             .pid_file
             .starts_with("/fixture/launcher-data/runtime-profiles/torch"));
+        // The sidecar's token, model confinement and parent watchdog arrive
+        // through the environment; the token never appears in argv.
+        let token = spec.env_vars.get(TORCH_API_TOKEN_ENV).expect("API token");
+        assert_eq!(token, torch_api_token());
+        assert_eq!(token.len(), 64);
+        assert!(!spec
+            .extra_args
+            .iter()
+            .any(|arg| arg.contains(token.as_str())));
+        assert_eq!(
+            spec.env_vars.get(TORCH_MODEL_ROOTS_ENV).map(PathBuf::from),
+            Some(
+                Path::new("/fixture")
+                    .join("shared-resources")
+                    .join("models")
+            )
+        );
+        assert_eq!(
+            spec.env_vars.get(TORCH_PARENT_PID_ENV),
+            Some(&std::process::id().to_string())
+        );
 
         // Exercise both production argument builders against real Python imports.
         // The fixture substitutes package code, not the launch arguments.

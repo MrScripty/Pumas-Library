@@ -302,6 +302,8 @@ impl ManagedChild {
         #[cfg(target_os = "macos")]
         {
             use std::os::unix::process::ExitStatusExt;
+            // SAFETY: siginfo_t is a plain C struct; all-zero bytes are a
+            // valid value, and waitid overwrites it before it is read.
             #[allow(unsafe_code)]
             let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             // SAFETY: `info` is a valid output buffer; WNOWAIT retains the
@@ -674,8 +676,9 @@ fn macos_listener_attribution_requires_structured_listen_state() {
     assert!(!macos_lsof_has_listener(observation, "127.0.0.2", 8080));
 }
 
+// Each function below that crosses the Win32 FFI boundary carries its own
+// `#[allow(unsafe_code)]`, and every unsafe block states why it is sound.
 #[cfg(windows)]
-#[allow(unsafe_code)]
 mod windows {
     use super::*;
     use std::mem::{size_of, zeroed};
@@ -710,6 +713,7 @@ mod windows {
         Ok(count)
     }
 
+    #[allow(unsafe_code)]
     pub(super) fn spawn(
         command: &mut Command,
         custody: Arc<ManagedChildCustodySlot>,
@@ -717,13 +721,21 @@ mod windows {
         use std::os::windows::process::CommandExt;
         // The child cannot execute or create descendants before Job admission.
         command.creation_flags(CREATE_SUSPENDED);
+        // SAFETY: null security attributes and a null name are documented
+        // valid arguments; the call borrows no Rust memory.
         let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if raw_job.is_null() {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: `raw_job` is a fresh, non-null Job handle that nothing else
+        // owns; OwnedHandle closes it exactly once.
         let job = std::sync::Arc::new(unsafe { OwnedHandle::from_raw_handle(raw_job) });
+        // SAFETY: JOBOBJECT_EXTENDED_LIMIT_INFORMATION is a plain C struct of
+        // integers for which all-zero bytes are a valid value.
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `raw_job` is live (owned by `job`); the pointer and size
+        // describe `limits`, which outlives the call and is only read.
         if unsafe {
             SetInformationJobObject(
                 raw_job,
@@ -736,6 +748,8 @@ mod windows {
             return Err(io::Error::last_os_error());
         }
         let mut child = command.spawn()?;
+        // SAFETY: both handles are live: `job` owns the Job and `child` owns
+        // the suspended process handle for the duration of the call.
         if unsafe { AssignProcessToJobObject(raw_job, child.as_raw_handle()) } == 0 {
             let error = io::Error::last_os_error();
             // Still suspended: no child code or descendant could have run.
@@ -784,20 +798,30 @@ mod windows {
         })
     }
 
+    #[allow(unsafe_code)]
     fn resume_initial_thread(pid: u32) -> io::Result<()> {
+        // SAFETY: a thread snapshot takes no pointers; the result is checked
+        // against INVALID_HANDLE_VALUE before use.
         let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
         if snapshot == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: `snapshot` is a fresh valid handle owned by nothing else;
+        // OwnedHandle closes it exactly once.
         let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
+        // SAFETY: THREADENTRY32 is a plain C struct of integers; all-zero is
+        // a valid value, and dwSize is set before the first call.
         let mut entry: THREADENTRY32 = unsafe { zeroed() };
         entry.dwSize = size_of::<THREADENTRY32>() as u32;
         let mut found = Vec::new();
+        // SAFETY: the snapshot handle is live and `entry` is a writable
+        // THREADENTRY32 with dwSize set, as Thread32First requires.
         let mut has_entry = unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) } != 0;
         while has_entry {
             if entry.th32OwnerProcessID == pid {
                 found.push(entry.th32ThreadID);
             }
+            // SAFETY: same live snapshot and writable entry as above.
             has_entry = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) } != 0;
         }
         if found.len() != 1 {
@@ -805,23 +829,34 @@ mod windows {
                 "Suspended child did not have one initial thread",
             ));
         }
+        // SAFETY: OpenThread takes only integer arguments; a null result is
+        // checked before use.
         let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, found[0]) };
         if thread.is_null() {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: `thread` is a fresh non-null handle owned by nothing else;
+        // OwnedHandle closes it exactly once.
         let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
+        // SAFETY: the thread handle is live and was opened with
+        // THREAD_SUSPEND_RESUME access.
         if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
             return Err(io::Error::last_os_error());
         }
         Ok(())
     }
 
+    #[allow(unsafe_code)]
     pub(super) fn terminate_and_has_members(job: &OwnedHandle) -> io::Result<bool> {
         let raw = job.as_raw_handle() as HANDLE;
+        // SAFETY: `job` borrows a live Job handle for the whole call.
         if unsafe { TerminateJobObject(raw, 1) } == 0 {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: the accounting struct is plain integers; all-zero is valid.
         let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { zeroed() };
+        // SAFETY: the Job handle is live; the pointer and size describe the
+        // writable `accounting` buffer, and the optional length is null.
         if unsafe {
             QueryInformationJobObject(
                 raw,
@@ -837,6 +872,7 @@ mod windows {
         Ok(accounting.ActiveProcesses != 0)
     }
 
+    #[allow(unsafe_code)]
     pub(super) fn job_owns_listener(
         job: &OwnedHandle,
         endpoint: &RuntimeEndpointUrl,
@@ -867,6 +903,8 @@ mod windows {
             return Err(io::Error::other("IPv6 listener attribution unavailable"));
         }
         let mut size = 0;
+        // SAFETY: a null table with a writable size asks only for the
+        // required buffer size; nothing else is written.
         unsafe {
             GetExtendedTcpTable(
                 std::ptr::null_mut(),
@@ -881,6 +919,8 @@ mod windows {
             return Err(io::Error::other("Invalid TCP owner table size"));
         }
         let mut table = vec![0u64; (size as usize).div_ceil(8)];
+        // SAFETY: `table` is a writable, 8-byte-aligned buffer of at least
+        // `size` bytes, and `size` is a writable in/out length.
         let code = unsafe {
             GetExtendedTcpTable(
                 table.as_mut_ptr().cast(),
@@ -898,6 +938,8 @@ mod windows {
         if reported_size < size_of::<u32>() || reported_size > table.len() * size_of::<u64>() {
             return Err(io::Error::other("Invalid TCP owner table"));
         }
+        // SAFETY: `reported_size` was checked to cover at least the leading
+        // u32 row count inside `table`; read_unaligned needs no alignment.
         let count = unsafe { table.as_ptr().cast::<u32>().read_unaligned() } as usize;
         let row_size = size_of::<MIB_TCPROW_OWNER_PID>();
         for index in 0..checked_tcp_row_count(
@@ -907,6 +949,9 @@ mod windows {
             row_size,
         )? {
             let offset = size_of::<u32>() + index * row_size;
+            // SAFETY: checked_tcp_row_count bounds every row inside the
+            // reported table, so `offset..offset + row_size` is within
+            // `table`; the row is a plain C struct read without alignment.
             let row = unsafe {
                 table
                     .as_ptr()
@@ -921,13 +966,19 @@ mod windows {
             {
                 continue;
             }
+            // SAFETY: OpenProcess takes only integer arguments; a null result
+            // is checked before use.
             let process =
                 unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, row.dwOwningPid) };
             if process.is_null() {
                 return Err(io::Error::last_os_error());
             }
+            // SAFETY: `process` is a fresh non-null handle owned by nothing
+            // else; OwnedHandle closes it exactly once.
             let process = unsafe { OwnedHandle::from_raw_handle(process) };
             let mut member = 0;
+            // SAFETY: both handles are live for the call and `member` is a
+            // writable BOOL.
             if unsafe { IsProcessInJob(process.as_raw_handle(), job.as_raw_handle(), &mut member) }
                 == 0
             {

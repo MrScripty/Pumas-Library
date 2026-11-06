@@ -1046,8 +1046,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-anstream 0.6.21 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/anstream/0.6.21/download
+anstream 1.0.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/anstream/1.0.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -1277,8 +1277,8 @@ SOFTWARE.
 
 ==============================================================================
 
-anstyle 1.0.13 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/anstyle/1.0.13/download
+anstyle 1.0.14 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/anstyle/1.0.14/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -1508,8 +1508,8 @@ SOFTWARE.
 
 ==============================================================================
 
-anstyle-parse 0.2.7 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/anstyle-parse/0.2.7/download
+anstyle-parse 1.0.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/anstyle-parse/1.0.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -2201,8 +2201,8 @@ SOFTWARE.
 
 ==============================================================================
 
-anyhow 1.0.103 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/anyhow/1.0.103/download
+anyhow 1.0.104 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/anyhow/1.0.104/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -2406,40 +2406,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-
-
-==============================================================================
-
-arrayref 0.3.9 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/arrayref/0.3.9/download
-Declared license: BSD-2-Clause
---- LICENSE ---
-Copyright (c) 2015 David Roundy <roundyd@physics.oregonstate.edu>
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-1. Redistributions of source code must retain the above copyright
-   notice, this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright
-   notice, this list of conditions and the following disclaimer in the
-   documentation and/or other materials provided with the
-   distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ==============================================================================
@@ -2680,8 +2646,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-async-trait 0.1.89 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/async-trait/0.1.89/download
+async-trait 0.1.92 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/async-trait/0.1.92/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -3918,6 +3884,238 @@ THE SOFTWARE.
 
 ==============================================================================
 
+base64 0.23.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/base64/0.23.1/download
+Declared license: MIT OR Apache-2.0
+--- LICENSE-APACHE ---
+                              Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+--- LICENSE-MIT ---
+The MIT License (MIT)
+
+Copyright (c) 2025 Alice Maz, Marshall Pierce
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+
+==============================================================================
+
 bitflags 1.3.2 (Rust normal/build dependency, all desktop targets; conservative superset)
 Source: https://crates.io/api/v1/crates/bitflags/1.3.2/download
 Declared license: MIT/Apache-2.0
@@ -4154,8 +4352,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-bitflags 2.10.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/bitflags/2.10.0/download
+bitflags 2.13.2 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/bitflags/2.13.2/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -4390,8 +4588,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-blake3 1.8.3 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/blake3/1.8.3/download
+blake3 1.8.7 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/blake3/1.8.7/download
 Declared license: CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception
 --- LICENSE_A2 ---
 
@@ -7603,8 +7801,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-chrono 0.4.43 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/chrono/0.4.43/download
+chrono 0.4.45 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/chrono/0.4.45/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE.txt ---
 Rust-chrono is dual-licensed under The MIT License [1] and
@@ -7851,8 +8049,8 @@ limitations under the License.
 
 ==============================================================================
 
-clap 4.5.54 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/clap/4.5.54/download
+clap 4.6.7 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/clap/4.6.7/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -8043,7 +8241,7 @@ Declared license: MIT OR Apache-2.0
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright {yyyy} {name of copyright owner}
+   Copyright Individual contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -8082,8 +8280,8 @@ SOFTWARE.
 
 ==============================================================================
 
-clap_builder 4.5.54 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/clap_builder/4.5.54/download
+clap_builder 4.6.7 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/clap_builder/4.6.7/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -8274,7 +8472,7 @@ Declared license: MIT OR Apache-2.0
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright {yyyy} {name of copyright owner}
+   Copyright Individual contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -8313,8 +8511,8 @@ SOFTWARE.
 
 ==============================================================================
 
-clap_derive 4.5.49 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/clap_derive/4.5.49/download
+clap_derive 4.6.7 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/clap_derive/4.6.7/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -8505,7 +8703,7 @@ Declared license: MIT OR Apache-2.0
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright {yyyy} {name of copyright owner}
+   Copyright Individual contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -8544,8 +8742,8 @@ SOFTWARE.
 
 ==============================================================================
 
-clap_lex 0.7.7 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/clap_lex/0.7.7/download
+clap_lex 1.1.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/clap_lex/1.1.1/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -8736,7 +8934,7 @@ Declared license: MIT OR Apache-2.0
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright {yyyy} {name of copyright owner}
+   Copyright Individual contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -9830,6 +10028,242 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
+core-foundation 0.10.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/core-foundation/0.10.1/download
+Declared license: MIT OR Apache-2.0
+--- LICENSE-APACHE ---
+                              Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+--- LICENSE-MIT ---
+Copyright (c) 2012-2013 Mozilla Foundation
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+==============================================================================
+
 core-foundation 0.9.4 (Rust normal/build dependency, all desktop targets; conservative superset)
 Source: https://crates.io/api/v1/crates/core-foundation/0.9.4/download
 Declared license: MIT OR Apache-2.0
@@ -10774,8 +11208,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-crc32fast 1.5.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/crc32fast/1.5.0/download
+crc32fast 1.5.4 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/crc32fast/1.5.4/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -13026,8 +13460,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-ctrlc 3.5.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/ctrlc/3.5.1/download
+ctrlc 3.5.2 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/ctrlc/3.5.2/download
 Declared license: MIT/Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -13260,8 +13694,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-daachorse 1.0.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/daachorse/1.0.1/download
+daachorse 3.0.3 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/daachorse/3.0.3/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -18290,8 +18724,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-flate2 1.1.8 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/flate2/1.1.8/download
+flate2 1.1.10 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/flate2/1.1.10/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -18497,7 +18931,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 --- LICENSE-MIT ---
-Copyright (c) 2014-2025 Alex Crichton
+Copyright (c) 2014-2026 Alex Crichton
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -18759,6 +19193,32 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
+
+==============================================================================
+
+foldhash 0.2.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/foldhash/0.2.0/download
+Declared license: Zlib
+--- LICENSE ---
+Copyright (c) 2024 Orson Peters
+
+This software is provided 'as-is', without any express or implied warranty. In
+no event will the authors be held liable for any damages arising from the use of
+this software.
+
+Permission is granted to anyone to use this software for any purpose, including
+commercial applications, and to alter it and redistribute it freely, subject to
+the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim
+    that you wrote the original software. If you use this software in a product,
+    an acknowledgment in the product documentation would be appreciated but is
+    not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+    misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
 
@@ -20213,8 +20673,8 @@ SOFTWARE.
 
 ==============================================================================
 
-futures 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures/0.3.31/download
+futures 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -20451,8 +20911,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-channel 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-channel/0.3.31/download
+futures-channel 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-channel/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -20689,8 +21149,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-core 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-core/0.3.31/download
+futures-core 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-core/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -20927,8 +21387,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-executor 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-executor/0.3.31/download
+futures-executor 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-executor/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -21165,8 +21625,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-io 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-io/0.3.31/download
+futures-io 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-io/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -21403,8 +21863,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-macro 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-macro/0.3.31/download
+futures-macro 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-macro/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -21641,8 +22101,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-sink 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-sink/0.3.31/download
+futures-sink 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-sink/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -21879,8 +22339,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-task 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-task/0.3.31/download
+futures-task 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-task/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -22353,8 +22813,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-futures-util 0.3.31 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/futures-util/0.3.31/download
+futures-util 0.3.34 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/futures-util/0.3.34/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -24305,8 +24765,244 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-hashlink 0.9.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/hashlink/0.9.1/download
+hashbrown 0.17.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/hashbrown/0.17.1/download
+Declared license: MIT OR Apache-2.0
+--- LICENSE-APACHE ---
+                              Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+--- LICENSE-MIT ---
+Copyright (c) 2016 Amanieu d'Antras
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+==============================================================================
+
+hashlink 0.12.2 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/hashlink/0.12.2/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -25008,8 +25704,8 @@ SOFTWARE.
 
 ==============================================================================
 
-http 1.4.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/http/1.4.0/download
+http 1.5.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/http/1.5.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -25244,11 +25940,11 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-http-body 1.0.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/http-body/1.0.1/download
+http-body 1.1.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/http-body/1.1.0/download
 Declared license: MIT
 --- LICENSE ---
-Copyright (c) 2019-2024 Sean McArthur & Hyper Contributors
+Copyright (c) 2019-2026 Sean McArthur & Hyper Contributors
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -25277,11 +25973,11 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-http-body-util 0.1.3 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/http-body-util/0.1.3/download
+http-body-util 0.1.5 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/http-body-util/0.1.5/download
 Declared license: MIT
 --- LICENSE ---
-Copyright (c) 2019-2025 Sean McArthur & Hyper Contributors
+Copyright (c) 2019-2026 Sean McArthur & Hyper Contributors
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -26007,11 +26703,11 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-hyper 1.8.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/hyper/1.8.1/download
+hyper 1.12.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/hyper/1.12.0/download
 Declared license: MIT
 --- LICENSE ---
-Copyright (c) 2014-2025 Sean McArthur
+Copyright (c) 2014-2026 Sean McArthur
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26265,8 +26961,8 @@ THE SOFTWARE.
 
 ==============================================================================
 
-hyper-util 0.1.19 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/hyper-util/0.1.19/download
+hyper-util 0.1.21 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/hyper-util/0.1.21/download
 Declared license: MIT
 --- LICENSE ---
 Copyright (c) 2023-2025 Sean McArthur
@@ -31280,11 +31976,11 @@ THIS SOFTWARE.
 
 ==============================================================================
 
-libsqlite3-sys 0.30.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/libsqlite3-sys/0.30.1/download
+libsqlite3-sys 0.39.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/libsqlite3-sys/0.39.1/download
 Declared license: MIT
 --- LICENSE ---
-Copyright (c) 2014-2021 The rusqlite developers
+Copyright (c) 2014 The rusqlite developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -31304,37 +32000,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
---- sqlcipher/LICENSE ---
-Copyright (c) 2008-2020 Zetetic LLC
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of the ZETETIC LLC nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY ZETETIC LLC ''AS IS'' AND ANY
-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL ZETETIC LLC BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 
 ==============================================================================
 
-linux-raw-sys 0.11.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/linux-raw-sys/0.11.0/download
+linux-raw-sys 0.12.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/linux-raw-sys/0.12.1/download
 Declared license: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 --- COPYRIGHT ---
 Short version for non-lawyers:
@@ -36495,6 +37165,260 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 ==============================================================================
 
+miniz_oxide 0.9.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/miniz_oxide/0.9.1/download
+Declared license: MIT OR Zlib OR Apache-2.0
+--- LICENSE ---
+MIT License
+
+Copyright 2013-2014 RAD Game Tools and Valve Software
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+Copyright (c) 2017 Frommi
+Copyright (c) 2017-2024 oyvindln
+
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- LICENSE-APACHE.md ---
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+--- LICENSE-MIT.md ---
+MIT License
+
+Copyright 2013-2014 RAD Game Tools and Valve Software
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+Copyright (c) 2017 Frommi
+Copyright (c) 2017-2024 oyvindln
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- LICENSE-ZLIB.md ---
+Copyright 2013-2014 RAD Game Tools and Valve Software
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+Copyright (c) 2020 Frommi
+Copyright (c) 2017-2024 oyvindln
+
+This software is provided 'as-is', without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
+
+
+==============================================================================
+
 mio 1.2.4 (Rust normal/build dependency, all desktop targets; conservative superset)
 Source: https://crates.io/api/v1/crates/mio/1.2.4/download
 Declared license: MIT
@@ -37176,8 +38100,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
 
-native-tls 0.2.14 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/native-tls/0.2.14/download
+native-tls 0.2.18 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/native-tls/0.2.18/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                                  Apache License
@@ -37641,64 +38565,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-
-
-==============================================================================
-
-nix 0.29.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/nix/0.29.0/download
-Declared license: MIT
---- LICENSE ---
-The MIT License (MIT)
-
-Copyright (c) 2015 Carl Lerche + nix-rust Authors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-
-==============================================================================
-
-nix 0.30.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/nix/0.30.1/download
-Declared license: MIT
---- LICENSE ---
-The MIT License (MIT)
-
-Copyright (c) 2015 Carl Lerche + nix-rust Authors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
 
 
 ==============================================================================
@@ -40359,9 +41225,9 @@ SOFTWARE.
 
 ==============================================================================
 
-openssl-probe 0.1.6 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/openssl-probe/0.1.6/download
-Declared license: MIT/Apache-2.0
+openssl-probe 0.2.2 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/openssl-probe/0.2.2/download
+Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
                         Version 2.0, January 2004
@@ -42578,242 +43444,6 @@ Declared license: Apache-2.0 OR MIT
    END OF TERMS AND CONDITIONS
 
 --- LICENSE-MIT ---
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-
-==============================================================================
-
-pin-utils 0.1.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/pin-utils/0.1.0/download
-Declared license: MIT OR Apache-2.0
---- LICENSE-APACHE ---
-                              Apache License
-                        Version 2.0, January 2004
-                     http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-   "License" shall mean the terms and conditions for use, reproduction,
-   and distribution as defined by Sections 1 through 9 of this document.
-
-   "Licensor" shall mean the copyright owner or entity authorized by
-   the copyright owner that is granting the License.
-
-   "Legal Entity" shall mean the union of the acting entity and all
-   other entities that control, are controlled by, or are under common
-   control with that entity. For the purposes of this definition,
-   "control" means (i) the power, direct or indirect, to cause the
-   direction or management of such entity, whether by contract or
-   otherwise, or (ii) ownership of fifty percent (50%) or more of the
-   outstanding shares, or (iii) beneficial ownership of such entity.
-
-   "You" (or "Your") shall mean an individual or Legal Entity
-   exercising permissions granted by this License.
-
-   "Source" form shall mean the preferred form for making modifications,
-   including but not limited to software source code, documentation
-   source, and configuration files.
-
-   "Object" form shall mean any form resulting from mechanical
-   transformation or translation of a Source form, including but
-   not limited to compiled object code, generated documentation,
-   and conversions to other media types.
-
-   "Work" shall mean the work of authorship, whether in Source or
-   Object form, made available under the License, as indicated by a
-   copyright notice that is included in or attached to the work
-   (an example is provided in the Appendix below).
-
-   "Derivative Works" shall mean any work, whether in Source or Object
-   form, that is based on (or derived from) the Work and for which the
-   editorial revisions, annotations, elaborations, or other modifications
-   represent, as a whole, an original work of authorship. For the purposes
-   of this License, Derivative Works shall not include works that remain
-   separable from, or merely link (or bind by name) to the interfaces of,
-   the Work and Derivative Works thereof.
-
-   "Contribution" shall mean any work of authorship, including
-   the original version of the Work and any modifications or additions
-   to that Work or Derivative Works thereof, that is intentionally
-   submitted to Licensor for inclusion in the Work by the copyright owner
-   or by an individual or Legal Entity authorized to submit on behalf of
-   the copyright owner. For the purposes of this definition, "submitted"
-   means any form of electronic, verbal, or written communication sent
-   to the Licensor or its representatives, including but not limited to
-   communication on electronic mailing lists, source code control systems,
-   and issue tracking systems that are managed by, or on behalf of, the
-   Licensor for the purpose of discussing and improving the Work, but
-   excluding communication that is conspicuously marked or otherwise
-   designated in writing by the copyright owner as "Not a Contribution."
-
-   "Contributor" shall mean Licensor and any individual or Legal Entity
-   on behalf of whom a Contribution has been received by Licensor and
-   subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of
-   this License, each Contributor hereby grants to You a perpetual,
-   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-   copyright license to reproduce, prepare Derivative Works of,
-   publicly display, publicly perform, sublicense, and distribute the
-   Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of
-   this License, each Contributor hereby grants to You a perpetual,
-   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-   (except as stated in this section) patent license to make, have made,
-   use, offer to sell, sell, import, and otherwise transfer the Work,
-   where such license applies only to those patent claims licensable
-   by such Contributor that are necessarily infringed by their
-   Contribution(s) alone or by combination of their Contribution(s)
-   with the Work to which such Contribution(s) was submitted. If You
-   institute patent litigation against any entity (including a
-   cross-claim or counterclaim in a lawsuit) alleging that the Work
-   or a Contribution incorporated within the Work constitutes direct
-   or contributory patent infringement, then any patent licenses
-   granted to You under this License for that Work shall terminate
-   as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the
-   Work or Derivative Works thereof in any medium, with or without
-   modifications, and in Source or Object form, provided that You
-   meet the following conditions:
-
-   (a) You must give any other recipients of the Work or
-       Derivative Works a copy of this License; and
-
-   (b) You must cause any modified files to carry prominent notices
-       stating that You changed the files; and
-
-   (c) You must retain, in the Source form of any Derivative Works
-       that You distribute, all copyright, patent, trademark, and
-       attribution notices from the Source form of the Work,
-       excluding those notices that do not pertain to any part of
-       the Derivative Works; and
-
-   (d) If the Work includes a "NOTICE" text file as part of its
-       distribution, then any Derivative Works that You distribute must
-       include a readable copy of the attribution notices contained
-       within such NOTICE file, excluding those notices that do not
-       pertain to any part of the Derivative Works, in at least one
-       of the following places: within a NOTICE text file distributed
-       as part of the Derivative Works; within the Source form or
-       documentation, if provided along with the Derivative Works; or,
-       within a display generated by the Derivative Works, if and
-       wherever such third-party notices normally appear. The contents
-       of the NOTICE file are for informational purposes only and
-       do not modify the License. You may add Your own attribution
-       notices within Derivative Works that You distribute, alongside
-       or as an addendum to the NOTICE text from the Work, provided
-       that such additional attribution notices cannot be construed
-       as modifying the License.
-
-   You may add Your own copyright statement to Your modifications and
-   may provide additional or different license terms and conditions
-   for use, reproduction, or distribution of Your modifications, or
-   for any such Derivative Works as a whole, provided Your use,
-   reproduction, and distribution of the Work otherwise complies with
-   the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise,
-   any Contribution intentionally submitted for inclusion in the Work
-   by You to the Licensor shall be under the terms and conditions of
-   this License, without any additional terms or conditions.
-   Notwithstanding the above, nothing herein shall supersede or modify
-   the terms of any separate license agreement you may have executed
-   with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade
-   names, trademarks, service marks, or product names of the Licensor,
-   except as required for reasonable and customary use in describing the
-   origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or
-   agreed to in writing, Licensor provides the Work (and each
-   Contributor provides its Contributions) on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-   implied, including, without limitation, any warranties or conditions
-   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-   PARTICULAR PURPOSE. You are solely responsible for determining the
-   appropriateness of using or redistributing the Work and assume any
-   risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory,
-   whether in tort (including negligence), contract, or otherwise,
-   unless required by applicable law (such as deliberate and grossly
-   negligent acts) or agreed to in writing, shall any Contributor be
-   liable to You for damages, including any direct, indirect, special,
-   incidental, or consequential damages of any character arising as a
-   result of this License or out of the use or inability to use the
-   Work (including but not limited to damages for loss of goodwill,
-   work stoppage, computer failure or malfunction, or any and all
-   other commercial damages or losses), even if such Contributor
-   has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing
-   the Work or Derivative Works thereof, You may choose to offer,
-   and charge a fee for, acceptance of support, warranty, indemnity,
-   or other liability obligations and/or rights consistent with this
-   License. However, in accepting such obligations, You may act only
-   on Your own behalf and on Your sole responsibility, not on behalf
-   of any other Contributor, and only if You agree to indemnify,
-   defend, and hold each Contributor harmless for any liability
-   incurred by, or claims asserted against, such Contributor by reason
-   of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work.
-
-   To apply the Apache License to your work, attach the following
-   boilerplate notice, with the fields enclosed by brackets "[]"
-   replaced with your own identifying information. (Don't include
-   the brackets!)  The text should be enclosed in the appropriate
-   comment syntax for the file format. We also recommend that a
-   file or class name and description of purpose be included on the
-   same "printed page" as the copyright notice for easier
-   identification within third-party archives.
-
-Copyright 2018 The pin-utils authors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
---- LICENSE-MIT ---
-Copyright (c) 2018 The pin-utils authors
-
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
 documentation files (the "Software"), to deal in the
@@ -47328,8 +47958,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-regex 1.12.2 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/regex/1.12.2/download
+regex 1.12.3 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/regex/1.12.3/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -48326,11 +48956,11 @@ THE SOFTWARE.
 
 ==============================================================================
 
-rusqlite 0.32.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/rusqlite/0.32.1/download
+rusqlite 0.41.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/rusqlite/0.41.1/download
 Declared license: MIT
 --- LICENSE ---
-Copyright (c) 2014-2021 The rusqlite developers
+Copyright (c) 2014 The rusqlite developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -48353,8 +48983,8 @@ THE SOFTWARE.
 
 ==============================================================================
 
-rustix 1.1.3 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/rustix/1.1.3/download
+rustix 1.1.6 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/rustix/1.1.6/download
 Declared license: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 --- COPYRIGHT ---
 Short version for non-lawyers:
@@ -50292,8 +50922,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-security-framework 2.11.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/security-framework/2.11.1/download
+security-framework 3.7.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/security-framework/3.7.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -50523,8 +51153,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-security-framework-sys 2.15.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/security-framework-sys/2.15.0/download
+security-framework-sys 2.17.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/security-framework-sys/2.17.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -50754,8 +51384,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-semver 1.0.27 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/semver/1.0.27/download
+semver 1.0.28 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/semver/1.0.28/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -50963,8 +51593,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-serde 1.0.228 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/serde/1.0.228/download
+serde 1.0.229 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/serde/1.0.229/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -51172,8 +51802,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-serde_core 1.0.228 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/serde_core/1.0.228/download
+serde_core 1.0.229 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/serde_core/1.0.229/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -51381,8 +52011,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-serde_derive 1.0.228 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/serde_derive/1.0.228/download
+serde_derive 1.0.229 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/serde_derive/1.0.229/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -51590,8 +52220,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-serde_json 1.0.149 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/serde_json/1.0.149/download
+serde_json 1.0.154 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/serde_json/1.0.154/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -55125,8 +55755,8 @@ SOFTWARE.
 
 ==============================================================================
 
-system-configuration 0.6.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/system-configuration/0.6.1/download
+system-configuration 0.7.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/system-configuration/0.7.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -55877,8 +56507,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-tempfile 3.24.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/tempfile/3.24.0/download
+tempfile 3.25.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/tempfile/3.25.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -56322,8 +56952,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-thiserror 2.0.18 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/thiserror/2.0.18/download
+thiserror 2.0.21 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/thiserror/2.0.21/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -56740,8 +57370,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-thiserror-impl 2.0.18 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/thiserror-impl/2.0.18/download
+thiserror-impl 2.0.21 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/thiserror-impl/2.0.21/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -57724,8 +58354,8 @@ freely, subject to the following restrictions:
 
 ==============================================================================
 
-tokenizers 0.23.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/tokenizers/0.23.1/download
+tokenizers 0.23.2 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/tokenizers/0.23.2/download
 Declared license: Apache-2.0
 --- LICENSE ---
                                  Apache License
@@ -58341,8 +58971,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-tracing-subscriber 0.3.22 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/tracing-subscriber/0.3.22/download
+tracing-subscriber 0.3.23 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/tracing-subscriber/0.3.23/download
 Declared license: MIT
 --- LICENSE ---
 Copyright (c) 2019 Tokio Contributors
@@ -59831,9 +60461,9 @@ authorization of the copyright holder.
 
 ==============================================================================
 
-unicode-normalization 0.1.25 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/unicode-normalization/0.1.25/download
-Declared license: MIT OR Apache-2.0
+unicode-normalization 0.1.26 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/unicode-normalization/0.1.26/download
+Declared license: (MIT OR Apache-2.0) AND Unicode-3.0
 --- COPYRIGHT ---
 Licensed under the Apache License, Version 2.0
 <LICENSE-APACHE or
@@ -60072,6 +60702,47 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+--- LICENSE-UNICODE ---
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2023 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
 
 
 ==============================================================================
@@ -61553,8 +62224,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-uuid 1.19.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/uuid/1.19.0/download
+uuid 1.29.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/uuid/1.29.0/download
 Declared license: Apache-2.0 OR MIT
 --- LICENSE-APACHE ---
                               Apache License
@@ -62318,8 +62989,8 @@ For more information, please refer to <http://unlicense.org/>
 
 ==============================================================================
 
-want 0.3.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/want/0.3.1/download
+want 0.3.2 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/want/0.3.2/download
 Declared license: MIT
 --- LICENSE ---
 Copyright (c) 2018-2019 Sean McArthur
@@ -70505,13 +71176,13 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-lucide-react 0.561.0 (JavaScript production dependency closure; includes tree-shaken code)
-Source: https://www.npmjs.com/package/lucide-react/v/0.561.0
+lucide-react 1.70.0 (JavaScript production dependency closure; includes tree-shaken code)
+Source: https://www.npmjs.com/package/lucide-react/v/1.70.0
 Declared license: ISC
 --- LICENSE ---
 ISC License
 
-Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2023 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2025.
+Copyright (c) 2026 Lucide Icons and Contributors
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above
@@ -70527,9 +71198,13 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ---
 
-The MIT License (MIT) (for portions derived from Feather)
+The following Lucide icons are derived from the Feather project:
 
-Copyright (c) 2013-2023 Cole Bemis
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -70549,27 +71224,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
---- dist/esm/icons/copyright.js ---
+--- dist/esm/icons/copyright.mjs ---
 /**
- * @license lucide-react v0.561.0 - ISC
+ * @license lucide-react v1.70.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
 
-import createLucideIcon from '../createLucideIcon.js';
+export { default } from './circle-letter-c.mjs';
+//# sourceMappingURL=copyright.mjs.map
 
-const __iconNode = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M14.83 14.83a4 4 0 1 1 0-5.66", key: "1i56pz" }]
-];
-const Copyright = createLucideIcon("copyright", __iconNode);
-
-export { __iconNode, Copyright as default };
-//# sourceMappingURL=copyright.js.map
-
---- dist/esm/icons/copyright.js.map ---
-{"version":3,"file":"copyright.js","sources":["../../../src/icons/copyright.ts"],"sourcesContent":["import createLucideIcon from '../createLucideIcon';\nimport { IconNode } from '../types';\n\nexport const __iconNode: IconNode = [\n  ['circle', { cx: '12', cy: '12', r: '10', key: '1mglay' }],\n  ['path', { d: 'M14.83 14.83a4 4 0 1 1 0-5.66', key: '1i56pz' }],\n];\n\n/**\n * @component @name Copyright\n * @description Lucide SVG icon component, renders SVG Element with children.\n *\n * @preview ![img](data:image/svg+xml;base64,PHN2ZyAgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIgogIHdpZHRoPSIyNCIKICBoZWlnaHQ9IjI0IgogIHZpZXdCb3g9IjAgMCAyNCAyNCIKICBmaWxsPSJub25lIgogIHN0cm9rZT0iIzAwMCIgc3R5bGU9ImJhY2tncm91bmQtY29sb3I6ICNmZmY7IGJvcmRlci1yYWRpdXM6IDJweCIKICBzdHJva2Utd2lkdGg9IjIiCiAgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIgogIHN0cm9rZS1saW5lam9pbj0icm91bmQiCj4KICA8Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIgLz4KICA8cGF0aCBkPSJNMTQuODMgMTQuODNhNCA0IDAgMSAxIDAtNS42NiIgLz4KPC9zdmc+Cg==) - https://lucide.dev/icons/copyright\n * @see https://lucide.dev/guide/packages/lucide-react - Documentation\n *\n * @param {Object} props - Lucide icons props and any valid SVG attribute\n * @returns {JSX.Element} JSX Element\n *\n */\nconst Copyright = createLucideIcon('copyright', __iconNode);\n\nexport default Copyright;\n"],"names":[],"mappings":";;;;;;;;;AAGO,CAAA,CAAA,CAAA,CAAA,CAAA,CAAM,UAAA,CAAA,CAAA,CAAuB;AAAA,CAAA,CAClC,CAAC,QAAA,CAAA,CAAU,CAAA,CAAE,EAAA,CAAA,CAAI,CAAA,CAAA,CAAA,CAAA,EAAM,CAAA,CAAA,CAAA,CAAI,IAAA,CAAA,CAAM,CAAA,EAAG,CAAA,CAAA,CAAA,CAAA,CAAA,CAAM,GAAA,CAAA,CAAK,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,EAAU,CAAA;AAAA,CAAA,CACzD,CAAC,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAQ,CAAA,CAAE,GAAG,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAiC,CAAA,CAAA,CAAA,CAAA,CAAK,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,GAAU;AAChE,CAAA;AAaA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAM,SAAA,CAAA,CAAA,CAAY,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAiB,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,EAAa,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAA,CAAU,CAAA;;"}
+--- dist/esm/icons/copyright.mjs.map ---
+{"version":3,"file":"copyright.mjs","sources":[],"sourcesContent":[],"names":[],"mappings":";;;;;;;"}
 
 ==============================================================================
 
@@ -70631,8 +71298,8 @@ SOFTWARE.
 
 ==============================================================================
 
-react 19.3.0 (JavaScript production dependency closure; includes tree-shaken code)
-Source: https://www.npmjs.com/package/react/v/19.3.0
+react 19.3.1 (JavaScript production dependency closure; includes tree-shaken code)
+Source: https://www.npmjs.com/package/react/v/19.3.1
 Declared license: MIT
 --- LICENSE ---
 MIT License
@@ -70869,8 +71536,8 @@ Declared license: Apache-2.0
 
 ==============================================================================
 
-react-dom 19.3.0 (JavaScript production dependency closure; includes tree-shaken code)
-Source: https://www.npmjs.com/package/react-dom/v/19.3.0
+react-dom 19.3.1 (JavaScript production dependency closure; includes tree-shaken code)
+Source: https://www.npmjs.com/package/react-dom/v/19.3.1
 Declared license: MIT
 --- LICENSE ---
 MIT License
@@ -85666,7 +86333,7 @@ SQLite bundled by libsqlite3-sys 0.30.1
 Source: https://www.sqlite.org/
 /******************************************************************************
 ** This file is an amalgamation of many separate C source files from SQLite
-** version 3.46.0.  By combining all the individual C code files into this
+** version 3.54.1.  By combining all the individual C code files into this
 ** single large file, the entire code can be compiled as a single translation
 ** unit.  This allows many compilers to do optimizations that would not be
 ** possible if the files were compiled separately.  Performance improvements
@@ -85684,7 +86351,9 @@ Source: https://www.sqlite.org/
 ** separate file. This file contains only code for the core SQLite library.
 **
 ** The content in this amalgamation comes from Fossil check-in
-** 96c92aba00c8375bc32fafcdf12429c58bd8.
+** 555e07ef33f69a0957d24d8e555b702464a1 with changes in files:
+**
+**    
 */
 
 ==============================================================================

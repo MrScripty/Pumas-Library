@@ -372,8 +372,11 @@ const electronAPI = {
     const params = requireDecoded(decodeGetTorchReleaseOptionsParams({ tag }), 'get_torch_release_options request');
     return validatedApiCall('get_torch_release_options', decodeTorchReleaseOptionsOutcome, params);
   },
-  preview_torch_runtime: async (request: { tag: string; build: string; python: string; adapter: string }) => {
-    const params = requireDecoded(decodePreviewTorchRuntimeParams(request), 'preview_torch_runtime request');
+  preview_torch_runtime: async (request: {
+    tag: string; build: string; python: string; adapter: string; verified_versions?: boolean;
+  }) => {
+    const params = requireDecoded(
+      decodePreviewTorchRuntimeParams(withoutUndefined(request)), 'preview_torch_runtime request');
     return validatedApiCall('preview_torch_runtime', decodeTorchRuntimePreviewOutcome, params);
   },
   get_torch_runtime_probe: async (tag: string) => {

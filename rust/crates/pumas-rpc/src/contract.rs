@@ -361,6 +361,7 @@ pub(crate) enum RpcCommand {
         build: String,
         python: String,
         adapter: String,
+        verified_versions: bool,
     },
     #[cfg(feature = "inference-plugins")]
     GetTorchRuntimeProbe {
@@ -4254,6 +4255,35 @@ mod torch_release_options_contract_tests {
         .is_err());
     }
 
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn preview_parser_accepts_an_optional_verified_versions_flag() {
+        let preview = |extra: serde_json::Value| {
+            let mut params =
+                serde_json::json!({"tag": "v2.10.0", "build": "cu130", "python": "python3.12"});
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            parse_command("preview_torch_runtime", Some(&params))
+        };
+        assert!(matches!(
+            preview(serde_json::json!({})),
+            Ok(RpcCommand::PreviewTorchRuntime {
+                verified_versions: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            preview(serde_json::json!({"verified_versions": true})),
+            Ok(RpcCommand::PreviewTorchRuntime {
+                verified_versions: true,
+                ..
+            })
+        ));
+        assert!(preview(serde_json::json!({"verified_versions": "yes"})).is_err());
+    }
+
     #[test]
     fn typed_release_options_use_the_expected_wire_shape() {
         let outcome = TorchReleaseOptionsOutcome {
@@ -4366,6 +4396,10 @@ pub(crate) struct PreviewTorchRuntimeParams {
     python: String,
     #[serde(default = "default_torch_adapter")]
     adapter: String,
+    /// Constrain resolution to the package versions a verified combination
+    /// recorded. The selection must then match that combination exactly.
+    #[serde(default)]
+    verified_versions: bool,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -7001,6 +7035,7 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     build: params.build,
                     python: params.python,
                     adapter: params.adapter,
+                    verified_versions: params.verified_versions,
                 }
             })
         }

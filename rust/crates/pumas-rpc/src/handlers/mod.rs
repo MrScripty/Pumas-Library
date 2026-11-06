@@ -1152,10 +1152,17 @@ async fn dispatch_admitted_command(
             build,
             python,
             adapter,
+            verified_versions,
         } => {
             let vm = require_version_manager(state, "torch").await?;
             let preview = vm
-                .preview_torch_runtime(&tag, &build, &python, &adapter)
+                .preview_torch_runtime_with_verified_versions(
+                    &tag,
+                    &build,
+                    &python,
+                    &adapter,
+                    verified_versions,
+                )
                 .await?;
             Ok(RpcOutcome::TorchRuntimePreview(preview.try_into()?))
         }

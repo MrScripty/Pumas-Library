@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 fccfa3cfdd8e84563ea91990579c9b0870c23234e336eeb0851231d1327f50e6. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 fcf7c51b5fb42225cb3b41014d8c43e38795a325e91abfcd1f87369f00f447f5. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -18150,7 +18150,7 @@ function validate132(data, { instancePath = "", parentData, parentDataProperty, 
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "adapter" || key0 === "build" || key0 === "python" || key0 === "tag")) {
+          if (!(key0 === "adapter" || key0 === "build" || key0 === "python" || key0 === "tag" || key0 === "verified_versions")) {
             validate132.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
@@ -18199,6 +18199,18 @@ function validate132(data, { instancePath = "", parentData, parentDataProperty, 
                   var valid0 = _errs8 === errors;
                 } else {
                   var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.verified_versions !== void 0) {
+                    const _errs10 = errors;
+                    if (typeof data.verified_versions !== "boolean") {
+                      validate132.errors = [{ instancePath: instancePath + "/verified_versions", schemaPath: "#/properties/verified_versions/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                      return false;
+                    }
+                    var valid0 = _errs10 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
                 }
               }
             }

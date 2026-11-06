@@ -164,9 +164,16 @@ never forwarded:
 The sidecar's `/health` reports protocol `3` and the `image_generation`
 capability. `TorchClient` in `pumas-app-manager` admits only that protocol and
 requires the capability before it routes image requests. No runtime recipe
-pins a dependency set: each install records its resolved packages, and
-`torch-server/runtime/verified-runtimes.json` records verified combinations as
-evidence only.
+pins a dependency set by default: each install resolves current package
+versions and records them, and `torch-server/runtime/verified-runtimes.json`
+records verified combinations as evidence. An installed runtime is *verified*
+when every package its combination recorded is installed at exactly the
+recorded version; a recorded package that is absent fails the match. This is a
+version comparison only, not a hash or provenance claim (the per-install hash
+lock separately binds the downloaded wheels). `preview_torch_runtime` accepts
+an optional `verified_versions: true` for a selection that exactly matches a
+verified combination; that install is then constrained to the record's
+versions, and the desktop offers it as "Install the verified package versions".
 
 ## Verification locations
 

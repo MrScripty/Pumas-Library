@@ -250,6 +250,22 @@ describe('TorchInstallPreview', () => {
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'nunchaku' });
   });
 
+  it('pins the verified package versions only when asked and only for an exact verified selection', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2', 'nunchaku'], verified: [verifiedRecord] });
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'cu130 · python3.12 · FLUX.2 image generation' }));
+    const pin = screen.getByRole('checkbox', { name: 'Install the verified package versions' });
+    expect(pin).not.toBeChecked();
+    fireEvent.click(pin);
+    expect(screen.getByText(/Verified on 2026-09-23/)).toHaveTextContent('Installing uses exactly these package versions');
+    fireEvent.click(await readyInstallButton());
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+    expect(getSelection).toHaveBeenCalledWith({
+      tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'flux2', verified_versions: true,
+    });
+  });
+
   it('does not offer verified combinations for another release or an unavailable adapter', async () => {
     getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'], verified: [verifiedRecord] });
     const { unmount } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);

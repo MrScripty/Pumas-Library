@@ -32,4 +32,6 @@ export interface TorchRuntimePreviewRequest {
   build: string;
   python: string;
   adapter: string;
+  /** Install the package versions a verified combination recorded (exact selection only). */
+  verified_versions?: boolean;
 }

@@ -653,18 +653,35 @@ mod tests {
             let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
             let proxied = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let counter = proxied.clone();
+            // First request line of each proxied connection.
+            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let recorded = requests.clone();
             tokio::spawn(async move {
                 loop {
                     let (mut socket, _) = proxy.accept().await.unwrap();
                     counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     let mut buffer = [0u8; 4096];
-                    let _ = socket.read(&mut buffer).await;
+                    let read = socket.read(&mut buffer).await.unwrap_or(0);
+                    recorded.lock().unwrap().push(
+                        String::from_utf8_lossy(&buffer[..read])
+                            .lines()
+                            .next()
+                            .unwrap_or_default()
+                            .to_owned(),
+                    );
                     let _ = socket
                         .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nproxy")
                         .await;
                 }
             });
-            for name in ["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
+            for name in [
+                "HTTP_PROXY",
+                "http_proxy",
+                "HTTPS_PROXY",
+                "https_proxy",
+                "ALL_PROXY",
+                "all_proxy",
+            ] {
                 std::env::set_var(name, &proxy_url);
             }
             for name in ["NO_PROXY", "no_proxy", "REQUEST_METHOD"] {
@@ -676,11 +693,17 @@ mod tests {
             let direct = http.for_url(&target).get(&target).send().await.unwrap();
             assert_eq!(direct.text().await.unwrap(), "direct");
             assert_eq!(proxied.load(std::sync::atomic::Ordering::SeqCst), 0);
-            // The same environment still proxies a remote provider.
-            let remote = "http://198.51.100.7/";
-            let reply = http.for_url(remote).get(remote).send().await.unwrap();
-            assert_eq!(reply.text().await.unwrap(), "proxy");
+            // The same environment still proxies a remote provider. An HTTPS
+            // remote is tunnelled, so the proxy's CONNECT line proves the
+            // route; the tunnelled TLS handshake then fails against the fake
+            // proxy, which is expected and not asserted.
+            let remote = "https://198.51.100.7/";
+            let _ = http.for_url(remote).get(remote).send().await;
             assert_eq!(proxied.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert_eq!(
+                requests.lock().unwrap().as_slice(),
+                ["CONNECT 198.51.100.7:443 HTTP/1.1"]
+            );
             let _ = stop.send(());
         });
     }

@@ -118,7 +118,11 @@ mod tests {
     async fn loopback_hosts_bypass_an_environment_proxy_and_remote_hosts_keep_it() {
         let (proxy, proxied) = recording_listener().await;
         let (target, direct) = recording_listener().await;
-        let env: HashMap<&str, String> = [("HTTP_PROXY", format!("http://{proxy}"))].into();
+        let env: HashMap<&str, String> = [
+            ("HTTP_PROXY", format!("http://{proxy}")),
+            ("HTTPS_PROXY", format!("http://{proxy}")),
+        ]
+        .into();
         let client = bypass_proxy_for_loopback_with(reqwest::Client::builder(), |name| {
             env.get(name).cloned()
         })
@@ -136,15 +140,17 @@ mod tests {
         );
         assert!(proxied.lock().unwrap().is_empty());
 
-        // A remote provider still goes through the user's proxy.
-        client
-            .get("http://remote-provider.invalid/api/tags")
+        // A remote provider still goes through the user's proxy. An HTTPS
+        // remote is tunnelled, so the proxy's CONNECT line proves the route;
+        // the tunnelled TLS handshake then fails against the recording
+        // listener, which is expected and not asserted.
+        let _ = client
+            .get("https://remote-provider.invalid/api/tags")
             .send()
-            .await
-            .unwrap();
+            .await;
         assert_eq!(
             proxied.lock().unwrap().as_slice(),
-            ["GET http://remote-provider.invalid/api/tags HTTP/1.1"]
+            ["CONNECT remote-provider.invalid:443 HTTP/1.1"]
         );
     }
 

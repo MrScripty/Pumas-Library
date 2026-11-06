@@ -1485,9 +1485,12 @@ mod windows_tests {
         assert_ne!(member, 0, "descendant escaped the admitted Job");
         child.terminate_and_drain(Duration::from_secs(10)).unwrap();
         // The retained handle names the same process even after its PID can be reused.
+        // Drain completes when the Job reports no active processes; Windows can
+        // drop the Job count shortly before the terminated process object is
+        // signaled, so allow a bounded wait rather than polling it once.
         assert_eq!(
             // SAFETY: OwnedHandle keeps the process handle live through this wait.
-            unsafe { WaitForSingleObject(process.as_raw_handle(), 0) },
+            unsafe { WaitForSingleObject(process.as_raw_handle(), 5_000) },
             WAIT_OBJECT_0
         );
         assert!(!windows::terminate_and_has_members(&child.job).unwrap());

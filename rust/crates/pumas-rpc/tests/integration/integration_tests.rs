@@ -2013,12 +2013,13 @@ mod tests {
         let model_id = create_untracked_partial_test_model(env.path());
         let server = start_rpc_server(env.path()).await.unwrap();
         let recovery_token = recovery_token_for_model(server.port, model_id).await;
-        std::fs::write(
-            env.path()
-                .join("launcher-data/cache/hf/hf_acme_model_files.json"),
-            b"not-json",
-        )
-        .unwrap();
+        // A corrupt tree cache is now a refetched miss, so make the lookup
+        // fail locally and deterministically: the cache entry is unreadable.
+        let tree_cache = env
+            .path()
+            .join("launcher-data/cache/hf/hf_acme_model_files.json");
+        std::fs::remove_file(&tree_cache).unwrap();
+        std::fs::create_dir(&tree_cache).unwrap();
 
         let refused = rpc_call(
             server.port,

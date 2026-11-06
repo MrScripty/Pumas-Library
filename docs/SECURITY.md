@@ -221,7 +221,7 @@ so their rows were dropped.
 | --- | --- | --- |
 | `lru` 0.16.4 | RUSTSEC-2026-0253 (unsound) | Only in `s3` builds, through `aws-sdk-s3` 1.137.0. The trigger is absent: the key is a `String` with no custom `Drop`, and `pop` is never called. Ignored in `rust/deny.toml`. |
 | `bincode` 1.3.3, `instant` 0.1.13, `paste` 1.0.15, `basic-toml` 0.1.10, `pin-utils` 0.1.0 | Unmaintained notices (RUSTSEC-2026-0374 for `basic-toml`, RUSTSEC-2026-0441 for `pin-utils`) | Pulled in by UniFFI tooling, `notify`, macro dependencies, UniFFI's `askama` templates and the S3 SDK's `aws-smithy-http` respectively; no known vulnerability. `rust/deny.toml` does not fail on unmaintained notices. |
-| `zip` 2.4.2, `pyo3` 0.23.5 | Dependabot and Scorecard alerts on `pantograph_guard_interop/Cargo.lock` | Test-only harness lock, never built into a release and not scanned by `dependency-audit`. The pinned Pantograph commit requires `zip = "2"` and `pyo3 = "0.23"`, so no patched version fits; they move when Pantograph upgrades and the pin moves. The harness never extracts an archive, and `pyo3` is only built with `backend-pytorch`, which the harness never enables. Other crates in this lock stay at the patched versions `rust/Cargo.lock` uses. |
+| `zip` 2.4.2, `pyo3` 0.23.5 | Dependabot alerts on `pantograph_guard_interop/Cargo.lock` | Test-only harness lock, never built into a release and not scanned by `dependency-audit`. Both come from Pantograph's `inference` crate at the pinned consumer commit, so they move when that pin moves; `pyo3` is only built with `backend-pytorch`, which the harness never enables. |
 
 ### Dependency currency
 

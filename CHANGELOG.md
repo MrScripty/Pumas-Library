@@ -66,6 +66,9 @@ Fixes from the [2026-11-02 audit](docs/audits/comprehensive-audit-2026-11-02.md)
   versions metadata changes under one write lock; review edits whose
   `metadata.json` write was interrupted are replayed.
 - `OllamaClient::new` and `VersionManager::version_path` return `Result`.
+- Updated `tokio` to 1.54.1 (with `mio`, `socket2`, `tokio-macros`), `zstd`
+  to 0.13.4, `zstd-safe` to 7.4.0 and `ctutils` to 0.4.8, clearing
+  RUSTSEC-2026-0385, -0386 and -0391 to -0406.
 
 ### Removed
 

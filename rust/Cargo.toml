@@ -118,7 +118,7 @@ uniffi = "0.28"
 rustler = "0.34"
 
 # Platform-specific process management (used conditionally in crates)
-nix = { version = "0.29", features = ["signal", "process"] }
+nix = { version = "0.31", features = ["signal", "process"] }
 libc = "0.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Security",

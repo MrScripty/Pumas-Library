@@ -191,7 +191,7 @@ pub async fn trial_torch_runtime(
         error: None,
         cleanup: TorchTrialCleanup::NotNeeded,
     };
-    let client = TorchClient::new(Some(owned.endpoint_url.as_str()));
+    let client = TorchClient::for_owned_sidecar(owned.endpoint_url.as_str());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let trial = async {
         loop {

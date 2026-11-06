@@ -32,8 +32,10 @@ Fixes from the [2026-11-02 audit](docs/audits/comprehensive-audit-2026-11-02.md)
   (`--require-hashes --no-deps`); dependency installs never use the `python3`
   on PATH; version tags that escape their directory are refused.
 - Managed Torch sidecars require a per-backend token and confine model loads
-  to the library's roots. Loopback provider traffic never uses a proxy and
-  provider clients follow no redirects.
+  to the library's roots. The token is sent only to a sidecar this backend
+  launched and is currently running; a caller-named Torch `connection_url` or
+  any other server never receives it. Loopback provider traffic never uses a
+  proxy and provider clients follow no redirects.
 - Public error redaction handles control characters, labelled values, JSON
   pairs and `Basic` credentials. The HF token is written atomically with mode
   0600 and `registry.db` is owner-only on Unix.

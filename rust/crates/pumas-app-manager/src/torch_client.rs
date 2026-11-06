@@ -14,11 +14,18 @@
 //! - `/api/devices` — Available compute devices
 //! - `/api/configure` — Update server configuration
 //!
-//! Every request except `/health` carries this backend's per-process Torch
-//! API token ([`pumas_library::runtime_profiles::torch_api_token`]) in the
-//! `x-pumas-torch-token` header; the managed sidecar refuses requests without
-//! it. Clients never follow redirects, so the token cannot be forwarded to
-//! another origin, and loopback sidecars are reached without any proxy.
+//! ## API token
+//!
+//! Every Torch sidecar this backend launches shares one per-process API token
+//! ([`pumas_library::runtime_profiles::torch_api_token`]) and refuses requests
+//! without it. Only [`TorchClient::for_owned_sidecar`] sends that token, in the
+//! `x-pumas-torch-token` header; the caller must have proved the endpoint is a
+//! sidecar this backend owns. [`TorchClient::new`] targets any other Torch
+//! server (external, remote, or caller-named) and never sends the token, so a
+//! server the caller chose cannot learn the secret protecting owned sidecars.
+//!
+//! Clients never follow redirects, so a request cannot be forwarded to another
+//! origin, and loopback servers are reached without any proxy.
 
 use futures::StreamExt;
 use pumas_library::config::AppId;
@@ -82,21 +89,32 @@ fn is_loopback_base_url(base_url: &str) -> bool {
     }
 }
 
-/// Shared transport policy for every Torch sidecar client.
-fn sidecar_client_builder(base_url: &str) -> reqwest::ClientBuilder {
-    let mut headers = reqwest::header::HeaderMap::new();
-    let mut token = reqwest::header::HeaderValue::from_str(torch_api_token())
-        .expect("hex Torch API token is a valid header value");
-    token.set_sensitive(true);
-    headers.insert(
-        reqwest::header::HeaderName::from_static(TORCH_API_TOKEN_HEADER),
-        token,
-    );
-    let builder = reqwest::Client::builder()
+/// Whether a client presents this backend's Torch API token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenScope {
+    /// The destination is a sidecar this backend launched and owns.
+    OwnedSidecar,
+    /// Any other server; the token must never reach it.
+    Unowned,
+}
+
+/// Shared transport policy for every Torch client.
+fn sidecar_client_builder(base_url: &str, scope: TokenScope) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder()
         .user_agent("pumas-library")
-        .default_headers(headers)
-        // A redirect would forward the token header to another origin.
+        // A redirect would forward the request (and any token) to another origin.
         .redirect(reqwest::redirect::Policy::none());
+    if scope == TokenScope::OwnedSidecar {
+        let mut token = reqwest::header::HeaderValue::from_str(torch_api_token())
+            .expect("hex Torch API token is a valid header value");
+        token.set_sensitive(true);
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::HeaderName::from_static(TORCH_API_TOKEN_HEADER),
+            token,
+        );
+        builder = builder.default_headers(headers);
+    }
     if is_loopback_base_url(base_url) {
         // A system proxy must never see loopback sidecar traffic or its token.
         builder.no_proxy()
@@ -752,26 +770,42 @@ pub struct TorchClient {
 }
 
 impl TorchClient {
-    /// Create a new client targeting the given base URL.
+    /// Create a client for a Torch server this backend does not own.
+    ///
+    /// The client never sends this backend's Torch API token, so it is safe
+    /// for any caller-chosen, external or remote destination. A sidecar this
+    /// backend launched refuses its requests; use [`Self::for_owned_sidecar`]
+    /// once ownership of the endpoint is proven.
     ///
     /// If `base_url` is `None`, defaults to `http://127.0.0.1:8400`.
     pub fn new(base_url: Option<&str>) -> Self {
-        let base_url = base_url
-            .unwrap_or(default_base_url())
-            .trim_end_matches('/')
-            .to_string();
+        Self::build(base_url.unwrap_or(default_base_url()), TokenScope::Unowned)
+    }
 
-        let client = sidecar_client_builder(&base_url)
+    /// Create a client for a Torch sidecar this backend launched and owns.
+    ///
+    /// Every request except `/health` carries this backend's Torch API token.
+    /// Pass only an endpoint taken from a current owned-process observation;
+    /// any other destination would learn the secret that protects every
+    /// sidecar this backend launches.
+    pub fn for_owned_sidecar(endpoint_url: &str) -> Self {
+        Self::build(endpoint_url, TokenScope::OwnedSidecar)
+    }
+
+    fn build(base_url: &str, scope: TokenScope) -> Self {
+        let base_url = base_url.trim_end_matches('/').to_string();
+
+        let client = sidecar_client_builder(&base_url, scope)
             .timeout(API_TIMEOUT)
             .build()
             .expect("failed to build reqwest client");
 
-        let load_client = sidecar_client_builder(&base_url)
+        let load_client = sidecar_client_builder(&base_url, scope)
             .timeout(LOAD_TIMEOUT)
             .build()
             .expect("failed to build reqwest load client");
 
-        let image_client = sidecar_client_builder(&base_url)
+        let image_client = sidecar_client_builder(&base_url, scope)
             .connect_timeout(GENERATION_CONNECT_TIMEOUT)
             .retry(reqwest::retry::never())
             .build()
@@ -1227,7 +1261,7 @@ mod tests {
             assert!(request.starts_with(b"POST /api/images/generate "));
             socket.write_all(format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: {target}\r\nContent-Length: 0\r\n\r\n").as_bytes()).await.unwrap();
         });
-        let result = TorchClient::new(Some(&endpoint))
+        let result = TorchClient::for_owned_sidecar(&endpoint)
             .generate_image("fixture", "synthetic", 1, 1, None)
             .await;
         assert!(result.is_err());
@@ -1255,16 +1289,14 @@ mod tests {
         })
     }
 
+    const EMPTY_SLOTS: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"slots\":[]}";
+
     #[tokio::test]
-    async fn every_sidecar_request_carries_the_launch_token() {
+    async fn owned_sidecar_requests_carry_the_launch_token() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let backend = serve_once(
-            listener,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 12\r\n\r\n{\"slots\":[]}",
-        )
-        .await;
-        let slots = TorchClient::new(Some(&endpoint))
+        let backend = serve_once(listener, EMPTY_SLOTS).await;
+        let slots = TorchClient::for_owned_sidecar(&endpoint)
             .list_slots()
             .await
             .unwrap();
@@ -1272,6 +1304,22 @@ mod tests {
         let request = backend.await.unwrap();
         assert!(request.starts_with("get /api/slots "));
         assert!(request.contains(&format!("{TORCH_API_TOKEN_HEADER}: {}", torch_api_token())));
+    }
+
+    #[tokio::test]
+    async fn unowned_server_requests_never_carry_the_launch_token() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let backend = serve_once(listener, EMPTY_SLOTS).await;
+        let slots = TorchClient::new(Some(&endpoint))
+            .list_slots()
+            .await
+            .unwrap();
+        assert!(slots.is_empty());
+        let request = backend.await.unwrap();
+        assert!(request.starts_with("get /api/slots "));
+        assert!(!request.contains(TORCH_API_TOKEN_HEADER));
+        assert!(!request.contains(torch_api_token()));
     }
 
     #[tokio::test]
@@ -1283,7 +1331,7 @@ mod tests {
             "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://192.0.2.1/api/slots\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
-        let result = TorchClient::new(Some(&endpoint)).list_slots().await;
+        let result = TorchClient::for_owned_sidecar(&endpoint).list_slots().await;
         backend.await.unwrap();
         assert!(result.unwrap_err().to_string().contains("307"));
 

@@ -173,8 +173,10 @@ argv:
 - `PUMAS_TORCH_API_TOKEN`: a random token generated once per Pumas backend
   process and never persisted. All routes except `/health` then require it
   through `X-Pumas-Torch-Token` or a bearer authorization header; a request
-  without it is refused with `401 unauthorized`. Every Pumas Torch client sends
-  it, never follows redirects, and bypasses proxies for loopback sidecars.
+  without it is refused with `401 unauthorized`. Pumas sends it only to a
+  sidecar it launched and still owns, never to another server (such as one
+  named by a caller's `connection_url`); its Torch clients never follow
+  redirects and bypass proxies for loopback servers.
   The managed token replaces any `PUMAS_TORCH_API_TOKEN` in the user's own
   environment.
 - `PUMAS_TORCH_MODEL_ROOTS`: the library's model root plus the directory of

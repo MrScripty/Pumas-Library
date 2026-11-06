@@ -127,7 +127,7 @@ pub(super) async fn check_live_torch_image_runtime(
         return Err(TorchLiveCheckError::ProcessIdentity);
     }
 
-    let client = TorchClient::new(Some(endpoint.as_str()));
+    let client = TorchClient::for_owned_sidecar(endpoint.as_str());
     client
         .check_image_runtime()
         .await

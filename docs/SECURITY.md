@@ -40,7 +40,10 @@ maintainer explicitly announces otherwise.
   `PUMAS_TORCH_ALLOW_LAN=1` and `PUMAS_TORCH_API_TOKEN`; all routes except
   `/health` then require the token. A Pumas-managed launch always sets a random
   token, generated once per backend process and passed only through the
-  environment, so every managed sidecar refuses requests without it. The
+  environment, so every managed sidecar refuses requests without it. Pumas
+  sends the token only to an endpoint where a Torch sidecar it launched is
+  currently running; any other Torch server, including a caller-named
+  `connection_url`, gets requests without it. The
   launch also confines model loads to the library root and the directories of
   known external-reference models (`PUMAS_TORCH_MODEL_ROOTS`), and passes the
   backend's pid so the sidecar exits when the backend is gone. See the

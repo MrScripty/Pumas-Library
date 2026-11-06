@@ -48,9 +48,14 @@ never persists it, and passes it to the sidecar only through
 `PUMAS_TORCH_API_TOKEN` in the environment, never argv. Every sidecar launched
 by that backend process shares it, so a sidecar left running by an earlier
 backend refuses the new one. A missing or wrong token is refused with
-`401` and `detail: {"code": "unauthorized", "message": ...}`. `TorchClient`
-sends the token on every request, never follows redirects, and bypasses
-proxies for loopback sidecars.
+`401` and `detail: {"code": "unauthorized", "message": ...}`.
+`TorchClient::for_owned_sidecar` sends the token on every request and is used
+only for an endpoint proven to be a running sidecar this backend launched
+(a current owned-process observation of a running Torch profile at that
+endpoint whose child owns the listener).
+`TorchClient::new`, used for any other server, including a caller-named
+`connection_url`, never sends it. Neither client follows redirects, and both
+bypass proxies for loopback servers.
 
 The launcher also sets `PUMAS_TORCH_MODEL_ROOTS` (the library root plus the
 directory of each external-reference model known at launch; load paths

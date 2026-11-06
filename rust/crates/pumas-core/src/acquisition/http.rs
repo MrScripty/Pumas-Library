@@ -963,8 +963,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn url_userinfo_requires_the_same_secure_transport_without_disclosure() {
+    // These refusal tests call `for_request`, where the scheme and credential
+    // decision is made before any request is built, rather than going through
+    // `open_http_artifact`. A refused source therefore never reaches a request
+    // call, so no connection is possible and no plaintext request URL is
+    // constructed from the fixture literals.
+    #[test]
+    fn url_userinfo_requires_the_same_secure_transport_without_disclosure() {
         let client = AcquisitionHttpClient::from(reqwest::Client::new());
         for (url, expected) in [
             (
@@ -980,17 +985,7 @@ mod tests {
                 "HTTP artifact credentials require an HTTPS-only transport builder",
             ),
         ] {
-            let error = super::open_http_artifact(
-                &client,
-                url,
-                &manifest(weak_file(6), RevisionStrength::Weak),
-                0,
-                0,
-                None,
-                None,
-            )
-            .await
-            .unwrap_err();
+            let error = client.for_request(url, false).unwrap_err();
             assert!(
                 matches!(&error, PumasError::Validation { message, .. } if message == expected)
             );
@@ -1177,23 +1172,21 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn credentials_are_refused_before_plaintext_non_loopback_requests() {
+    // Targets `for_request`, the refusal point, for the reason given above
+    // `url_userinfo_requires_the_same_secure_transport_without_disclosure`.
+    // The loopback fixture is installed as the `open_http_artifact` test
+    // helper does, proving it does not exempt these non-literal-loopback or
+    // non-HTTP sources from the refusal.
+    #[test]
+    fn credentials_are_refused_before_plaintext_non_loopback_requests() {
+        let client = AcquisitionHttpClient::from(reqwest::Client::new())
+            .with_loopback_fixture(reqwest::Client::new());
         for url in [
             "http://example.invalid/artifact",
             "http://localhost/artifact",
             "ftp://127.0.0.1/artifact",
         ] {
-            let error = open_http_artifact(
-                &reqwest::Client::new(),
-                url,
-                &manifest(weak_file(6), RevisionStrength::Weak),
-                0,
-                0,
-                Some("Bearer seeded-test-credential"),
-            )
-            .await
-            .unwrap_err();
+            let error = client.for_request(url, true).unwrap_err();
             assert!(matches!(error, PumasError::Validation { ref message, .. }
                 if message == "HTTP artifact credentials require an HTTPS source"));
         }

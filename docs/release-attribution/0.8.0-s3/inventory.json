@@ -135,7 +135,7 @@
     },
     {
       "name": "aws-smithy-types",
-      "version": "1.9.1"
+      "version": "1.5.0"
     },
     {
       "name": "aws-smithy-xml",
@@ -2115,9 +2115,9 @@
     },
     {
       "name": "aws-smithy-types",
-      "version": "1.9.1",
+      "version": "1.5.0",
       "license_declared": "Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/aws-smithy-types/1.9.1/download",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-types/1.5.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -9409,11 +9409,11 @@
     "electron/package.json": "2f4adb4ab9c2fc5724959197a7b22ace87e7d403940ffd0d278d00ce162418f0",
     "frontend/package.json": "d7578fd4567b52cf02e901d322612b93091fadc1a0b2e54e7abd6f374306da7d",
     "pnpm-lock.yaml": "ef54d3843397742c655fc7843eb8c16031bb242b4924fa4e8e89e0db17490268",
-    "rust/Cargo.lock": "9bb13dedc3dc594afdd67475b2b6b711b316a43463dee84aaf27c992cf7bbda3",
+    "rust/Cargo.lock": "098bce7d6b6820ebbccd24817105d41e9aab184fc4735cde039eb8a9a7d7cba3",
     "rust/Cargo.toml": "5ac4729864ac1ee314db5319c80e809dc3ba702788cc123d81366be8cce86b7e",
     "rust/crates/pumas-app-manager/Cargo.toml": "f344b89815164c0acc2f6758ad8313a2b8cccba1004354046d542ca5a3d22a73",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "c990968b92e6e8218b69f90601ddb80cfc6bcfdf39360279af3e181fbbc4d901",
-    "rust/crates/pumas-core/Cargo.toml": "c3c72cf47ab1886648a295625662e111e9b9a773458b45b3bcf00de674292e55",
+    "rust/crates/pumas-core/Cargo.toml": "b488c9be2ce38b4ad41a4422c41a1625e774ac5510fd7cf9f8384ab02e5da7b9",
     "rust/crates/pumas-rpc/Cargo.toml": "2a5c01cc72dcd3fc4d58e650430cb8f0d6c63771eaf06f8064c6611fd23e8fd1",
     "scripts/release/artifact-plan.json": "66348a507f00ffdc74741fc7d70eab02f4a0eed4d3655354784cea2971662064",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
@@ -9423,5 +9423,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "525c37d2a71d48daf127899e4fb34d8ad3f590714486875a2363253e1ec2a791"
+  "notices_sha256": "48334eadcf1d9e8273169179709c3b5684d73b40d1b3c7cf72561aa5d04eeb16"
 }

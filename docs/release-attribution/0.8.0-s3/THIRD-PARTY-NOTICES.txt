@@ -6429,8 +6429,8 @@ Declared license: Apache-2.0
 
 ==============================================================================
 
-aws-smithy-types 1.9.1 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/aws-smithy-types/1.9.1/download
+aws-smithy-types 1.5.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/aws-smithy-types/1.5.0/download
 Declared license: Apache-2.0
 --- LICENSE ---
 

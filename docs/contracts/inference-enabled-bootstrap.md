@@ -101,7 +101,9 @@ supporting C API 24 (qualification pin 1.24.2), its complete native dependency
 closure and per-file hashes. Install it beside the exact executable or select its
 absolute path through `ORT_DYLIB_PATH`. Cargo and Pumas do not download this SDK.
 Also provide an explicitly selected compatible ONNX embedding model package,
-`tokenizer.json`, configuration with the required hidden-size metadata, all
+`tokenizer.json`, configuration with the required hidden-size metadata (its
+`max_position_embeddings` or `n_positions`, when present, bounds each input's
+tokens, and a longer input is refused with its count and the limit), all
 external tensor members, immutable source/content hashes, selected library/model
 identity, and compatible I/O options. No default model is inferred from a test's
 optional fixture path.

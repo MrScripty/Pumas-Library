@@ -88,6 +88,18 @@ export default tseslint.config(
           message:
             'Use specific error types from @/errors instead of generic Error',
         },
+        // The renderer never opens windows or targets new browsing contexts;
+        // external URLs leave through ExternalLink / openExternalUrl.
+        {
+          selector: 'JSXAttribute[name.name="target"]',
+          message:
+            'Do not set target on links. Use ExternalLink from components/ui/ExternalLink, which opens the system browser through the desktop bridge.',
+        },
+        {
+          selector: 'MemberExpression[property.name="open"][object.name=/^(window|globalThis|self|top|parent)$/]',
+          message:
+            'Do not call window.open. Use openExternalUrl from components/ui/openExternalUrl, which opens the system browser through the desktop bridge.',
+        },
         // React Aria rules
         {
           selector: 'JSXAttribute[name.name="onMouseEnter"]',

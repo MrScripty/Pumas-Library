@@ -24,3 +24,18 @@ test('attribution hook accepts Electron Builder beforePack context', () => {
   `], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('packages ship compiled JavaScript without source maps or declarations', () => {
+  const desktop = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const { files } = desktop.build;
+  assert.ok(files.includes('dist/**/*'));
+  assert.ok(files.includes('!dist/**/*.map'), 'source maps stay out of packages');
+  assert.ok(files.includes('!dist/**/*.d.ts'), 'type declarations stay out of packages');
+});
+
+test('packaging config claims no Windows signing identity while signing is disabled', () => {
+  const desktop = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  // CI packages with CSC_IDENTITY_AUTO_DISCOVERY=false, so a publisher name
+  // would describe a signature the installer does not carry.
+  assert.equal(desktop.build.win.signtoolOptions, undefined);
+});

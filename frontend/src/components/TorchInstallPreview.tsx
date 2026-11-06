@@ -39,6 +39,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   const [buildChoice, setBuildChoice] = useState('auto');
   const [adapterChoice, setAdapterChoice] = useState('none');
   const [pythonChoice, setPythonChoice] = useState('auto');
+  const [useVerifiedVersions, setUseVerifiedVersions] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -53,6 +54,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setPythonChoice('auto');
     setBuildChoice('auto');
     setAdapterChoice('none');
+    setUseVerifiedVersions(false);
     setError(null);
 
     void api.get_torch_runtime_options().then((options) => {
@@ -99,6 +101,8 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     const build = buildChoice;
     const python = pythonChoice;
     const adapter = adapterChoice;
+    // Pinning applies only to an exact verified selection; Rust refuses others.
+    const pinVerified = useVerifiedVersions && selectedVerified !== undefined;
     setStarting(true);
     setError(null);
 
@@ -108,6 +112,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
         build,
         python,
         adapter,
+        ...(pinVerified ? { verified_versions: true } : {}),
       });
       if (requestNumber.current !== currentRequest) return;
       if (outcome.status === 'rejected') {
@@ -173,8 +178,14 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
               </button>
             ))}
             {selectedVerified && <p className="text-xs text-[hsl(var(--text-secondary))]">
-              Verified on {selectedVerified.record.verifiedOn} with {selectedVerified.record.packages.map((item) => `${item.name} ${item.version}`).join(', ')}. {selectedVerified.record.scope} Installing resolves current package versions, which may be newer; the installed runtime is marked verified only if they match.
+              Verified on {selectedVerified.record.verifiedOn} with {selectedVerified.record.packages.map((item) => `${item.name} ${item.version}`).join(', ')}. {selectedVerified.record.scope} {useVerifiedVersions
+                ? 'Installing uses exactly these package versions, so the installed runtime matches the record.'
+                : 'Installing resolves current package versions, which may be newer; the installed runtime is marked verified only if they match.'}
             </p>}
+            {selectedVerified && <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" disabled={starting} checked={useVerifiedVersions} onChange={(event) => { setUseVerifiedVersions(event.target.checked); setError(null); }} />
+              Install the verified package versions
+            </label>}
           </div>}
           <details className="rounded border p-3 text-sm">
             <summary className="cursor-pointer">Advanced setup</summary>

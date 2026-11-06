@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 EXPECTED_LOAD_ERRORS = (OSError, RuntimeError, ValueError, KeyError)
 EXPECTED_UNLOAD_ERRORS = (OSError, RuntimeError, AttributeError)
 _MAX_LOAD_GENERATION = (1 << 128) - 1
+# Loader-detected types that are not causal text generators.
+NON_TEXT_MODEL_TYPES = frozenset({"cohere-asr", "nunchaku-z-image-turbo", "flux2-klein-9b-kv-fp8"})
+
+
+class SlotConflict(RuntimeError):
+    """The slot registry or a device lease refuses the request in its current state.
+
+    ``code`` is a stable machine-readable reason; the message is caller-safe.
+    """
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 class SlotState(str, Enum):
@@ -170,9 +183,10 @@ class ModelManager:
         async with self._registry_lock:
             active_count = self._active_slot_count()
             if max_loaded_models < active_count:
-                raise RuntimeError(
+                raise SlotConflict(
+                    "slot_limit_conflict",
                     f"Cannot reduce max_loaded_models to {max_loaded_models}; "
-                    f"{active_count} models are active or loading."
+                    f"{active_count} models are active or loading.",
                 )
             self.max_loaded_models = max_loaded_models
 
@@ -196,9 +210,10 @@ class ModelManager:
         async with self._registry_lock:
             active_count = self._active_slot_count()
             if active_count >= self.max_loaded_models:
-                raise RuntimeError(
+                raise SlotConflict(
+                    "slot_limit_reached",
                     f"Maximum loaded models ({self.max_loaded_models}) reached. "
-                    "Unload a model first."
+                    "Unload a model first.",
                 )
 
             slot_id = str(uuid.uuid4())[:8]
@@ -333,8 +348,10 @@ class ModelManager:
     def _load_diffusion(
         model_path, pipeline_path, device, model_type, vae_path=None
     ) -> LoadedModel:
-        from diffusion import FLUX2_KLEIN, NUNCHAKU_Z_IMAGE, NunchakuZImage
+        from diffusion import FLUX2_KLEIN, NUNCHAKU_Z_IMAGE, NunchakuZImage, finish_device_work
+        from validation import ModelLoadRefusal
 
+        failure = None
         try:
             if model_type == NUNCHAKU_Z_IMAGE:
                 adapter = NunchakuZImage(model_path, pipeline_path, device)
@@ -343,10 +360,15 @@ class ModelManager:
 
                 adapter = Flux2Klein(model_path, pipeline_path, vae_path, device)
             else:
-                raise ValueError("Unsupported diffusion adapter")
+                raise ModelLoadRefusal("Unsupported diffusion adapter")
             return LoadedModel(adapter, None, device, model_type)
+        except BaseException as error:
+            failure = error
+            raise
         finally:
-            torch.cuda.synchronize(device)
+            # Loading kernels finish before the device lease is released; a
+            # synchronize failure never masks the loader's own error.
+            finish_device_work(device, failure)
 
     @asynccontextmanager
     async def image_lease(self, model_name: str):
@@ -365,6 +387,31 @@ class ModelManager:
             raise RuntimeError("Image runtime is busy")
         async with lock:
             yield slot._loaded.model
+
+    @asynccontextmanager
+    async def text_lease(self, model_name: str):
+        """Hold the slot's device lease for one text generation.
+
+        Queued work is refused rather than waited for, matching image_lease.
+        The caller keeps the lease until its generation worker has stopped.
+        """
+        slot = next(
+            (
+                s
+                for s in self.slots.values()
+                if s.model_name == model_name and s._owned_owner is None
+            ),
+            None,
+        )
+        if slot is None or slot.state != SlotState.READY or slot._loaded is None:
+            raise KeyError(model_name)
+        if slot.model_type in NON_TEXT_MODEL_TYPES or slot._loaded.tokenizer is None:
+            raise ValueError("Selected model does not support text generation")
+        lock = self._get_device_lock(slot.device)
+        if lock.locked():
+            raise SlotConflict("runtime_busy", "Text runtime is busy")
+        async with lock:
+            yield slot._loaded
 
     @property
     def runtime_instance_id(self) -> str:
@@ -483,11 +530,11 @@ class ModelManager:
             if slot is None:
                 raise KeyError(f"Slot not found: {slot_id}")
             if slot._owned_owner is not None:
-                raise RuntimeError("Owned model requires exact owner unload")
+                raise SlotConflict("owned_model", "Owned model requires exact owner unload")
             if slot.state == SlotState.LOADING:
-                raise RuntimeError(f"Cannot unload loading slot: {slot_id}")
+                raise SlotConflict("slot_loading", f"Cannot unload loading slot: {slot_id}")
             if self._get_device_lock(slot.device).locked():
-                raise RuntimeError("Cannot unload a model while its device is busy")
+                raise SlotConflict("runtime_busy", "Cannot unload a model while its device is busy")
             slot.state = SlotState.UNLOADING
 
         try:

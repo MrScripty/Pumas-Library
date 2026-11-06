@@ -105,7 +105,15 @@ impl OnnxRuntimeSession {
             execution_provider: self.execution_provider,
             embedding_dimensions: self.embedding_dimensions,
             state: OnnxSessionState::Loaded,
+            max_input_tokens: self.max_input_tokens(),
         }
+    }
+
+    /// The per-input token limit derived from the model config, if declared.
+    pub fn max_input_tokens(&self) -> Option<usize> {
+        self.model_config
+            .input_token_limit()
+            .map(|limit| limit.max_tokens)
     }
 
     pub fn tokenizer(&self) -> &OnnxTokenizer {
@@ -135,7 +143,9 @@ impl OnnxRuntimeSession {
         if request.model_id != self.model_id {
             return Err(OnnxRuntimeError::not_loaded(&request.model_id));
         }
-        let tokenized = self.tokenizer.tokenize_request(&request)?;
+        let tokenized = self
+            .tokenizer
+            .tokenize_request_within(&request, self.model_config.input_token_limit())?;
         let tensors = TokenTensors::from_tokenized_batch(&tokenized)?;
         let input_ids = TensorRef::from_array_view((
             [tensors.batch_size, tensors.sequence_len],
@@ -169,10 +179,12 @@ impl OnnxRuntimeSession {
             inputs.push(("token_type_ids".into(), token_type_ids.into()));
         }
 
-        let outputs = self
-            .session
-            .run(inputs)
-            .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime inference failed"))?;
+        let outputs = self.session.run(inputs).map_err(|_| {
+            OnnxRuntimeError::backend(format!(
+                "ONNX Runtime inference failed for {} inputs of up to {} tokens",
+                tensors.batch_size, tensors.sequence_len
+            ))
+        })?;
         let postprocess_config = OnnxEmbeddingPostprocessConfig::mean_pool_l2();
         let hidden_states = extract_hidden_states(
             &outputs,

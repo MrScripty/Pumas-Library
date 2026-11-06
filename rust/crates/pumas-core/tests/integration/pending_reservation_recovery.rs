@@ -766,7 +766,12 @@ async fn checkpoint_preflight_bounds_and_stale_legacy_transition_refuse() {
     let checkpoint = authority
         .checkpoint_metadata_for_pending_recovery(PAYLOAD)
         .unwrap();
-    registry.register_instance(&root, 999_999, 1).unwrap();
+    crate::support::inject_foreign_ready_instance(
+        &temp.path().join("registry.db"),
+        &root,
+        999_999,
+        1,
+    );
     assert_eq!(checkpoint_count(temp.path()), 0);
     assert!(authority.cancel().is_err());
     assert!(recover_pending_reservation(

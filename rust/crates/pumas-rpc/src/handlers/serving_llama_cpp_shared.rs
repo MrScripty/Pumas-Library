@@ -43,7 +43,7 @@ pub(super) async fn active_llama_cpp_runtime(
         );
         return Ok(None);
     };
-    let version_dir = version_manager.version_path(&tag);
+    let version_dir = version_manager.version_path(&tag)?;
     Ok(Some((tag, version_dir)))
 }
 

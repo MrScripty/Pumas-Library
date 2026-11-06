@@ -10,7 +10,7 @@ interface BuildAppShellPanelsOptions {
   appDisplayName: string;
   appVersions: AppVersionState;
   connectionUrl?: string | undefined;
-  diskSpacePercent: number;
+  diskSpacePercent: number | null;
   isOllamaRunning: boolean;
   isTorchRunning: boolean;
   modelGroups: ModelCategory[];

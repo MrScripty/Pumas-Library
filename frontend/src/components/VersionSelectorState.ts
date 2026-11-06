@@ -8,7 +8,7 @@ const logger = getLogger('VersionSelector');
 interface VersionSelectorStateInput {
   appId?: string | null;
   activeVersion: string | null;
-  diskSpacePercent: number;
+  diskSpacePercent: number | null;
   hasNewVersion: boolean;
   installedVersions: string[];
   installNetworkStatus: 'idle' | 'downloading' | 'stalled' | 'failed';
@@ -23,6 +23,8 @@ export interface VersionSelectorDisplayState {
   displayVersion: string;
   emphasizeInstall: boolean;
   folderIconColor: string;
+  /** Disk usage for the active install's volume, or that it is unknown. */
+  diskUsageLabel: string;
   hasInstallActivity: boolean;
   hasInstalledVersions: boolean;
   hasVersionsToShow: boolean;
@@ -44,7 +46,8 @@ function combineInstalledVersions(
   return merged.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
-function getFolderIconColor(diskSpacePercent: number): string {
+function getFolderIconColor(diskSpacePercent: number | null): string {
+  if (diskSpacePercent === null) return 'text-tertiary';
   if (diskSpacePercent >= 95) return 'text-accent-error';
   if (diskSpacePercent >= 85) return 'text-accent-warning';
   return 'text-tertiary';
@@ -94,6 +97,9 @@ export function getVersionSelectorDisplayState({
     displayVersion: activeVersion || 'No version selected',
     emphasizeInstall: !hasInstalledVersions && !isLoading,
     folderIconColor: getFolderIconColor(diskSpacePercent),
+    diskUsageLabel: diskSpacePercent === null
+      ? 'Disk usage unavailable'
+      : `Disk ${Math.round(diskSpacePercent)}% used`,
     hasInstallActivity,
     hasInstalledVersions,
     hasVersionsToShow: combinedVersions.length > 0,

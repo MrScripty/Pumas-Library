@@ -51,7 +51,6 @@ mod installer;
 mod launcher;
 mod managed_depot_lease;
 mod managed_python;
-pub mod ollama;
 mod operation_receipt;
 mod progress;
 pub mod size_calculator;
@@ -67,7 +66,6 @@ pub use constraints::ConstraintsManager;
 pub use dependencies::DependencyManager;
 pub use installer::VersionInstaller;
 pub use launcher::VersionLauncher;
-pub use ollama::OllamaVersionManager;
 pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
@@ -178,6 +176,61 @@ async fn wait_for_install_cancel(cancel_flag: Arc<AtomicBool>) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Refuse a version tag that is not exactly one normal path component.
+///
+/// A version directory is `<app>-versions/<tag>`, so the tag must be a single
+/// file name: not empty, not `.` or `..`, with no `/` or `\` separator, no
+/// drive or root prefix, and no NUL. Release tags such as `v0.5.1` or
+/// `b1234+cpu` pass unchanged.
+pub(crate) fn validate_version_tag(tag: &str) -> Result<()> {
+    let mut components = Path::new(tag).components();
+    let single_normal = matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(name)), None) if name == std::ffi::OsStr::new(tag)
+    );
+    if !single_normal || tag.contains(['/', '\\', '\0']) {
+        return Err(PumasError::Validation {
+            field: "tag".into(),
+            message: format!(
+                "Version tag {:?} must be a single directory name without separators or `..`",
+                tag.chars().take(128).collect::<String>()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Why the Torch process recorded at `pid_file` may still use the runtime,
+/// or `None` when nothing recorded there is running.
+///
+/// A verified identity record is checked against the live process. A bare PID
+/// file (no identity record) proves nothing, so it blocks only while some
+/// process holds that PID; it is never signalled here.
+fn torch_process_blocker(pid_file: &Path) -> Option<String> {
+    use pumas_library::platform::process_identity::{
+        read_record, verify, IdentityCheck, PidRecord,
+    };
+    match read_record(pid_file) {
+        Ok(None) => None,
+        Ok(Some(PidRecord::Verified(identity))) => match verify(&identity) {
+            IdentityCheck::Alive => Some(format!("process {} is running", identity.pid)),
+            IdentityCheck::Gone { .. } => None,
+            IdentityCheck::Unverifiable { reason } => Some(reason),
+        },
+        Ok(Some(PidRecord::Unverified {
+            pid: Some(pid),
+            reason,
+        })) if pumas_library::platform::is_process_alive(pid) => {
+            Some(format!("process {pid} may be running: {reason}"))
+        }
+        Ok(Some(PidRecord::Unverified { pid: None, .. })) => {
+            Some(format!("{} holds an invalid PID", pid_file.display()))
+        }
+        Ok(Some(PidRecord::Unverified { .. })) => None,
+        Err(error) => Some(format!("cannot read {}: {error}", pid_file.display())),
     }
 }
 
@@ -595,8 +648,13 @@ impl VersionManager {
     }
 
     /// Get the path to a specific version.
-    pub fn version_path(&self, tag: &str) -> PathBuf {
-        self.versions_dir().join(tag)
+    ///
+    /// The tag must name exactly one directory inside the versions directory;
+    /// see [`validate_version_tag`]. A tag such as `../x` is refused rather
+    /// than joined, so no caller can reach outside `<app>-versions/`.
+    pub fn version_path(&self, tag: &str) -> Result<PathBuf> {
+        validate_version_tag(tag)?;
+        Ok(self.versions_dir().join(tag))
     }
 
     /// Get the active version file path.
@@ -1079,6 +1137,7 @@ impl VersionManager {
                         build: "auto".to_owned(),
                         python: "auto".to_owned(),
                         adapter: "none".to_owned(),
+                        verified_constraints: None,
                         created: std::time::Instant::now(),
                     },
                 })
@@ -1091,6 +1150,7 @@ impl VersionManager {
                     build: "auto".to_owned(),
                     python: "auto".to_owned(),
                     adapter: "none".to_owned(),
+                    verified_constraints: None,
                     created: std::time::Instant::now(),
                 },
             })
@@ -1381,7 +1441,7 @@ impl VersionManager {
         if self.app_id != AppId::Torch {
             return Ok(());
         }
-        let mut pid_paths = vec![self.version_path(tag).join("torch.pid")];
+        let mut pid_paths = vec![self.version_path(tag)?.join("torch.pid")];
         let profiles = self
             .launcher_root
             .join("launcher-data/runtime-profiles/torch");
@@ -1400,23 +1460,17 @@ impl VersionManager {
         }
         // Profiles share the selected environment. Require them to stop before
         // changing runtime selection or deleting files used by a profile.
-        for pid_path in pid_paths {
-            match fs::read_to_string(&pid_path).await {
-                Ok(pid) => {
-                    let pid = pid.trim().parse::<u32>().map_err(|_| {
-                        PumasError::Other(
-                            "Cannot verify Torch process: invalid PID file".to_string(),
-                        )
-                    })?;
-                    if pumas_library::platform::is_process_alive(pid) {
-                        return Err(PumasError::Other(
-                            "Stop Torch before switching or removing its runtime".to_string(),
-                        ));
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(PumasError::io_with_path(error, pid_path)),
-            }
+        let blocker = tokio::task::spawn_blocking(move || {
+            pid_paths
+                .iter()
+                .find_map(|path| torch_process_blocker(path))
+        })
+        .await
+        .map_err(|error| PumasError::Other(format!("Torch process check failed: {error}")))?;
+        if let Some(reason) = blocker {
+            return Err(PumasError::Other(format!(
+                "Stop Torch before switching or removing its runtime ({reason})"
+            )));
         }
         Ok(())
     }
@@ -1471,7 +1525,7 @@ impl VersionManager {
         // Keep directory removal and metadata deletion in one leased worker, so
         // cancelling this waiter cannot release mutation admission while the
         // filesystem and metadata effects are still running.
-        let version_path = self.version_path(tag);
+        let version_path = self.version_path(tag)?;
         let mutations = self.state.read().await.mutation_tasks();
         let metadata = self.metadata_manager.clone();
         let removed_tag = tag.to_owned();
@@ -1725,6 +1779,28 @@ mod tests {
             .await
             .unwrap();
         (manager, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn version_path_admits_only_one_directory_name() {
+        let (manager, _temp) = create_test_manager().await;
+        for tag in ["v0.5.1", "b1234+cpu", "v1.0.0-rc.1"] {
+            assert_eq!(
+                manager.version_path(tag).unwrap(),
+                manager.versions_dir().join(tag)
+            );
+        }
+        for tag in [
+            "../x", "..", ".", "", "a/b", "a\\b", "/abs", "x/..", "nul\0",
+        ] {
+            assert!(
+                matches!(
+                    manager.version_path(tag),
+                    Err(PumasError::Validation { field, .. }) if field == "tag"
+                ),
+                "{tag:?}"
+            );
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -2037,7 +2113,7 @@ mod tests {
                         assets: vec![pumas_library::network::GitHubAsset {
                             name: "ollama-linux-amd64.tgz".into(),
                             size: 100,
-                            download_url: url,
+                            download_url: url.clone(),
                             content_type: Some("application/gzip".into()),
                         }],
                         html_url: "https://github.com/ollama/ollama/releases/tag/v0.1.2".into(),
@@ -2049,9 +2125,35 @@ mod tests {
                 .unwrap();
             let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
             let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let base_url = url.trim_end_matches("/archive").to_owned();
+            let metadata_url = url.clone();
             let server = tokio::spawn(async move {
-                let (mut stream, _) = listener.accept().await.unwrap();
+                // Fresh release metadata supplies the publisher digest that
+                // authorizes the archive; the stall happens on the archive.
+                let (mut metadata, _) = listener.accept().await.unwrap();
                 let mut request = [0; 4096];
+                assert!(metadata.read(&mut request).await.unwrap() > 0);
+                let body = serde_json::to_vec(&serde_json::json!({
+                    "tag_name": "v0.1.2", "assets": [{
+                        "id": 12, "name": "ollama-linux-amd64.tgz", "size": 100,
+                        "browser_download_url": metadata_url,
+                        "digest": format!("sha256:{}", "0".repeat(64)),
+                    }]
+                }))
+                .unwrap();
+                metadata
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                metadata.write_all(&body).await.unwrap();
+                drop(metadata);
+                let (mut stream, _) = listener.accept().await.unwrap();
                 assert!(stream.read(&mut request).await.unwrap() > 0);
                 if send_headers {
                     stream
@@ -2064,9 +2166,20 @@ mod tests {
                 entered_tx.send(()).unwrap();
                 release_rx.await.unwrap();
             });
-            let manager = VersionManager::new(root.path(), AppId::Ollama)
-                .await
-                .unwrap();
+            let manager = VersionManager::new_with_github_client(
+                root.path().to_path_buf(),
+                AppId::Ollama,
+                Some(Arc::new(
+                    GitHubClient::with_loopback_api(
+                        root.path().join("launcher-data/cache"),
+                        Duration::from_secs(3600),
+                        base_url,
+                    )
+                    .unwrap(),
+                )),
+            )
+            .await
+            .unwrap();
             let mut updates = manager.install_version("v0.1.2").await.unwrap();
             tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, entered_rx)
                 .await
@@ -2101,7 +2214,7 @@ mod tests {
                     .to_string(),
                 error
             );
-            assert!(!manager.version_path("v0.1.2").exists());
+            assert!(!manager.version_path("v0.1.2").unwrap().exists());
             assert!(manager
                 .metadata_manager
                 .get_installed_version("v0.1.2", Some(AppId::Ollama))
@@ -2120,8 +2233,12 @@ mod tests {
             .await
             .unwrap();
         for tag in ["b1234+cpu", "b1235+cpu"] {
-            std::fs::create_dir(manager.version_path(tag)).unwrap();
-            std::fs::write(manager.version_path(tag).join("llama-server"), "complete").unwrap();
+            std::fs::create_dir(manager.version_path(tag).unwrap()).unwrap();
+            std::fs::write(
+                manager.version_path(tag).unwrap().join("llama-server"),
+                "complete",
+            )
+            .unwrap();
             manager
                 .state
                 .write()
@@ -2139,7 +2256,11 @@ mod tests {
         manager.set_active_version("b1235+cpu").await.unwrap();
         let lease = installer::NativeVersionsLock::try_acquire(&manager.versions_dir()).unwrap();
         assert!(manager.remove_version("b1234+cpu").await.is_err());
-        assert!(manager.version_path("b1234+cpu/llama-server").exists());
+        assert!(manager
+            .version_path("b1234+cpu")
+            .unwrap()
+            .join("llama-server")
+            .exists());
         assert!(manager
             .metadata_manager
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
@@ -2147,7 +2268,7 @@ mod tests {
             .is_some());
         drop(lease);
         assert!(manager.remove_version("b1234+cpu").await.unwrap());
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         assert!(manager
             .metadata_manager
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
@@ -2175,9 +2296,12 @@ mod tests {
                     .await
                     .unwrap();
                 for tag in ["b1234+cpu", "b1235+cpu"] {
-                    std::fs::create_dir(manager.version_path(tag)).unwrap();
-                    std::fs::write(manager.version_path(tag).join("llama-server"), "complete")
-                        .unwrap();
+                    std::fs::create_dir(manager.version_path(tag).unwrap()).unwrap();
+                    std::fs::write(
+                        manager.version_path(tag).unwrap().join("llama-server"),
+                        "complete",
+                    )
+                    .unwrap();
                     manager
                         .state
                         .write()
@@ -2204,8 +2328,8 @@ mod tests {
                     tokio::spawn(async move { removing.remove_version("b1234+cpu").await });
                 pause.entered.notified().await;
                 if fail_removal {
-                    std::fs::remove_dir_all(manager.version_path("b1234+cpu")).unwrap();
-                    std::fs::write(manager.version_path("b1234+cpu"), "retained").unwrap();
+                    std::fs::remove_dir_all(manager.version_path("b1234+cpu").unwrap()).unwrap();
+                    std::fs::write(manager.version_path("b1234+cpu").unwrap(), "retained").unwrap();
                 }
                 let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
                 let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -2232,7 +2356,7 @@ mod tests {
                         .await
                         .is_err()
                 );
-                assert!(manager.version_path("b1234+cpu").exists());
+                assert!(manager.version_path("b1234+cpu").unwrap().exists());
                 assert!(
                     installer::NativeVersionsLock::try_acquire(&manager.versions_dir()).is_err()
                 );
@@ -2249,12 +2373,12 @@ mod tests {
                 if fail_removal {
                     assert!(outcome.as_ref().unwrap_err().contains("b1234+cpu"));
                     assert_eq!(
-                        std::fs::read(manager.version_path("b1234+cpu")).unwrap(),
+                        std::fs::read(manager.version_path("b1234+cpu").unwrap()).unwrap(),
                         b"retained"
                     );
                 } else {
                     assert!(outcome.is_ok());
-                    assert!(!manager.version_path("b1234+cpu").exists());
+                    assert!(!manager.version_path("b1234+cpu").unwrap().exists());
                 }
                 assert_eq!(
                     manager
@@ -2405,7 +2529,10 @@ mod tests {
             manager.shutdown_installations().await.unwrap();
             api.shutdown_instance().await.unwrap();
             let versions = manager.versions_dir();
-            let output = manager.version_path("b1234+cpu").join("bin/llama-server");
+            let output = manager
+                .version_path("b1234+cpu")
+                .unwrap()
+                .join("bin/llama-server");
             let output_before = std::fs::read(&output).unwrap();
             let store_path = root.path().join("launcher-data/downloads.json");
             let store_before = std::fs::read(&store_path).unwrap();
@@ -2571,7 +2698,7 @@ mod tests {
             b"replacement"
         );
         assert_eq!(std::fs::read(retired.join(input)).unwrap(), original_input);
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         let _ = api.shutdown_acquisition().await;
     }
 
@@ -2645,7 +2772,7 @@ mod tests {
             .as_object()
             .unwrap()
             .is_empty());
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         assert!(manager
             .metadata_manager
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
@@ -2712,6 +2839,7 @@ mod tests {
         reopened.shutdown_installations().await.unwrap();
         assert!(reopened
             .version_path("b1234+cpu")
+            .unwrap()
             .join("bin/llama-server")
             .is_file());
         assert!(reopened
@@ -2871,7 +2999,7 @@ mod tests {
         // The installer wraps the extracted binary in a launcher. The exact
         // archive payload is checked above; later snapshots preserve the full
         // staged output without assuming its generated launcher bytes.
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         assert!(manager
             .metadata_manager
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
@@ -2881,7 +3009,7 @@ mod tests {
         // Seed plausible orphan publication only after both owners have drained.
         // Matching executable bytes and installed metadata cannot authorize this
         // exact retained use without its consumer completion receipt.
-        let destination = manager.version_path("b1234+cpu");
+        let destination = manager.version_path("b1234+cpu").unwrap();
         let orphan_metadata = pumas_library::metadata::InstalledVersionMetadata {
             path: "b1234+cpu".into(),
             installed_date: "2026-09-29T00:00:00Z".into(),
@@ -3245,7 +3373,7 @@ mod tests {
         };
         let install_shutdown =
             tokio::time::timeout(Duration::from_secs(8), manager.shutdown_installations()).await;
-        let version_path = manager.version_path("b1234+cpu");
+        let version_path = manager.version_path("b1234+cpu").unwrap();
         let manager_shutdown_ok = install_shutdown.is_ok_and(|result| result.is_err());
         drop(updates);
         let acquisition_shutdown =
@@ -3695,7 +3823,7 @@ mod tests {
             .versions_dir()
             .join(record["workspace"]["relative_target"].as_str().unwrap());
         let stage = workspace.join("output");
-        let destination = manager.version_path("b1234+cpu");
+        let destination = manager.version_path("b1234+cpu").unwrap();
         let launcher = destination.join("bin/llama-server");
         let expected_launcher = concat!(
             "#!/bin/sh\n",
@@ -4242,7 +4370,7 @@ mod tests {
             .expect("extraction and proof must reach the receipt boundary");
         // This destination belongs solely to the test. Create the conflict
         // after extraction so the real receipt is durable before publication fails.
-        let destination = manager.version_path("b1234+cpu");
+        let destination = manager.version_path("b1234+cpu").unwrap();
         std::fs::create_dir_all(destination.join("bin")).unwrap();
         std::fs::write(destination.join("bin/llama-server"), b"test-owned conflict").unwrap();
         let conflict = snapshot(&destination);
@@ -4603,7 +4731,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         assert!(manager
             .metadata_manager
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
@@ -4625,11 +4753,15 @@ mod tests {
         .unwrap();
         server.await.unwrap();
         manager.shutdown_installations().await.unwrap();
-        let output =
-            std::process::Command::new(manager.version_path("b1234+cpu").join("bin/llama-server"))
-                .current_dir(root.path())
-                .output()
-                .unwrap();
+        let output = std::process::Command::new(
+            manager
+                .version_path("b1234+cpu")
+                .unwrap()
+                .join("bin/llama-server"),
+        )
+        .current_dir(root.path())
+        .output()
+        .unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, b"native-fixture");
         let document: serde_json::Value = serde_json::from_slice(
@@ -4746,7 +4878,7 @@ mod tests {
             .unwrap();
         keep.path = "b9999+cpu".into();
         keep.release_tag = "b9999+cpu".into();
-        std::fs::create_dir(reinstall.version_path("b9999+cpu")).unwrap();
+        std::fs::create_dir(reinstall.version_path("b9999+cpu").unwrap()).unwrap();
         reinstall
             .state
             .write()
@@ -4763,7 +4895,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!reinstall.version_path("b1234+cpu").exists());
+        assert!(!reinstall.version_path("b1234+cpu").unwrap().exists());
         let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
         reinstall.github_client = Arc::new(
             GitHubClient::with_loopback_api(
@@ -4915,7 +5047,7 @@ mod tests {
             .await
             .expect("native installation must report terminal progress");
 
-            let destination = manager.version_path("b1234+cpu");
+            let destination = manager.version_path("b1234+cpu").unwrap();
             let launcher = destination.join("bin/llama-server");
             let output = tokio::time::timeout(
                 Duration::from_secs(5),
@@ -5234,10 +5366,10 @@ mod tests {
             // the post-publication Setup send also settles while still full.
             if shutdown_signal {
                 outcome.unwrap();
-                assert!(manager.version_path("b1234+cpu").exists());
+                assert!(manager.version_path("b1234+cpu").unwrap().exists());
             } else {
                 assert!(matches!(outcome, Err(PumasError::DownloadCancelled)));
-                assert!(!manager.version_path("b1234+cpu").exists());
+                assert!(!manager.version_path("b1234+cpu").unwrap().exists());
             }
             assert!(
                 matches!(receiver.recv().await, Some(ProgressUpdate::Setup { message }) if message == "full")
@@ -5392,7 +5524,7 @@ mod tests {
         );
         release.send(false).unwrap();
         server.await.unwrap();
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         assert!(manager
             .metadata_manager
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
@@ -5498,7 +5630,7 @@ mod tests {
             std::fs::read(retired.join("owned-sentinel")).unwrap(),
             b"retain owned data on binding loss"
         );
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         assert!(manager
             .metadata_manager
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
@@ -5577,7 +5709,7 @@ mod tests {
             std::fs::read(stage.join("retained-sentinel")).unwrap(),
             b"source failure retains custody"
         );
-        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(!manager.version_path("b1234+cpu").unwrap().exists());
         api.shutdown_acquisition().await.unwrap();
     }
 
@@ -5738,6 +5870,7 @@ mod tests {
                 build: "auto".into(),
                 python: "auto".into(),
                 adapter: "none".into(),
+                verified_constraints: None,
                 created: std::time::Instant::now()
                     - torch_preview::PREVIEW_TTL
                     - Duration::from_secs(1),
@@ -5944,7 +6077,7 @@ mod tests {
     }
 
     async fn register_test_version(manager: &VersionManager, tag: &str) {
-        let runtime = manager.version_path(tag);
+        let runtime = manager.version_path(tag).unwrap();
         std::fs::create_dir_all(&runtime).unwrap();
         let python = pumas_library::platform::paths::venv_python(&runtime);
         std::fs::create_dir_all(python.parent().unwrap()).unwrap();
@@ -6026,7 +6159,13 @@ mod tests {
     async fn torch_activation_requires_identity_manifest() {
         let (manager, _root) = create_torch_test_manager().await;
         register_test_version(&manager, "v2.10.0").await;
-        std::fs::remove_file(manager.version_path("v2.10.0").join("runtime.json")).unwrap();
+        std::fs::remove_file(
+            manager
+                .version_path("v2.10.0")
+                .unwrap()
+                .join("runtime.json"),
+        )
+        .unwrap();
         let error = manager.set_active_version("v2.10.0").await.unwrap_err();
         assert!(error.to_string().contains("identity manifest"));
     }
@@ -6036,7 +6175,7 @@ mod tests {
     async fn qualified_legacy_torch_activation_uses_trusted_recipe_identity() {
         let (manager, _root) = create_torch_test_manager().await;
         register_test_version(&manager, "v2.9.1").await;
-        let runtime = manager.version_path("v2.9.1");
+        let runtime = manager.version_path("v2.9.1").unwrap();
         std::fs::remove_file(runtime.join("resolution.json")).unwrap();
         std::fs::write(
             runtime.join("runtime.json"),
@@ -6058,7 +6197,7 @@ mod tests {
         register_test_version(&manager, "bad").await;
         manager.set_default_version(Some("good")).await.unwrap();
         manager.set_active_version("bad").await.unwrap();
-        std::fs::remove_file(manager.version_path("bad").join("runtime.json")).unwrap();
+        std::fs::remove_file(manager.version_path("bad").unwrap().join("runtime.json")).unwrap();
         let restored = VersionManager::new(root.path(), AppId::Torch)
             .await
             .unwrap();
@@ -6109,8 +6248,8 @@ mod tests {
             Err(PumasError::VersionNotFound { tag }) if tag == "remove"
         ));
 
-        assert!(!manager.version_path("remove").exists());
-        assert!(manager.version_path("keep").exists());
+        assert!(!manager.version_path("remove").unwrap().exists());
+        assert!(manager.version_path("keep").unwrap().exists());
         assert_eq!(
             manager.get_installed_versions().await.unwrap(),
             vec!["keep"]
@@ -6170,7 +6309,7 @@ mod tests {
 
         let error = manager.remove_version("selected").await.unwrap_err();
         assert!(error.to_string().contains("currently active"));
-        assert!(manager.version_path("selected").exists());
+        assert!(manager.version_path("selected").unwrap().exists());
         assert_eq!(
             manager.get_installed_versions().await.unwrap(),
             vec!["selected"]
@@ -6233,7 +6372,7 @@ mod tests {
         let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
 
         assert!(other_manager.remove_version("remove").await.is_err());
-        assert!(other_manager.version_path("remove").exists());
+        assert!(other_manager.version_path("remove").unwrap().exists());
         assert!(other_manager
             .metadata_manager
             .get_installed_version("remove", Some(AppId::Torch))
@@ -6242,7 +6381,7 @@ mod tests {
 
         drop(owner);
         assert!(other_manager.remove_version("remove").await.unwrap());
-        assert!(!other_manager.version_path("remove").exists());
+        assert!(!other_manager.version_path("remove").unwrap().exists());
         assert!(other_manager
             .metadata_manager
             .get_installed_version("remove", Some(AppId::Torch))
@@ -6568,7 +6707,7 @@ mod tests {
         let removing_manager = manager.clone();
         let removing = tokio::spawn(async move { removing_manager.remove_version("remove").await });
         pause.entered.notified().await;
-        assert!(!manager.version_path("remove").exists());
+        assert!(!manager.version_path("remove").unwrap().exists());
         assert!(manager
             .metadata_manager
             .load_versions(Some(AppId::Torch))
@@ -6641,8 +6780,8 @@ mod tests {
         assert!(manager.set_default_version(Some("remove")).await.unwrap());
 
         assert!(manager.remove_version("remove").await.unwrap());
-        assert!(!manager.version_path("remove").exists());
-        assert!(manager.version_path("keep").exists());
+        assert!(!manager.version_path("remove").unwrap().exists());
+        assert!(manager.version_path("keep").unwrap().exists());
         assert_eq!(
             manager.get_installed_versions().await.unwrap(),
             vec!["keep"]
@@ -6725,7 +6864,7 @@ mod tests {
         let manager = VersionManager::new(root.path(), AppId::Torch)
             .await
             .unwrap();
-        let runtime = manager.version_path("torch-runtime-running");
+        let runtime = manager.version_path("torch-runtime-running").unwrap();
         std::fs::create_dir_all(&runtime).unwrap();
         std::fs::write(runtime.join("torch.pid"), std::process::id().to_string()).unwrap();
         let error = manager
@@ -6734,6 +6873,37 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("Stop Torch"));
         assert!(runtime.join("torch.pid").exists());
+    }
+
+    #[test]
+    fn torch_process_blocker_trusts_identity_records_over_bare_pids() {
+        use pumas_library::platform::process_identity::{capture, write_record};
+        let root = TempDir::new().unwrap();
+        let pid_file = root.path().join("torch.pid");
+        assert_eq!(super::torch_process_blocker(&pid_file), None);
+
+        // A verified live record blocks.
+        let live = capture(std::process::id()).unwrap();
+        write_record(&pid_file, &live).unwrap();
+        assert!(super::torch_process_blocker(&pid_file)
+            .is_some_and(|reason| reason.contains("is running")));
+
+        // A record whose PID now belongs to another process does not.
+        let mut reused = live.clone();
+        reused.start_time = reused.start_time.wrapping_add(1);
+        write_record(&pid_file, &reused).unwrap();
+        assert_eq!(super::torch_process_blocker(&pid_file), None);
+
+        // A bare PID file proves nothing; it blocks only while the PID is live.
+        std::fs::remove_file(pumas_library::platform::process_identity::identity_path(
+            &pid_file,
+        ))
+        .unwrap();
+        assert!(super::torch_process_blocker(&pid_file)
+            .is_some_and(|reason| reason.contains("may be running")));
+        std::fs::write(&pid_file, "not-a-pid").unwrap();
+        assert!(super::torch_process_blocker(&pid_file)
+            .is_some_and(|reason| reason.contains("invalid PID")));
     }
 
     #[tokio::test]
@@ -6849,7 +7019,7 @@ mod tests {
         assert_eq!(manager.logs_dir(), temp.path().join("launcher-data/logs"));
         assert_eq!(manager.cache_dir(), temp.path().join("launcher-data/cache"));
         assert_eq!(
-            manager.version_path("v1.0.0"),
+            manager.version_path("v1.0.0").unwrap(),
             temp.path().join("ollama-versions/v1.0.0")
         );
     }

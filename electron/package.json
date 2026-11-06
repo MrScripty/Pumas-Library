@@ -52,6 +52,8 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/**/*.map",
+      "!dist/**/*.d.ts",
       "package.json"
     ],
     "extraResources": [
@@ -128,10 +130,7 @@
           ]
         }
       ],
-      "icon": "build/icons/icon.ico",
-      "signtoolOptions": {
-        "publisherName": "Pumas Library Team"
-      }
+      "icon": "build/icons/icon.ico"
     },
     "nsis": {
       "oneClick": false,

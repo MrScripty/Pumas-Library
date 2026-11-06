@@ -29,7 +29,7 @@ async fn serving_test_state() -> (TempDir, AppState) {
                 SizeCalculator::new_with_cache(launcher_root.join("launcher-data/cache")).await,
             )),
             plugin_loader: Arc::new(plugin_loader),
-            gateway_http_client: reqwest::Client::new(),
+            gateway_http_client: reqwest::Client::new().into(),
             gateway_base_url: pumas_library::models::RuntimeEndpointUrl::parse(
                 "http://127.0.0.1:3456/v1",
             )

@@ -49,7 +49,7 @@ Generation and packaging can require external host toolchains. See
 
 | Directory | Purpose |
 | --- | --- |
-| `release/` | Artifact plan and inventory checker, runtime staging and probes, package smoke checks, notices and release metadata; [Releasing](../RELEASING.md) owns their use |
+| `release/` | Artifact plan and inventory checker, dependency scan, renderer variant check, runtime staging and probes, package smoke checks, notices and release metadata; [Releasing](../RELEASING.md) owns their use |
 | `tests/` | Qualification runners and contract tests for S3 RPC paths and Hugging Face cached search |
 | `acceptance/` | Real-process acceptance helpers (download-location reconciliation, FLUX.2 RPC); point them only at temporary libraries |
 | `consumers/` | Reference consumers of the local HTTP owner contract, not supported SDKs; see the [local HTTP consumer contract](../docs/contracts/local-http-consumer.md) |

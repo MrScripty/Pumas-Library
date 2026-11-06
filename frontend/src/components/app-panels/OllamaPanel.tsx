@@ -12,7 +12,7 @@ export interface OllamaPanelProps {
   versions: AppVersionState;
   showVersionManager: boolean;
   onShowVersionManager: (show: boolean) => void;
-  diskSpacePercent: number;
+  diskSpacePercent: number | null;
   modelManagerProps: ModelManagerProps;
   isOllamaRunning: boolean;
   modelGroups: ModelCategory[];

@@ -40,6 +40,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
@@ -84,6 +86,57 @@ jobs:
       - run: python scripts/release/test_s3_build_provenance.py
       - run: python scripts/rust/test_native_qualification.py
 
+  # Produces the `current-vulnerability-results` release review
+  # (docs/SECURITY.md#dependency-scans). Advisory on pull requests and ordinary
+  # pushes; blocking on version tags and candidate dispatches.
+  dependency-audit:
+    name: Dependency vulnerability and license scan
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      # cargo-deny reads the graph through `cargo metadata`.
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Install checksum-pinned scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes -r scripts/dev/pip-audit-python.lock
+          tool_dir="$RUNNER_TEMP/cargo-deny"
+          mkdir -p "$tool_dir"
+          curl --fail --location --retry 3 \
+            https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz \
+            --output "$tool_dir/cargo-deny.tar.gz"
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $tool_dir/cargo-deny.tar.gz" | sha256sum --check
+          tar -xzf "$tool_dir/cargo-deny.tar.gz" -C "$tool_dir" --strip-components=1 cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
+      - name: Scan Rust, JavaScript and Python dependency inputs
+        id: scan
+        # Advisory outside candidate runs: the step may fail without failing the
+        # job, and the next step reports it as a warning on the run.
+        continue-on-error: ${{ !((github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)) }}
+        run: node scripts/release/dependency-audit.mjs run --output "${{ runner.temp }}/current-vulnerability-results" --cargo-deny "${{ runner.temp }}/cargo-deny/cargo-deny" --python python
+      - name: Report an advisory scan failure
+        if: steps.scan.outcome == 'failure'
+        run: echo "::warning title=Dependency scan found unaccepted findings::Advisory on this run; version tags and candidate runs fail on it. See the current-vulnerability-results artifact."
+      - name: Upload current vulnerability results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: current-vulnerability-results
+          path: ${{ runner.temp }}/current-vulnerability-results/
+          if-no-files-found: error
+
   rust-quality:
     name: Rust quality
     needs: lint-workflows
@@ -91,6 +144,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Reads the repository's rust-toolchain.toml; no second toolchain pin.
       - name: Install repository Rust toolchain
         run: rustup toolchain install --no-self-update
@@ -108,6 +163,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install repository Rust toolchain
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -161,6 +218,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install repository Rust toolchain
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -259,10 +318,12 @@ jobs:
             ${{ runner.temp }}/native-loader.json
           if-no-files-found: ignore
 
+  # The review jobs also run on pushes to main, so the merged commit gets the
+  # same gates as its pull request (a merge result can differ from the PR head).
   review-inference-linux:
     name: Review Linux inference candidate
     needs: lint-workflows
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -333,7 +394,7 @@ jobs:
   review-audio-dependencies:
     name: Review confined audio dependencies
     needs: lint-workflows
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -439,6 +500,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -455,13 +518,18 @@ jobs:
       - run: pnpm --dir frontend lint
       - run: pnpm --dir frontend check:types
       - run: pnpm --dir frontend test:run
+      # Both renderer variants build on every trigger. The library-only bundle
+      # goes to its own directory so it never mixes with the packaging input.
+      - name: Test library-only renderer behavior
+        run: pnpm --dir frontend test:library-only
       - name: Build library-only renderer
-        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
-        run: pnpm --dir frontend build:library-only
-      # Restore the default renderer before publishing the packaging input.
+        run: pnpm --dir frontend build:library-only --outDir "${{ runner.temp }}/frontend-library-only" --emptyOutDir
+      - name: Verify library-only renderer excludes inference plugins
+        run: node scripts/release/check-frontend-variant.mjs "${{ runner.temp }}/frontend-library-only" library-only
       - name: Build default renderer
-        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
         run: pnpm --dir frontend build
+      - name: Verify default renderer includes inference plugins
+        run: node scripts/release/check-frontend-variant.mjs frontend/dist default
       - run: pnpm --dir electron lint
       - run: pnpm --dir electron validate
       - run: npm run test:launcher
@@ -526,9 +594,12 @@ jobs:
       # validate host APIs without claiming GPU inference or model support.
       - if: matrix.shard == 'torch'
         run: python -m unittest discover -s torch-server/tests
+      # The acceptance tooling reads managed CPython .tar.zst archives with
+      # `compression.zstd`, which needs CPython 3.14; the repository runtime
+      # stays on .python-version. One exact pin serves both acceptance jobs.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.14'
+          python-version-file: scripts/release/acceptance.python-version
       - name: Self-test native Torch acceptance script
         if: matrix.shard == 'torch'
         run: python scripts/release/torch-managed-python-acceptance.py --self-test
@@ -571,9 +642,10 @@ jobs:
         with:
           workspaces: rust -> target
           key: torch-native-e2e-${{ runner.os }}
+      # CPython 3.14 for `compression.zstd`; see the torch-quality pin.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.14'
+          python-version-file: scripts/release/acceptance.python-version
       - name: Build native RPC for Torch acceptance
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc
       - name: Accept v2.14 CPU/Core via native RPC (${{ runner.os }})
@@ -604,6 +676,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install repository Rust toolchain
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -649,6 +723,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -717,6 +793,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -785,6 +863,8 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install repository Rust toolchain
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -853,6 +933,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
@@ -913,6 +995,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -941,12 +1025,14 @@ jobs:
 
   release-candidate:
     name: Assemble release candidate
-    needs: [rust-quality, headless, headless-rpc, headless-inference, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
+    needs: [dependency-audit, rust-quality, headless, headless-rpc, headless-inference, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
     if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
@@ -959,6 +1045,14 @@ jobs:
           pattern: headless-*
           path: candidate-input
       - run: node scripts/release/check-artifacts.mjs candidate-input required release-candidate
+      # The candidate's dependency review travels as its own workflow artifact;
+      # it must describe this exact source and pass.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: current-vulnerability-results
+          path: ${{ runner.temp }}/current-vulnerability-results
+      - name: Verify the candidate's current vulnerability results
+        run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/current-vulnerability-results" current-vulnerability-results "${{ github.sha }}"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version-file: .python-version

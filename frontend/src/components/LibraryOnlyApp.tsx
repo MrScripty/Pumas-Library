@@ -24,8 +24,8 @@ export default function LibraryOnlyApp() {
     refetch: refetchStatus,
   } = useStatus();
   const { fetchDiskSpace } = useDiskSpace();
-  const { modelGroups, libraryLoadStatus, scanModels, fetchModels } = useModels();
-  const { activeDownload, activeDownloadCount } = useActiveModelDownload();
+  const { modelGroups, libraryLoadStatus, libraryDiagnostics, scanModels, fetchModels } = useModels();
+  const { activeDownload, activeDownloadCount, activeDownloadError } = useActiveModelDownload();
   const {
     checkLauncherUpdates,
     checkLauncherVersion,
@@ -78,6 +78,7 @@ export default function LibraryOnlyApp() {
         modelLibraryLoaded={modelLibraryLoaded}
         activeModelDownload={activeDownload}
         activeModelDownloadCount={activeDownloadCount}
+        activeModelDownloadError={activeDownloadError}
       />
       <StatusNoticesBanner notices={status?.notices ?? []} />
 
@@ -85,6 +86,7 @@ export default function LibraryOnlyApp() {
         <ModelManager
           modelGroups={modelGroups}
           libraryLoadStatus={libraryLoadStatus}
+          libraryDiagnostics={libraryDiagnostics}
           starredModels={starredModels}
           excludedModels={excludedModels}
           onToggleStar={toggleStar}

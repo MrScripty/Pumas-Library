@@ -1217,15 +1217,6 @@ impl CacheStrategy for GitHubClient {
     fn default_ttl(&self) -> Duration {
         NetworkConfig::GITHUB_RELEASES_TTL
     }
-
-    fn allow_stale_on_offline(&self) -> bool {
-        true
-    }
-
-    fn max_stale_age(&self) -> Option<Duration> {
-        // Allow stale data up to 7 days old
-        Some(Duration::from_secs(7 * 24 * 60 * 60))
-    }
 }
 
 #[async_trait]

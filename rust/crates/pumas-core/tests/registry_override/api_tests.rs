@@ -1382,6 +1382,8 @@ async fn test_resolve_pumas_model_ref_api_surface() {
 /// A field this version does not know (for example one written by a newer
 /// Pumas) disables downloads with a reported reason instead of failing startup,
 /// and leaves the saved download state byte-for-byte untouched.
+// The notice comes from the HuggingFace client, which only `hf-client` builds start.
+#[cfg(feature = "hf-client")]
 #[tokio::test]
 async fn unreadable_download_state_disables_downloads_without_blocking_startup() {
     let temp_dir = TempDir::new().unwrap();

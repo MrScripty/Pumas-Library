@@ -38,15 +38,17 @@ pub(super) async fn is_decision_model(state: &AppState, served: &ServedModelStat
     if base.query().is_some() || base.fragment().is_some() {
         return false;
     }
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    let client = CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(2))
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .build()
+    static CLIENT: OnceLock<crate::provider_clients::ProviderHttp> = OnceLock::new();
+    let client = CLIENT
+        .get_or_init(|| {
+            crate::provider_clients::ProviderHttp::build(|builder| {
+                builder
+                    .connect_timeout(Duration::from_secs(2))
+                    .retry(reqwest::retry::never())
+            })
             .expect("decision declaration client")
-    });
+        })
+        .for_url(endpoint.as_str());
     let read = async {
         let mut response = client
             .get(format!(

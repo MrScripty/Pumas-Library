@@ -474,55 +474,62 @@ impl VersionState {
         let active_file = super::active_version_path(&self.launcher_root, self.app_id);
         self.mutation_tasks
             .leased_transaction(lock, move || {
-                let mut versions = metadata_manager.load_versions(Some(AppId::LlamaCpp))?;
-                let replacements = legacy_llama_cpp_sycl_replacements(&versions.installed);
-                if replacements.is_empty() {
+                // Skip the write entirely on the common no-legacy-tags path.
+                let current = metadata_manager.load_versions(Some(AppId::LlamaCpp))?;
+                if legacy_llama_cpp_sycl_replacements(&current.installed).is_empty() {
                     return Ok(());
                 }
-                for (old_tag, new_tag) in &replacements {
-                    let Some(mut metadata) = versions.installed.remove(old_tag) else {
-                        continue;
-                    };
-                    metadata.path = new_tag.clone();
-                    metadata.release_tag = new_tag.clone();
-                    versions
-                        .installed
-                        .entry(new_tag.clone())
-                        .or_insert(metadata);
-                    if versions.last_selected_version.as_ref() == Some(old_tag) {
-                        versions.last_selected_version = Some(new_tag.clone());
-                    }
-                    if versions.default_version.as_ref() == Some(old_tag) {
-                        versions.default_version = Some(new_tag.clone());
-                    }
-                }
-                for (old_tag, new_tag) in replacements {
-                    let old_path = versions_dir.join(&old_tag);
-                    let new_path = versions_dir.join(&new_tag);
-                    if old_path
-                        .try_exists()
-                        .map_err(|error| PumasError::io_with_path(error, &old_path))?
-                        && !new_path
-                            .try_exists()
-                            .map_err(|error| PumasError::io_with_path(error, &new_path))?
-                    {
-                        std::fs::rename(&old_path, &new_path)
-                            .map_err(|error| PumasError::io_with_path(error, &old_path))?;
-                    }
-                    match std::fs::read_to_string(&active_file) {
-                        Ok(active) if active.trim() == old_tag => {
-                            std::fs::write(&active_file, new_tag)
-                                .map_err(|error| PumasError::io_with_path(error, &active_file))?;
+                // Recompute under the versions write lock so a concurrent
+                // writer's change is neither lost nor overwritten. A failed
+                // rename returns an error before anything is written, keeping
+                // the old tags durable so a partial migration can retry.
+                metadata_manager.update_versions(Some(AppId::LlamaCpp), |versions| {
+                    let replacements = legacy_llama_cpp_sycl_replacements(&versions.installed);
+                    for (old_tag, new_tag) in &replacements {
+                        let Some(mut metadata) = versions.installed.remove(old_tag) else {
+                            continue;
+                        };
+                        metadata.path = new_tag.clone();
+                        metadata.release_tag = new_tag.clone();
+                        versions
+                            .installed
+                            .entry(new_tag.clone())
+                            .or_insert(metadata);
+                        if versions.last_selected_version.as_ref() == Some(old_tag) {
+                            versions.last_selected_version = Some(new_tag.clone());
                         }
-                        Ok(_) => {}
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
+                        if versions.default_version.as_ref() == Some(old_tag) {
+                            versions.default_version = Some(new_tag.clone());
+                        }
                     }
-                }
-                // Keep the old tags durable until every rename and active
-                // pointer update succeeds, so a partial migration can retry.
-                metadata_manager.save_versions(&versions, Some(AppId::LlamaCpp))?;
-                Ok(())
+                    for (old_tag, new_tag) in replacements {
+                        let old_path = versions_dir.join(&old_tag);
+                        let new_path = versions_dir.join(&new_tag);
+                        if old_path
+                            .try_exists()
+                            .map_err(|error| PumasError::io_with_path(error, &old_path))?
+                            && !new_path
+                                .try_exists()
+                                .map_err(|error| PumasError::io_with_path(error, &new_path))?
+                        {
+                            std::fs::rename(&old_path, &new_path)
+                                .map_err(|error| PumasError::io_with_path(error, &old_path))?;
+                        }
+                        match std::fs::read_to_string(&active_file) {
+                            Ok(active) if active.trim() == old_tag => {
+                                std::fs::write(&active_file, new_tag).map_err(|error| {
+                                    PumasError::io_with_path(error, &active_file)
+                                })?;
+                            }
+                            Ok(_) => {}
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(error) => {
+                                return Err(PumasError::io_with_path(error, &active_file))
+                            }
+                        }
+                    }
+                    Ok(())
+                })
             })
             .await
     }

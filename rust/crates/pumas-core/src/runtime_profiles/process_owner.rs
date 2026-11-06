@@ -1,6 +1,13 @@
 //! Session custody for managed binary profiles. PID files are diagnostics, never
 //! authority to adopt or signal a process. Unix leaders remain unreaped until
 //! group cleanup completes; Windows generations retain a kill-on-close Job.
+//!
+//! Each launch records its PID with an identity sidecar (see
+//! `platform::process_identity`). A PID file left by a crashed session is
+//! reclaimed only when its record proves the recorded process is gone; a live
+//! or unprovable record still blocks the launch, with a reason. On Linux the
+//! child leader is bound to its supervising worker thread with
+//! `PR_SET_PDEATHSIG`, so it does not outlive a crashed Pumas.
 
 use super::router_model_operation::{OwnedRouterModelOperation, RouterModelState};
 use super::{RuntimeProfileLaunchSpec, RuntimeProfileOperationGuard};
@@ -882,6 +889,76 @@ async fn drain_session(session: &Session) -> Result<bool> {
     }
 }
 
+/// Create the PID file exclusively. An existing file is reclaimed only when its
+/// record proves the recorded process is gone (a crashed earlier session);
+/// otherwise the launch is refused with the reason.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn reserve_pid_file(path: &std::path::Path) -> Result<std::fs::File> {
+    let create = || {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+    };
+    match create() {
+        Ok(file) => return Ok(file),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            return Err(failure(format!(
+                "Cannot reserve managed runtime PID metadata: {e}"
+            )))
+        }
+    }
+    match stale_pid_record(path) {
+        Ok(reason) => {
+            tracing::info!("Reclaiming stale runtime PID file {path:?}: {reason}");
+            crate::platform::process_identity::remove_record(path)
+                .map_err(|e| PumasError::io_with_path(e, path))?;
+            create().map_err(|e| {
+                failure(format!(
+                    "Cannot reserve managed runtime PID metadata after reclaiming a stale file: {e}"
+                ))
+            })
+        }
+        Err(reason) => Err(failure(format!(
+            "Cannot reserve managed runtime PID metadata: an existing PID file is not \
+             provably stale ({reason}); stop that process or remove {} if it is not running",
+            path.display()
+        ))),
+    }
+}
+
+/// `Ok(reason)` when the PID file's record names no running process,
+/// `Err(reason)` when it may still name one.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn stale_pid_record(path: &std::path::Path) -> std::result::Result<String, String> {
+    use crate::platform::process_identity::{read_record, verify, IdentityCheck, PidRecord};
+    match read_record(path) {
+        Ok(None) => Ok("the PID file disappeared".into()),
+        Ok(Some(PidRecord::Verified(identity))) => match verify(&identity) {
+            IdentityCheck::Gone { reason } => Ok(reason),
+            IdentityCheck::Alive => Err(format!(
+                "its recorded process {} is still running",
+                identity.pid
+            )),
+            IdentityCheck::Unverifiable { reason } => Err(reason),
+        },
+        Ok(Some(PidRecord::Unverified { pid: Some(pid), .. }))
+            if !crate::platform::process::is_process_alive(pid) =>
+        {
+            Ok(format!("no process with PID {pid} exists"))
+        }
+        Ok(Some(PidRecord::Unverified {
+            pid: Some(pid),
+            reason,
+        })) => Err(format!("PID {pid} is running and {reason}")),
+        Ok(Some(PidRecord::Unverified { pid: None, .. })) => {
+            Err("the PID file does not contain a PID".into())
+        }
+        Err(e) => Err(format!("the PID file is unreadable: {e}")),
+    }
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfileOperationGuard) {
     let mut child = None;
@@ -893,19 +970,11 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         if let Some(models) = &session.router_models {
             RouterModelState::capture(models)?;
         }
-        // Reserve diagnostic metadata without adopting or replacing existing state.
+        // Reserve diagnostic metadata without adopting or replacing live state.
         if let Some(parent) = config.pid_file.parent() {
             std::fs::create_dir_all(parent).map_err(|e| PumasError::io_with_path(e, parent))?;
         }
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&config.pid_file)
-            .map_err(|e| {
-                failure(format!(
-                    "Cannot reserve managed runtime PID metadata (existing files are unowned): {e}"
-                ))
-            })?;
+        let mut file = reserve_pid_file(&config.pid_file)?;
         pid_file = Some((
             config.pid_file.clone(),
             file.try_clone()
@@ -922,6 +991,9 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         if let Some(arg) = &config.command {
             command.arg(arg);
         }
+        // Owned children start from an allowlisted environment; the launch
+        // configuration's variables are applied on top.
+        crate::platform::child_environment::apply_owned_child_environment(&mut command);
         command
             .args(&config.extra_args)
             .envs(&config.env_vars)
@@ -946,7 +1018,8 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             return Err(failure("Runtime launch stopped before process creation"));
         }
         child = Some(
-            ManagedChild::spawn(&mut command, session.child_custody.clone())
+            // This worker thread supervises the child until it is drained.
+            ManagedChild::spawn_bound_to_thread(&mut command, session.child_custody.clone())
                 .map_err(|e| failure(format!("Runtime spawn failed: {e}")))?,
         );
         // Retain the physical store from the first child effect, including an
@@ -961,6 +1034,14 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             .attach_to_child(child.as_mut().expect("spawned child"))
             .map_err(|error| failure(format!("Audio child custody failed: {error:?}")))?;
         let pid = child.as_ref().expect("spawned child").id();
+        // The identity lets a later session tell a dead record from a live one.
+        match crate::platform::process_identity::capture(pid) {
+            Ok(identity) => {
+                crate::platform::process_identity::write_identity(&config.pid_file, &identity)
+                    .map_err(|e| PumasError::io_with_path(e, &config.pid_file))?
+            }
+            Err(e) => tracing::warn!("Cannot record identity of runtime process {pid}: {e}"),
+        }
         write!(file, "{pid}").map_err(|e| PumasError::io_with_path(e, &config.pid_file))?;
         {
             let mut state = session
@@ -1067,7 +1148,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
                 if !crate::platform::process::same_file_identity(&owned_file, &current)? {
                     return Err(std::io::Error::other("Runtime PID metadata was replaced"));
                 }
-                std::fs::remove_file(&path)
+                crate::platform::process_identity::remove_record(&path)
             });
             if let Err(e) = cleanup {
                 error = Some(format!("Runtime PID metadata cleanup failed: {e}"));
@@ -1467,6 +1548,113 @@ mod tests {
         assert!(fixture.owner.stop(&id).await.is_err());
         unrelated.kill().unwrap();
         unrelated.wait().unwrap();
+    }
+
+    #[tokio::test]
+    async fn stale_pid_files_from_a_crashed_session_are_reclaimed() {
+        let fixture = Fixture::new();
+        let pid_file = fixture.root.path().join("runtime.pid");
+        let mut exited = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let identity = crate::platform::process_identity::capture(exited.id()).unwrap();
+        exited.kill().unwrap();
+        exited.wait().unwrap();
+        // A recorded identity whose process is gone, and a bare PID no
+        // process holds, are both leftovers of a crashed session.
+        let stale: [Box<dyn Fn()>; 2] = [
+            Box::new(|| {
+                crate::platform::process_identity::write_record(&pid_file, &identity).unwrap()
+            }),
+            Box::new(|| std::fs::write(&pid_file, "4194303999").unwrap()),
+        ];
+        for write_stale in stale {
+            write_stale();
+            let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+            let id = spec.profile_id.clone();
+            let result = fixture
+                .owner
+                .launch(config, spec, None, None, guard)
+                .await
+                .unwrap();
+            assert!(result.response.success, "{:?}", result.response.error);
+            let running = fixture.owner.snapshot(&id).unwrap().unwrap();
+            let pid = running.pid.unwrap();
+            assert_eq!(std::fs::read_to_string(&pid_file).unwrap(), pid.to_string());
+            assert!(matches!(
+                crate::platform::process_identity::read_record(&pid_file).unwrap(),
+                Some(crate::platform::process_identity::PidRecord::Verified(_))
+            ));
+            assert!(fixture.owner.stop(&id).await.unwrap());
+            assert!(!pid_file.exists());
+            assert!(!crate::platform::process_identity::identity_path(&pid_file).exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn live_recorded_pid_file_still_blocks_launch_with_a_reason() {
+        let fixture = Fixture::new();
+        let pid_file = fixture.root.path().join("runtime.pid");
+        let mut live = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        crate::platform::process_identity::write_record(
+            &pid_file,
+            &crate::platform::process_identity::capture(live.id()).unwrap(),
+        )
+        .unwrap();
+        let (config, spec, guard) = fixture.launch("exit 0");
+        let result = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        let survived = live.try_wait().unwrap().is_none();
+        live.kill().unwrap();
+        live.wait().unwrap();
+        assert!(!result.response.success);
+        assert!(result
+            .response
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("still running"));
+        assert!(survived);
+        assert!(pid_file.exists());
+    }
+
+    #[tokio::test]
+    async fn owned_children_do_not_inherit_loader_injection() {
+        let fixture = Fixture::new();
+        let marker = fixture.root.path().join("environment");
+        let (mut config, spec, guard) = fixture.launch(&format!(
+            "printf '%s|%s|%s' \"${{LD_PRELOAD-unset}}\" \"${{PUMAS_FIXTURE_EXPLICIT-unset}}\" \"${{PATH:+path}}\" > '{}'; sleep 30",
+            marker.display()
+        ));
+        config
+            .env_vars
+            .insert("PUMAS_FIXTURE_EXPLICIT".into(), "explicit".into());
+        let id = spec.profile_id.clone();
+        // The parent's own LD_PRELOAD (if any) must not reach the child.
+        let result = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        assert!(result.response.success);
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while !marker.exists() {
+            assert!(std::time::Instant::now() < until, "fixture did not report");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(fixture.owner.stop(&id).await.unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "unset|explicit|path"
+        );
     }
 
     #[tokio::test]

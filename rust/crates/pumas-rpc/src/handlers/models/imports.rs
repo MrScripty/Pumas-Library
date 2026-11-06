@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
-struct ImportModelParams {
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ImportModelParams {
     #[serde(alias = "localPath")]
     local_path: String,
     family: String,

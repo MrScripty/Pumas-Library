@@ -42,7 +42,13 @@ malformed headers 400, mismatched generations 412, and closing/unavailable/curre
 identity failure 503. Native local Host/Origin admission and existing CORS apply.
 Each listener permits at most 64 active retention bodies; exhaustion returns 429
 without admitting a guard. This is a transport resource bound, separate from
-primary ownership and the existing request-handler concurrency bound.
+primary ownership and the existing request-handler concurrency bound. Non-Linux
+builds return 501. Every refusal carries the
+[pre-handler refusal body](local-http-admission-fence.md#refusal-body); its
+codes here are `fence_required` (428), `fence_malformed` (400),
+`generation_mismatch` (412), `shutting_down`, `service_not_advertised`,
+`listener_superseded` or `retention_unavailable` (503), `retention_capacity`
+(429) and `retention_unsupported` (501).
 
 The `text/event-stream` response has `Cache-Control: no-store`. Its first
 `pumas-owner-retention` event acknowledges admission only after the guard and fence

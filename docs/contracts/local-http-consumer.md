@@ -78,7 +78,8 @@ actual supervised child process. A missing HTTP service, claiming/incompatible
 owner or dead retained row fails without fallback, retry or historical takeover.
 
 For a Python host, place the reference directory on its import path. Descriptor
-decoding also needs its adjacent `contracts/capability-descriptor.schema.json`:
+decoding also needs the adjacent `contracts/capability-descriptor.schema.json`
+(tracked as `scripts/consumers/contracts/capability-descriptor.schema.json`):
 
 ```python
 from local_http_session import local_http_session
@@ -106,14 +107,17 @@ distribution/model/feature qualification.
 
 ## Pinned descriptor decoding and generic selection
 
-The copied `CapabilityDescriptor` schema is pinned to producer source
-`926710fa11067c63cae885180db43be5fd7f31f9`, tree
-`b09e274bd8df3f6d2ca98a37c5fbc94d1ea9f290`, containing Image-to-Text ancestor
-`a0d5dc476e89b08e7a8b4bde63a27354e26cb145`. These pins identify the schema and
-fixture contract; they do not qualify execution of that producer by this example.
-The adjacent copied schema is exactly 3,537 bytes with SHA256
-`eb25783123d38de5ff6aedf4cfa69de8f4f5f5c60799768b1b90da258b85f922`.
-The decoder rechecks that hash before use.
+The copied `CapabilityDescriptor` schema is
+`scripts/consumers/contracts/capability-descriptor.schema.json`, exported from
+producer source `7b39606a3e79c4ed9a2a9a329b4f30b6fd2849d9` (tree
+`389ecc51666530c40334ddbebc7c109b1d21daab`) by the schema export test in the
+[Image-to-Text contract](image-to-text-v0.8.md). This pin identifies the schema
+and fixture contract; it does not qualify execution of that producer by this
+example. The copied schema is exactly 4,981 bytes with SHA256
+`2a0270d10beaa5364ef3c598767dfcddae014a55a42d0c55b3df2bf4acff7f12`.
+The decoder rechecks that hash before use. To move the pin, rerun that export,
+copy `capability-descriptor.schema.json` over the file, and update
+`DESCRIPTOR_SCHEMA_SHA256` and this paragraph together.
 
 `decode_capability_descriptor` accepts bounded JSON bytes, preserves additional
 properties permitted by this exact schema, and validates every required field,
@@ -181,8 +185,10 @@ The same reference session also offers `capabilities(model, profile=None)` and
 `/v1/model-operations` routes. Both use the authenticated selected endpoint and
 paired generation fences. They return `{"status": HTTP_STATUS, "body": JSON_OBJECT}`,
 preserving producer errors, outcomes and typed result fields. An empty non-200
-response has `body=None`; native pre-handler fencing returns such a 412 without
-an operation envelope. The reference invents no error/outcome field. Capability replies
+response has `body=None`. Native pre-handler fencing returns a 412 whose body is
+the [refusal body](local-http-admission-fence.md#refusal-body)
+`{"error":{"code":"generation_mismatch","message":...}}`, not an operation
+envelope. The reference invents no error/outcome field. Capability replies
 advertise `supported_contract_versions`; they do not contain an operation's
 `contract_version` field. The reference requires a common version 1 and leaves
 capability selection to the existing descriptor helper and server admission.

@@ -55,8 +55,8 @@ export default function InferencePluginsApp() {
     useOllamaProcess(runningState.ollamaRunning);
   const { launchError: torchLaunchError, launchLogPath: torchLaunchLogPath, isStarting: torchIsStarting, isStopping: torchIsStopping, ...torchActions } =
     useTorchProcess(runningState.torchRunning);
-  const { modelGroups, libraryLoadStatus, scanModels, fetchModels } = useModels();
-  const { activeDownload, activeDownloadCount } = useActiveModelDownload();
+  const { modelGroups, libraryLoadStatus, libraryDiagnostics, scanModels, fetchModels } = useModels();
+  const { activeDownload, activeDownloadCount, activeDownloadError } = useActiveModelDownload();
   const runtimeProfiles = useRuntimeProfiles();
   const servingStatus = useServingStatus();
 
@@ -168,6 +168,7 @@ export default function InferencePluginsApp() {
   const modelManagerProps = buildModelManagerProps({
     modelGroups,
     libraryLoadStatus,
+    libraryDiagnostics,
     starredModels,
     excludedModels,
     onToggleStar: handleToggleStar,
@@ -215,6 +216,7 @@ export default function InferencePluginsApp() {
         appId: appVersions.appId,
         activeModelDownload: activeDownload,
         activeModelDownloadCount: activeDownloadCount,
+        activeModelDownloadError: activeDownloadError,
         installationProgress,
         installingTag: appVersions.installingTag,
         isCheckingLauncherUpdates,

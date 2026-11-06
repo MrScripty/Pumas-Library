@@ -80,9 +80,16 @@ pub fn observe_exit(pid: u32) -> io::Result<Option<ExitStatus>> {
     }
 }
 
-/// Signal only while direct-child ownership and its group identity are proven.
-/// Call synchronously while retaining Child, never queue a PID-only signal task.
+/// SIGKILL the group only while direct-child ownership and its group identity
+/// are proven. Call synchronously while retaining Child, never queue a
+/// PID-only signal task.
 pub fn signal_group(pid: u32) -> io::Result<()> {
+    signal_group_with(pid, Signal::SIGKILL)
+}
+
+/// Send `signal` to the group under the same custody proof as
+/// [`signal_group`].
+pub fn signal_group_with(pid: u32, signal: Signal) -> io::Result<()> {
     let group = checked_pid(pid)?;
     observe_exit(pid)?;
     if getpgid(Some(group)).map_err(io::Error::from)? != group {
@@ -91,7 +98,7 @@ pub fn signal_group(pid: u32) -> io::Result<()> {
             "Conversion child is not its process-group leader",
         ));
     }
-    killpg(group, Signal::SIGKILL).map_err(Into::into)
+    killpg(group, signal).map_err(Into::into)
 }
 
 /// WouldBlock means a disappearing task prevented a complete observation. It

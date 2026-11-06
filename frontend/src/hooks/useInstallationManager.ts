@@ -26,6 +26,58 @@ import { useInstallationAccess } from './useInstallationAccess';
 const logger = getLogger('useInstallationManager');
 const INSTALLATION_POLL_INTERVAL_MS = 800;
 const MAX_MISSING_PROGRESS_POLLS = 10;
+/** Consecutive transport failures before the lifecycle ends with an error. */
+export const MAX_CONSECUTIVE_PROGRESS_FAILURES = 6;
+/** Upper bound for the backed-off delay between failing progress polls. */
+const MAX_INSTALLATION_POLL_BACKOFF_MS = 10_000;
+
+/** Delay before the next poll: the base cadence, doubled per consecutive failure. */
+export function getInstallationPollDelay(consecutiveFailures: number): number {
+  if (consecutiveFailures <= 0) return INSTALLATION_POLL_INTERVAL_MS;
+  return Math.min(
+    INSTALLATION_POLL_INTERVAL_MS * 2 ** consecutiveFailures,
+    MAX_INSTALLATION_POLL_BACKOFF_MS
+  );
+}
+
+function describeProgressFailure(error: unknown): string {
+  return error instanceof Error && error.message.trim() ? error.message : 'Unknown error';
+}
+
+function buildLostContactProgress(
+  tag: string,
+  lastProgress: InstallationProgress | null,
+  reason: string,
+  failures: number
+): InstallationProgress {
+  const base: InstallationProgress = lastProgress ?? {
+    tag,
+    started_at: new Date().toISOString(),
+    stage: 'resolving',
+    stage_progress: 0,
+    overall_progress: 0,
+    current_item: null,
+    download_speed: null,
+    eta_seconds: null,
+    total_size: null,
+    downloaded_bytes: 0,
+    dependency_count: null,
+    completed_dependencies: 0,
+    completed_items: [],
+    error: null,
+  };
+  return {
+    ...base,
+    tag,
+    download_active: false,
+    download_speed: null,
+    eta_seconds: null,
+    completed_at: new Date().toISOString(),
+    success: false,
+    error: `Installation progress could not be read after ${failures} attempts (${reason}). `
+      + 'The installation may still be running; refresh versions to check its state.',
+  };
+}
 
 interface UseInstallationManagerOptions {
   appId?: string;
@@ -80,6 +132,8 @@ export function useInstallationManager({
   const lastDownloadSourceUrlRef = useRef<string | null>(null);
   const pendingInstallTagRef = useRef<string | null>(null);
   const missingProgressPollsRef = useRef(0);
+  const consecutiveProgressFailuresRef = useRef(0);
+  const lastProgressRef = useRef<InstallationProgress | null>(null);
   const networkStateRef = useRef<NetworkStatusState>(createNetworkStatusState());
   const runPollRef = useRef<(lifecycle: InstallationLifecycle) => void>(() => {});
 
@@ -102,6 +156,8 @@ export function useInstallationManager({
     lastDownloadSourceUrlRef.current = null;
     pendingInstallTagRef.current = null;
     missingProgressPollsRef.current = 0;
+    consecutiveProgressFailuresRef.current = 0;
+    lastProgressRef.current = null;
   }, []);
 
   const resetInstallState = useCallback(() => {
@@ -197,6 +253,7 @@ export function useInstallationManager({
         if (!isCurrentLifecycle(lifecycle)) {
           return false;
         }
+        consecutiveProgressFailuresRef.current = 0;
         const progress = response ? projectInstallationProgress(response) : null;
 
         if (progress && !progress.completed_at) {
@@ -219,6 +276,7 @@ export function useInstallationManager({
           lastDownloadTagRef.current = trackerState.lastDownloadTag;
           lastStageRef.current = trackerState.lastStage;
           lastDownloadSourceUrlRef.current = trackerState.lastDownloadSourceUrl;
+          lastProgressRef.current = adjustedProgress;
           setInstallationProgress(adjustedProgress);
           setInstallNetworkStatus(networkStatus);
           return true;
@@ -284,6 +342,21 @@ export function useInstallationManager({
         } else {
           logger.error('Unknown error fetching installation progress', { error });
         }
+        consecutiveProgressFailuresRef.current += 1;
+        const failures = consecutiveProgressFailuresRef.current;
+        if (failures >= MAX_CONSECUTIVE_PROGRESS_FAILURES) {
+          logger.error('Stopping installation progress polling after repeated failures', {
+            failures,
+            tag: lifecycle.tag,
+          });
+          finishInstallationLifecycle(lifecycle, buildLostContactProgress(
+            pendingInstallTagRef.current ?? lifecycle.tag,
+            lastProgressRef.current,
+            describeProgressFailure(error),
+            failures
+          ));
+          return false;
+        }
         setInstallNetworkStatus('failed');
         return true;
       }
@@ -308,7 +381,7 @@ export function useInstallationManager({
     pollTimeoutRef.current = setTimeout(() => {
       pollTimeoutRef.current = null;
       runPollRef.current(lifecycle);
-    }, INSTALLATION_POLL_INTERVAL_MS);
+    }, getInstallationPollDelay(consecutiveProgressFailuresRef.current));
   }, [isCurrentLifecycle, stopInstallPolling]);
 
   runPollRef.current = (lifecycle) => {

@@ -109,6 +109,7 @@ impl HuggingFaceClient {
         repo_id: &str,
         revision: &DownloadRevision,
     ) -> Result<HfSearchResult> {
+        validate_hf_repo_id(repo_id)?;
         let url = match revision.as_persisted() {
             Some(commit) => format!(
                 "{}/api/models/{}/revision/{}",
@@ -263,6 +264,8 @@ impl HuggingFaceClient {
         repo_id: &str,
         revision: &DownloadRevision,
     ) -> Result<RepoFileTree> {
+        // The ID names both the cache file and the authenticated API path.
+        validate_hf_repo_id(repo_id)?;
         // Check cache first
         let cache_repo_id = revision_cache_key(repo_id, revision);
         let cache_file = self.get_cache_path(&cache_repo_id, "files");
@@ -547,7 +550,7 @@ fn revision_cache_key(repo_id: &str, revision: &DownloadRevision) -> String {
     }
 }
 
-fn validate_hf_repo_id(repo_id: &str) -> Result<()> {
+pub(super) fn validate_hf_repo_id(repo_id: &str) -> Result<()> {
     let mut segments = repo_id.split('/');
     let owner = segments.next().unwrap_or_default();
     let name = segments.next().unwrap_or_default();
@@ -594,15 +597,41 @@ fn validate_revision_selector(selector: &str) -> Result<&str> {
     }
 }
 
+/// Read a cached repository tree. The cache is advisory: an entry that is
+/// not a valid tree is reported and treated as a miss, so the caller refetches
+/// and overwrites it instead of failing the download.
 async fn read_repo_file_tree_cache(path: PathBuf) -> Result<Option<RepoFileTree>> {
-    tokio::task::spawn_blocking(move || atomic_read_json(&path))
+    let cache_path = path.clone();
+    let read = tokio::task::spawn_blocking(move || atomic_read_json(&path))
         .await
         .map_err(|err| {
             PumasError::Other(format!(
                 "Failed to join HuggingFace repo tree cache read task: {}",
                 err
             ))
-        })?
+        })?;
+    match read {
+        Err(error) if repo_file_tree_cache_is_corrupt(&error) => {
+            tracing::warn!(
+                path = %cache_path.display(),
+                %error,
+                "Ignoring unreadable HuggingFace repo tree cache entry; refetching"
+            );
+            Ok(None)
+        }
+        read => read,
+    }
+}
+
+fn repo_file_tree_cache_is_corrupt(error: &PumasError) -> bool {
+    match error {
+        PumasError::Json { .. } => true,
+        PumasError::Io {
+            source: Some(source),
+            ..
+        } => source.kind() == std::io::ErrorKind::InvalidData,
+        _ => false,
+    }
 }
 
 async fn write_repo_file_tree_cache(
@@ -671,6 +700,102 @@ mod tests {
             request
         });
         (base_url, server)
+    }
+
+    #[tokio::test]
+    async fn corrupt_repo_tree_cache_is_a_miss_that_refetches_and_repairs() {
+        let (base_url, server) = serve_once(
+            "200 OK",
+            r#"[{"type":"file","path":"config.json"},{"type":"file","path":"model.bin","lfs":{"oid":"abc","size":4}}]"#
+                .to_string(),
+        )
+        .await;
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let cache_file = client.get_cache_path(
+            &revision_cache_key("acme/model", &DownloadRevision::legacy_main()),
+            "files",
+        );
+        let corrupt_entries: [&[u8]; 2] = [b"{not json", &[0xff, 0xfe, 0x00]];
+        for corrupt in corrupt_entries {
+            std::fs::write(&cache_file, corrupt).unwrap();
+            assert!(read_repo_file_tree_cache(cache_file.clone())
+                .await
+                .unwrap()
+                .is_none());
+        }
+
+        let tree = client.get_repo_files("acme/model").await.unwrap();
+
+        assert!(server
+            .await
+            .unwrap()
+            .starts_with("GET /api/models/acme/model/tree/main?recursive=true HTTP/1.1"));
+        assert_eq!(tree.regular_files, ["config.json"]);
+        assert_eq!(tree.lfs_files.len(), 1);
+        let repaired = read_repo_file_tree_cache(cache_file)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.regular_files, ["config.json"]);
+    }
+
+    #[tokio::test]
+    async fn read_paths_refuse_invalid_repository_ids_before_any_request() {
+        let temp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(temp.path()).unwrap();
+        let pinned = DownloadRevision::from_commit(&"a".repeat(40)).unwrap();
+        let is_repo_refusal = |error: PumasError| matches!(error, PumasError::Validation { ref field, .. } if field == "repo_id");
+        for repo_id in ["model", "../model", "acme/model/../../x", "acme/model?x=1"] {
+            assert!(is_repo_refusal(
+                client.get_model_snapshot(repo_id).await.unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client
+                    .get_model_snapshot_at_revision(repo_id, &pinned)
+                    .await
+                    .unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client.get_repo_files(repo_id).await.unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client
+                    .get_repo_files_at_revision(repo_id, &pinned)
+                    .await
+                    .unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client.classify_repo_bundle(repo_id).await.unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client.get_download_details(repo_id, &[]).await.unwrap_err()
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn search_encodes_the_pipeline_tag_filter() {
+        let (base_url, server) = serve_once("200 OK", "[]".to_string()).await;
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let params = HfSearchParams {
+            query: "llama".into(),
+            kind: Some("text-generation&author=evil".into()),
+            ..Default::default()
+        };
+
+        assert!(client.search_api(&params).await.unwrap().is_empty());
+
+        let request = server.await.unwrap();
+        let request_line = request.lines().next().unwrap();
+        assert!(
+            request_line.contains("&pipeline_tag=text-generation%26author%3Devil "),
+            "{request_line}"
+        );
+        assert!(!request_line.contains("&author="), "{request_line}");
     }
 
     #[tokio::test]

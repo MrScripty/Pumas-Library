@@ -1,7 +1,8 @@
 /**
  * Disk space monitoring hook
  *
- * Polls disk space usage periodically.
+ * Reads disk usage on demand. Until a reading succeeds the percent is `null`,
+ * never 0%. A failed read keeps the last valid reading and records why.
  */
 
 import { useState, useCallback } from 'react';
@@ -12,16 +13,34 @@ import { APIError } from '../errors';
 const logger = getLogger('useDiskSpace');
 
 export function useDiskSpace() {
-  const [diskSpacePercent, setDiskSpacePercent] = useState(0);
+  const [diskSpacePercent, setDiskSpacePercent] = useState<number | null>(null);
+  const [diskSpaceError, setDiskSpaceError] = useState<string | null>(null);
+
+  const recordFailure = useCallback((reason: string) => {
+    setDiskSpaceError(reason);
+  }, []);
 
   const fetchDiskSpace = useCallback(async () => {
+    if (!isAPIAvailable()) {
+      recordFailure('The desktop backend is not available.');
+      return;
+    }
     try {
-      if (isAPIAvailable()) {
-        const diskData = await api.get_disk_space();
-        if (diskData.success) {
-          setDiskSpacePercent(diskData.percent || 0);
-        }
+      const diskData = await api.get_disk_space();
+      if (!diskData.success) {
+        const reason = diskData.error?.trim() || 'The backend could not read disk usage.';
+        logger.error('Disk space request was not successful', { error: reason });
+        recordFailure(reason);
+        return;
       }
+      if (typeof diskData.percent !== 'number' || !Number.isFinite(diskData.percent) ||
+        diskData.percent < 0 || diskData.percent > 100) {
+        logger.error('Disk space response had no valid percent', { percent: diskData.percent });
+        recordFailure('The backend returned an invalid disk usage value.');
+        return;
+      }
+      setDiskSpacePercent(diskData.percent);
+      setDiskSpaceError(null);
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error fetching disk space', { error: error.message, endpoint: error.endpoint });
@@ -30,11 +49,13 @@ export function useDiskSpace() {
       } else {
         logger.error('Unknown error fetching disk space', { error });
       }
+      recordFailure(error instanceof Error ? error.message : 'Unknown error');
     }
-  }, []);
+  }, [recordFailure]);
 
   return {
     diskSpacePercent,
+    diskSpaceError,
     fetchDiskSpace,
   };
 }

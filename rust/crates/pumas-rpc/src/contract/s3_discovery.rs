@@ -1,7 +1,7 @@
 //! Complete discovery observations only; none carry import or acquisition authority.
 use super::{
-    require_versioned_set, validate_s3_id, PublicError, S3AddressingWire, S3CredentialParams,
-    S3ReadMode,
+    require_versioned_set, validate_s3_endpoint, validate_s3_id, validate_s3_text, PublicError,
+    S3AddressingWire, S3CredentialParams, S3ReadMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,29 +43,24 @@ impl S3DiscoveryParams {
     pub(crate) fn validate(&self) -> Result<(), PublicError> {
         require_versioned_set(self.read_mode)?;
         validate_s3_id(&self.operation_id)?;
-        for (v, max) in [
-            (&self.endpoint, 4096),
-            (&self.region, 255),
-            (&self.bucket, 255),
+        for (field, value, max) in [
+            ("endpoint", &self.endpoint, 4096),
+            ("region", &self.region, 255),
+            ("bucket", &self.bucket, 255),
         ] {
-            if v.trim().is_empty() || v.len() > max || v.chars().any(char::is_control) {
-                return Err(PublicError::invalid_params());
-            }
+            validate_s3_text(field, value, max)?;
         }
-        let url = url::Url::parse(&self.endpoint).map_err(|_| PublicError::invalid_params())?;
-        if !self.endpoint.starts_with("https://")
-            || self.endpoint.trim() != self.endpoint
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-            || url.path() != "/"
-            || self.prefix.len() > 1024
-            || self.prefix.chars().any(char::is_control)
-            || !(100..=30000).contains(&self.timeout_ms)
-        {
-            return Err(PublicError::invalid_params());
+        validate_s3_endpoint(&self.endpoint)?;
+        if self.prefix.len() > 1024 || self.prefix.chars().any(char::is_control) {
+            return Err(PublicError::invalid_params_because(
+                "`prefix` must be at most 1024 bytes without control characters",
+            ));
+        }
+        if !(100..=30000).contains(&self.timeout_ms) {
+            return Err(PublicError::invalid_params_because(format!(
+                "`timeout_ms` is {}; it must be 100 to 30000",
+                self.timeout_ms
+            )));
         }
         Ok(())
     }

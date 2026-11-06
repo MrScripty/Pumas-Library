@@ -9,12 +9,25 @@ use super::*;
 // Matches the non-transforming relative identity policy in core and RPC admission.
 const MODEL_LOOKUP_ID_PATTERN: &str = r"^(?![A-Za-z]:)(?!.*(?:^|/)\.{1,2}(?:/|$))[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+(?:/[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+)*$";
 
+use crate::handlers::ImportModelParams;
 use crate::startup_failure::StartupFailureFrame;
+use pumas_library::model_library::ModelImportSpec;
 use pumas_library::models::{
-    ModelLibraryUpdateNotification, RouterProfileSyncStatus, RuntimeProfileUpdateFeed,
-    ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
+    LibraryStatusResponse, ModelLibraryUpdateNotification, NetworkStatusResponse,
+    RouterProfileSyncStatus, RuntimeProfileUpdateFeed, RuntimeProfilesSnapshotResponse,
+    ServingStatusResponse, ServingStatusUpdateFeed, StatusTelemetrySnapshot,
+    StatusTelemetryUpdateNotification,
 };
 use schemars::{generate::SchemaSettings, JsonSchema};
+
+/// `import_batch` request. The handler reads `imports` as
+/// `Vec<ModelImportSpec>` (`handlers/models/imports.rs`); this names that
+/// shape for the desktop decoder and has no other use.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct ImportBatchParams {
+    imports: Vec<ModelImportSpec>,
+}
 
 /// Conformance values are made by the production constructors and real ticket
 /// issuer. Temporary filesystem identity is deliberately not normalized.
@@ -524,6 +537,9 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     for (key, value) in update_stream_fixtures()?.as_object().into_iter().flatten() {
         fixtures[key] = value.clone();
     }
+    for (key, value) in pull_snapshot_fixtures()?.as_object().into_iter().flatten() {
+        fixtures[key] = value.clone();
+    }
     for (key, value) in super::torch_runtime_fixtures()?
         .as_object()
         .into_iter()
@@ -619,6 +635,16 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     fixtures["runtime_running_false"] = serde_json::to_value(RuntimeRunningOutcome::new(false))?;
     fixtures["runtime_stop_true"] = serde_json::to_value(RuntimeStopOutcome::new(true))?;
     fixtures["runtime_stop_false"] = serde_json::to_value(RuntimeStopOutcome::new(false))?;
+    fixtures["runtime_stop_skipped"] = serde_json::to_value(RuntimeStopOutcome::from_report(
+        pumas_library::process::RuntimeStopReport {
+            stopped: vec![],
+            skipped: vec![pumas_library::process::RuntimeStopSkip {
+                pid: Some(4242),
+                pid_file: "/fixture/ollama.pid".into(),
+                reason: "skipped: not owned by Pumas".into(),
+            }],
+        },
+    ))?;
     fixtures["install_version_dependencies_true"] =
         serde_json::to_value(InstallVersionDependenciesOutcome::new(true))?;
     fixtures["install_version_dependencies_false"] =
@@ -902,11 +928,149 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         GetReleaseDependenciesOutcome,
         CheckVersionDependenciesParams,
         CheckVersionDependenciesOutcome,
+        // Mutating requests the desktop decodes before dispatch (ELE-03).
+        SetHfTokenParams,
+        ModelIdParams,
+        ImportModelParams,
+        ImportBatchParams,
+        // Pull snapshots whose push notifications are already decoded (FE-02).
+        StatusTelemetrySnapshot,
+        NetworkStatusResponse,
+        LibraryStatusResponse,
+        RuntimeProfilesSnapshotResponse,
+        ServingStatusResponse,
+        HfModelSearchOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",
         "dialect": "http://json-schema.org/draft-07/schema#",
         "schemas": schemas,
+    }))
+}
+
+/// Pull-snapshot payloads (FE-02) built from the producer types, with every
+/// optional field populated so the decoders see the full wire.
+fn pull_snapshot_fixtures() -> anyhow::Result<Value> {
+    use pumas_library::models::{
+        DownloadOption, FileGroup, HuggingFaceModel, ModelRuntimeRoute, ModelServeError,
+        ModelServeErrorCode, RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeLifecycleState,
+        RuntimeProfileConfig, RuntimeProfileId, RuntimeProfileStatus, RuntimeProfilesSnapshot,
+        RuntimeProviderId, ServedModelLoadState, ServedModelStatus, ServingEndpointMode,
+        ServingEndpointStatus, ServingStatusSnapshot,
+    };
+    let profile = RuntimeProfileConfig::default_ollama();
+    let endpoint =
+        RuntimeEndpointUrl::parse("http://127.0.0.1:11434").map_err(anyhow::Error::msg)?;
+    let mut llama = RuntimeProfileConfig::default_ollama();
+    llama.profile_id = RuntimeProfileId::parse("llama-default").map_err(anyhow::Error::msg)?;
+    llama.device.device_id = Some("cuda:0".into());
+    llama.device.gpu_layers = Some(-1);
+    llama.device.tensor_split = Some(vec![0.5, 0.5]);
+    llama.scheduler.max_concurrent_models = Some(2);
+    llama.scheduler.keep_alive_seconds = Some(300);
+    let runtime_profiles = RuntimeProfilesSnapshotResponse {
+        success: true,
+        error: None,
+        snapshot: RuntimeProfilesSnapshot {
+            default_profile_id: Some(profile.profile_id.clone()),
+            routes: vec![ModelRuntimeRoute {
+                provider: RuntimeProviderId::Ollama,
+                model_id: "llm/example/model".into(),
+                profile_id: Some(profile.profile_id.clone()),
+                auto_load: true,
+            }],
+            statuses: vec![RuntimeProfileStatus {
+                profile_id: profile.profile_id.clone(),
+                state: RuntimeLifecycleState::Running,
+                endpoint_url: Some(endpoint.clone()),
+                pid: Some(4242),
+                log_path: Some("/fixture/logs/ollama.log".into()),
+                last_error: Some("fixture error".into()),
+            }],
+            profiles: vec![profile.clone(), llama],
+            ..RuntimeProfilesSnapshot::empty()
+        },
+    };
+    let error = ModelServeError::non_critical(ModelServeErrorCode::InsufficientMemory, "fixture")
+        .for_model("llm/example/model")
+        .for_profile(profile.profile_id.clone())
+        .for_provider(RuntimeProviderId::Ollama);
+    let serving = ServingStatusResponse {
+        success: true,
+        error: None,
+        snapshot: ServingStatusSnapshot {
+            endpoint: ServingEndpointStatus {
+                endpoint_mode: ServingEndpointMode::PumasGateway,
+                endpoint_url: Some(endpoint.clone()),
+                model_count: 1,
+                message: Some("fixture".into()),
+            },
+            served_models: vec![ServedModelStatus {
+                model_id: "llm/example/model".into(),
+                model_alias: Some("example".into()),
+                provider: RuntimeProviderId::Ollama,
+                profile_id: profile.profile_id,
+                load_state: ServedModelLoadState::Loaded,
+                device_mode: RuntimeDeviceMode::Gpu,
+                device_id: Some("cuda:0".into()),
+                gpu_layers: Some(32),
+                tensor_split: Some(vec![1.0]),
+                context_size: Some(8192),
+                keep_loaded: true,
+                endpoint_url: Some(endpoint),
+                memory_bytes: Some(1 << 30),
+                loaded_at: Some("2026-11-05T00:00:00Z".into()),
+                last_error: Some(error.clone()),
+            }],
+            last_errors: vec![error],
+            ..ServingStatusSnapshot::empty()
+        },
+    };
+    let model = HuggingFaceModel {
+        repo_id: "example/model".into(),
+        name: "model".into(),
+        developer: "example".into(),
+        kind: "text-generation".into(),
+        formats: vec!["gguf".into()],
+        quants: vec!["Q4_K_M".into()],
+        download_options: vec![DownloadOption {
+            quant: "Q4_K_M".into(),
+            size_bytes: Some(4_000_000_000),
+            file_group: Some(FileGroup {
+                filenames: vec!["model-Q4_K_M.gguf".into()],
+                shard_count: 1,
+                label: "model-Q4_K_M.gguf".into(),
+            }),
+        }],
+        url: "https://huggingface.co/example/model".into(),
+        release_date: Some("2026-01-01T00:00:00Z".into()),
+        model_card: Some(
+            [(
+                "pumas_discovery".to_string(),
+                serde_json::json!({"source": "fixture", "nested": [1, {"a": null}]}),
+            )]
+            .into_iter()
+            .collect(),
+        ),
+        license: Some("apache-2.0".into()),
+        downloads: Some(3),
+        total_size_bytes: Some(4_000_000_000),
+        quant_sizes: Some(
+            [("Q4_K_M".to_string(), 4_000_000_000)]
+                .into_iter()
+                .collect(),
+        ),
+        compatible_engines: vec!["llama-cpp".into()],
+        observed_at: Some("2026-11-05T00:00:00Z".into()),
+        cached: true,
+    };
+    Ok(serde_json::json!({
+        "runtime_profiles_snapshot": serde_json::to_value(runtime_profiles)?,
+        "serving_status": serde_json::to_value(serving)?,
+        "hf_model_search": serde_json::to_value(HfModelSearchOutcome::found(vec![model]))?,
+        "hf_model_search_failed": serde_json::to_value(HfModelSearchOutcome::failed(
+            &PumasError::Config { message: "private diagnostic".into() },
+        ))?,
     }))
 }
 
@@ -1794,6 +1958,7 @@ fn constrain_representation(value: &mut Value) {
                     0.0,
                     (usize::MAX as u128).min(MAX_JS_SAFE_INTEGER as u128) as f64,
                 )),
+                Some("uint16") => Some((0.0, f64::from(u16::MAX))),
                 Some("uint32") => Some((0.0, f64::from(u32::MAX))),
                 Some("uint64") => Some((0.0, MAX_JS_SAFE_INTEGER as f64)),
                 Some("int32") => Some((f64::from(i32::MIN), f64::from(i32::MAX))),

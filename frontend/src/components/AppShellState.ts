@@ -42,6 +42,7 @@ interface BuildManagedAppsStateOptions {
 
 interface BuildModelManagerPropsOptions {
   libraryLoadStatus: ModelManagerProps['libraryLoadStatus'];
+  libraryDiagnostics?: ModelManagerProps['libraryDiagnostics'];
   activeVersion: string | null;
   excludedModels: Set<string>;
   modelGroups: ModelCategory[];
@@ -64,6 +65,7 @@ interface BuildAppShellHeaderOptions {
   appId?: AppHeaderProps['appId'];
   activeModelDownload: AppHeaderProps['activeModelDownload'];
   activeModelDownloadCount: number;
+  activeModelDownloadError?: string | null;
   installationProgress: AppHeaderProps['installationProgress'];
   installingTag?: AppHeaderProps['installingTag'];
   isCheckingLauncherUpdates: boolean;
@@ -144,6 +146,7 @@ export function buildManagedAppsState({
 
 export function buildModelManagerProps({
   libraryLoadStatus,
+  libraryDiagnostics,
   activeVersion,
   excludedModels,
   modelGroups,
@@ -164,6 +167,7 @@ export function buildModelManagerProps({
   return {
     modelGroups,
     libraryLoadStatus,
+    libraryDiagnostics,
     starredModels,
     excludedModels,
     onToggleStar,
@@ -186,6 +190,7 @@ export function buildAppShellHeader({
   appId,
   activeModelDownload,
   activeModelDownloadCount,
+  activeModelDownloadError = null,
   installationProgress,
   installingTag,
   isCheckingLauncherUpdates,
@@ -221,6 +226,7 @@ export function buildAppShellHeader({
     installingTag,
     activeModelDownload,
     activeModelDownloadCount,
+    activeModelDownloadError,
   };
 }
 

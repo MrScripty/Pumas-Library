@@ -52,12 +52,20 @@ cargo build --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
 
 `pumas-library` enables `full` by default: `hf-client`, `process-manager`,
 `gpu-monitor` and `onnx-runtime`. Only `onnx-runtime`, `s3`, `contract-schema`
-and `uniffi` gate optional dependencies. `hf-client` and `gpu-monitor` change
-only the advertised build-info feature list, and `process-manager` only whether
-the builder may enable the process manager; none of the three removes a
-dependency or public module. `default-features = false` therefore drops ONNX
-Runtime, tokenizers and half-precision support, but is not otherwise a minimal
-build. Do not describe it as minimal until those three features gate their code.
+and `uniffi` gate optional dependencies. The other three gate behavior, not
+dependencies or public modules:
+
+- without `hf-client` the HuggingFace client never starts (the builder default
+  and `with_hf_client(true)` are capped by the feature), so HuggingFace search,
+  metadata and download operations fail with "HuggingFace client not
+  initialized";
+- without `gpu-monitor` Pumas never probes or runs `nvidia-smi` and reports GPU
+  monitoring as unavailable;
+- without `process-manager` the builder cannot enable the legacy runtime
+  process manager.
+
+`default-features = false` therefore also drops ONNX Runtime, tokenizers and
+half-precision support.
 
 ## Verification
 

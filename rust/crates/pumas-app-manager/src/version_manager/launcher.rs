@@ -20,14 +20,6 @@ async fn path_exists(path: &Path) -> Result<bool> {
         .map_err(|err| PumasError::io_with_path(err, path))
 }
 
-async fn read_path_string(path: &Path) -> Result<String> {
-    fs::read_to_string(path).await.map_err(|e| PumasError::Io {
-        message: format!("Failed to read {}: {}", path.display(), e),
-        path: Some(path.to_path_buf()),
-        source: Some(e),
-    })
-}
-
 /// Handles launching version instances.
 pub struct VersionLauncher {
     /// Root directory for launcher.
@@ -49,10 +41,12 @@ impl VersionLauncher {
     }
 
     /// Get the version directory path.
-    fn version_path(&self, tag: &str) -> PathBuf {
-        self.launcher_root
+    fn version_path(&self, tag: &str) -> Result<PathBuf> {
+        super::validate_version_tag(tag)?;
+        Ok(self
+            .launcher_root
             .join(self.app_id.versions_dir_name())
-            .join(tag)
+            .join(tag))
     }
 
     /// Launch a version.
@@ -61,7 +55,7 @@ impl VersionLauncher {
         tag: &str,
         extra_args: Option<Vec<String>>,
     ) -> Result<LaunchResult> {
-        let version_path = self.version_path(tag);
+        let version_path = self.version_path(tag)?;
         if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
@@ -231,91 +225,32 @@ impl VersionLauncher {
     }
 
     /// Stop a running version.
+    ///
+    /// Only a process whose recorded identity (see
+    /// [`process_identity`](pumas_library::platform::process_identity))
+    /// matches the live process is signalled. A bare PID file without an
+    /// identity record is never signalled: it is discarded and the refusal
+    /// is returned with its reason. Returns `Ok(false)` when no recorded
+    /// process was running.
     pub async fn stop_version(&self, tag: &str) -> Result<bool> {
-        let version_path = self.version_path(tag);
-        let pid_file = version_path.join("ollama.pid");
-
-        if !path_exists(&pid_file).await? {
-            return Ok(false);
-        }
-
-        let pid_str = read_path_string(&pid_file).await?;
-
-        let pid: i32 = pid_str
-            .trim()
-            .parse()
-            .map_err(|_| PumasError::Other(format!("Invalid PID in file: {}", pid_str)))?;
-
-        info!("Stopping process with PID {}", pid);
-
-        // Send SIGTERM
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{kill, Signal};
-            use nix::unistd::Pid;
-
-            // Try to kill the process group
-            let pgid = Pid::from_raw(-pid); // Negative PID = process group
-            match kill(pgid, Signal::SIGTERM) {
-                Ok(_) => {
-                    debug!("Sent SIGTERM to process group {}", pid);
-                }
-                Err(_) => {
-                    // Try individual process
-                    let process_pid = Pid::from_raw(pid);
-                    if let Err(e) = kill(process_pid, Signal::SIGTERM) {
-                        warn!("Failed to send SIGTERM: {}", e);
-                    }
-                }
-            }
-
-            // Wait a bit
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            // Send SIGKILL if still running
-            let process_pid = Pid::from_raw(pid);
-            if let Ok(()) = kill(process_pid, Signal::SIGKILL) {
-                debug!("Sent SIGKILL to process {}", pid);
-            }
-        }
-
-        // Remove PID file
-        fs::remove_file(&pid_file).await.ok();
-
-        info!("Process {} stopped", pid);
-        Ok(true)
+        let pid_file = self.version_path(tag)?.join("ollama.pid");
+        tokio::task::spawn_blocking(move || stop_recorded_version(&pid_file))
+            .await
+            .map_err(|error| PumasError::Other(format!("Stop task failed: {error}")))?
     }
 
     /// Check if a version is running.
+    ///
+    /// True only when the PID file's recorded identity matches a live
+    /// process; a bare or reused PID does not count as running.
     pub async fn is_version_running(&self, tag: &str) -> bool {
-        let version_path = self.version_path(tag);
-        let pid_file = version_path.join("ollama.pid");
-
-        if !path_exists(&pid_file).await.unwrap_or(false) {
+        let Ok(version_path) = self.version_path(tag) else {
             return false;
-        }
-
-        if let Ok(pid_str) = read_path_string(&pid_file).await {
-            if let Ok(_pid) = pid_str.trim().parse::<i32>() {
-                #[cfg(unix)]
-                {
-                    use nix::sys::signal::kill;
-                    use nix::unistd::Pid;
-
-                    // Check if process exists by sending signal 0 (None = signal 0)
-                    let process_pid = Pid::from_raw(_pid);
-                    return kill(process_pid, None).is_ok();
-                }
-
-                #[cfg(not(unix))]
-                {
-                    // On non-Unix, just assume it's running if PID file exists
-                    return true;
-                }
-            }
-        }
-
-        false
+        };
+        let pid_file = version_path.join("ollama.pid");
+        tokio::task::spawn_blocking(move || recorded_process_alive(&pid_file))
+            .await
+            .unwrap_or(false)
     }
 
     /// Tail the last N lines from a log file.
@@ -343,6 +278,68 @@ impl VersionLauncher {
             .to_lowercase()
             .trim_start_matches('v')
             .to_string()
+    }
+}
+
+/// Grace period between SIGTERM and SIGKILL for a recorded runtime.
+const RECORDED_STOP_TIMEOUT_MS: u64 = 5_000;
+
+fn recorded_process_alive(pid_file: &Path) -> bool {
+    use pumas_library::platform::process_identity::{
+        read_record, verify, IdentityCheck, PidRecord,
+    };
+    matches!(
+        read_record(pid_file),
+        Ok(Some(PidRecord::Verified(identity))) if verify(&identity) == IdentityCheck::Alive
+    )
+}
+
+fn discard_pid_record(pid_file: &Path) {
+    if let Err(error) = pumas_library::platform::process_identity::remove_record(pid_file) {
+        warn!("Failed to remove PID record {:?}: {}", pid_file, error);
+    }
+}
+
+fn stop_recorded_version(pid_file: &Path) -> Result<bool> {
+    use pumas_library::platform::process_identity::{read_record, PidRecord};
+    use pumas_library::platform::{terminate_recorded_process, RecordedStop};
+
+    let record =
+        read_record(pid_file).map_err(|error| PumasError::io_with_path(error, pid_file))?;
+    match record {
+        None => Ok(false),
+        Some(PidRecord::Verified(identity)) => {
+            info!(
+                "Stopping recorded process {} from {:?}",
+                identity.pid, pid_file
+            );
+            match terminate_recorded_process(&identity, RECORDED_STOP_TIMEOUT_MS)? {
+                RecordedStop::Stopped => {
+                    discard_pid_record(pid_file);
+                    info!("Process {} stopped", identity.pid);
+                    Ok(true)
+                }
+                RecordedStop::AlreadyGone { reason } => {
+                    info!("Discarding stale PID record {:?}: {reason}", pid_file);
+                    discard_pid_record(pid_file);
+                    Ok(false)
+                }
+                RecordedStop::Refused { reason } => Err(PumasError::Other(format!(
+                    "Refused to stop process {}: {reason}",
+                    identity.pid
+                ))),
+            }
+        }
+        Some(PidRecord::Unverified { pid, reason }) => {
+            // Never signal a PID Pumas cannot prove it launched. The file can
+            // never be proven later either, so discard it.
+            discard_pid_record(pid_file);
+            let pid = pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string());
+            Err(PumasError::Other(format!(
+                "Refused to stop process {pid}: not owned by Pumas ({reason}); the PID \
+                 file was discarded and the process, if any, was left running"
+            )))
+        }
     }
 }
 
@@ -374,8 +371,71 @@ mod tests {
     fn test_version_path() {
         let (launcher, temp) = create_test_launcher();
 
-        let path = launcher.version_path("v1.0.0");
+        let path = launcher.version_path("v1.0.0").unwrap();
+        assert!(launcher.version_path("../x").is_err());
         assert_eq!(path, temp.path().join("ollama-versions/v1.0.0"));
+    }
+
+    fn ollama_pid_file(launcher: &VersionLauncher, tag: &str) -> PathBuf {
+        let dir = launcher.version_path(tag).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("ollama.pid")
+    }
+
+    #[tokio::test]
+    async fn bare_pid_file_is_never_signalled_or_reported_running() {
+        let (launcher, _temp) = create_test_launcher();
+        let pid_file = ollama_pid_file(&launcher, "v1.0.0");
+        // A live process (this test) named only by a bare PID file.
+        std::fs::write(&pid_file, std::process::id().to_string()).unwrap();
+
+        assert!(!launcher.is_version_running("v1.0.0").await);
+        let error = launcher.stop_version("v1.0.0").await.unwrap_err();
+        assert!(error.to_string().contains("not owned by Pumas"), "{error}");
+        // Discarded, and this process is evidently still alive.
+        assert!(!pid_file.exists());
+    }
+
+    #[tokio::test]
+    async fn reused_pid_with_foreign_identity_is_not_signalled() {
+        use pumas_library::platform::process_identity::{capture, write_record};
+        let (launcher, _temp) = create_test_launcher();
+        let pid_file = ollama_pid_file(&launcher, "v1.0.0");
+        let mut identity = capture(std::process::id()).unwrap();
+        // The PID is live but its start time no longer matches the record.
+        identity.start_time = identity.start_time.wrapping_add(1);
+        write_record(&pid_file, &identity).unwrap();
+
+        assert!(!launcher.is_version_running("v1.0.0").await);
+        assert!(!launcher.stop_version("v1.0.0").await.unwrap());
+        assert!(!pid_file.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn verified_record_is_reported_running_and_stopped() {
+        use pumas_library::platform::process_identity::{capture, write_record};
+        let (launcher, _temp) = create_test_launcher();
+        let pid_file = ollama_pid_file(&launcher, "v1.0.0");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        write_record(&pid_file, &capture(child.id()).unwrap()).unwrap();
+
+        assert!(launcher.is_version_running("v1.0.0").await);
+        assert!(launcher.stop_version("v1.0.0").await.unwrap());
+        assert!(!pid_file.exists());
+        let status = child.wait().unwrap();
+        assert!(!status.success());
+        assert!(!launcher.is_version_running("v1.0.0").await);
+    }
+
+    #[tokio::test]
+    async fn missing_pid_file_reports_not_running() {
+        let (launcher, _temp) = create_test_launcher();
+        assert!(!launcher.is_version_running("v1.0.0").await);
+        assert!(!launcher.stop_version("v1.0.0").await.unwrap());
     }
 
     #[tokio::test]

@@ -38,7 +38,7 @@ describe('useAppProcessActions', () => {
 
     expect(options.launchOllama).toHaveBeenCalledTimes(1);
     expect(options.stopOllama).not.toHaveBeenCalled();
-    expect(options.refetchStatus).toHaveBeenCalledWith(false, true);
+    expect(options.refetchStatus).toHaveBeenCalledWith();
 
     await act(async () => {
       vi.advanceTimersByTime(1200);

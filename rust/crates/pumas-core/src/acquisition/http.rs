@@ -2,7 +2,7 @@
 
 use super::{ArtifactManifest, ManifestValidationError};
 use crate::error::{PumasError, Result};
-use futures::{stream::BoxStream, StreamExt};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use reqwest::header::{
     ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_RANGE, ETAG, IF_MATCH, RANGE,
 };
@@ -20,6 +20,78 @@ pub struct AcquisitionHttpClient {
     credentials_over_https: bool,
     #[cfg(test)]
     loopback_fixture: Option<reqwest::Client>,
+    #[cfg(test)]
+    upgrade_loopback: bool,
+}
+
+/// How one artifact request reaches its source, decided before any byte is
+/// sent. Only a credential-less `http://` source on a network host is
+/// upgraded; every other source is requested exactly as given.
+#[derive(Debug)]
+pub(crate) enum HttpRequestPlan<'a> {
+    /// An `https://` source, a literal loopback `http://` source (its traffic
+    /// never leaves this machine, so TLS would protect nothing), or a
+    /// unit-test loopback fixture.
+    AsGiven(&'a reqwest::Client),
+    /// A credential-less `http://` source on a network host. The `https`
+    /// form is tried first. `fallback` permits the original plaintext URL
+    /// only after that attempt fails without any HTTP response; an
+    /// HTTPS-only transport never falls back.
+    PreferHttps {
+        client: &'a reqwest::Client,
+        https: reqwest::Url,
+        fallback: bool,
+    },
+}
+
+/// Why an HTTPS attempt for a plaintext source produced no HTTP response.
+/// Only these outcomes permit the plaintext fallback; any HTTP response,
+/// including an error status, is the source's answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HttpsUnavailable {
+    /// The client's own connect or request timeout elapsed first.
+    TimedOut,
+    /// TCP connect, the TLS handshake or certificate verification failed.
+    ConnectFailed,
+    /// The connection failed after connecting but before any response.
+    NoResponse,
+}
+
+impl HttpsUnavailable {
+    fn classify(error: &reqwest::Error) -> Option<Self> {
+        if error.is_builder()
+            || error.is_redirect()
+            || error.is_status()
+            || error.is_body()
+            || error.is_decode()
+        {
+            None
+        } else if error.is_timeout() {
+            Some(Self::TimedOut)
+        } else if error.is_connect() {
+            Some(Self::ConnectFailed)
+        } else if error.is_request() {
+            Some(Self::NoResponse)
+        } else {
+            None
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Self::TimedOut => "the HTTPS attempt timed out before any response",
+            Self::ConnectFailed => "the HTTPS connection or TLS handshake failed",
+            Self::NoResponse => "the HTTPS connection closed before any response",
+        }
+    }
+}
+
+fn is_literal_loopback(url: &reqwest::Url) -> bool {
+    url.host().is_some_and(|host| match host {
+        url::Host::Ipv4(ip) => ip.is_loopback(),
+        url::Host::Ipv6(ip) => ip.is_loopback(),
+        url::Host::Domain(_) => false,
+    })
 }
 
 impl AcquisitionHttpClient {
@@ -29,12 +101,23 @@ impl AcquisitionHttpClient {
             credentials_over_https: true,
             #[cfg(test)]
             loopback_fixture: None,
+            #[cfg(test)]
+            upgrade_loopback: false,
         })
     }
 
     #[cfg(test)]
     pub(crate) fn with_loopback_fixture(mut self, client: reqwest::Client) -> Self {
         self.loopback_fixture = Some(client);
+        self
+    }
+
+    /// Unit-test seam: treat a literal loopback `http://` source like a
+    /// network host, so loopback listeners can observe the HTTPS attempt and
+    /// the plaintext fallback.
+    #[cfg(test)]
+    pub(crate) fn with_loopback_upgrade(mut self) -> Self {
+        self.upgrade_loopback = true;
         self
     }
 
@@ -45,15 +128,7 @@ impl AcquisitionHttpClient {
             credentials || !parsed.username().is_empty() || parsed.password().is_some();
         #[cfg(test)]
         {
-            let literal_loopback = reqwest::Url::parse(url).ok().is_some_and(|url| {
-                url.scheme() == "http"
-                    && url.host().is_some_and(|host| match host {
-                        url::Host::Ipv4(ip) => ip.is_loopback(),
-                        url::Host::Ipv6(ip) => ip.is_loopback(),
-                        url::Host::Domain(_) => false,
-                    })
-            });
-            if literal_loopback {
+            if parsed.scheme() == "http" && is_literal_loopback(&parsed) {
                 if let Some(fixture) = &self.loopback_fixture {
                     return Ok(fixture);
                 }
@@ -73,6 +148,36 @@ impl AcquisitionHttpClient {
         }
         Ok(&self.client)
     }
+
+    /// Admit the request through [`Self::for_request`], then decide whether a
+    /// plaintext source is upgraded. Refusals are unchanged: credentials over
+    /// plaintext are refused here, never upgraded or sent.
+    pub(crate) fn plan(&self, url: &str, credentials: bool) -> Result<HttpRequestPlan<'_>> {
+        let client = self.for_request(url, credentials)?;
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|_| invalid_response("HTTP artifact URL is invalid"))?;
+        // A credentialed plaintext source passes `for_request` only as a
+        // unit-test loopback fixture; it is sent as given, never upgraded.
+        let credentialed =
+            credentials || !parsed.username().is_empty() || parsed.password().is_some();
+        #[cfg(test)]
+        let exempt_loopback = is_literal_loopback(&parsed) && !self.upgrade_loopback;
+        #[cfg(not(test))]
+        let exempt_loopback = is_literal_loopback(&parsed);
+        if parsed.scheme() != "http" || credentialed || exempt_loopback {
+            return Ok(HttpRequestPlan::AsGiven(client));
+        }
+        // A default port becomes 443; an explicit non-default port is kept.
+        let mut https = parsed;
+        https
+            .set_scheme("https")
+            .map_err(|()| invalid_response("HTTP artifact URL has no HTTPS form"))?;
+        Ok(HttpRequestPlan::PreferHttps {
+            client,
+            https,
+            fallback: !self.credentials_over_https,
+        })
+    }
 }
 
 impl From<reqwest::Client> for AcquisitionHttpClient {
@@ -82,6 +187,8 @@ impl From<reqwest::Client> for AcquisitionHttpClient {
             credentials_over_https: false,
             #[cfg(test)]
             loopback_fixture: None,
+            #[cfg(test)]
+            upgrade_loopback: false,
         }
     }
 }
@@ -133,7 +240,9 @@ pub(crate) struct HttpResumeEvidence {
 /// streams one selected representation.
 #[async_trait::async_trait]
 pub(crate) trait HttpArtifactSink: Send {
-    async fn write_all(&mut self, bytes: &[u8]) -> Result<()>;
+    /// Append the chunks, in order, as one write effect. The sink owns them,
+    /// so it needs no copy of the payload.
+    async fn write_all(&mut self, chunks: Vec<bytes::Bytes>) -> Result<()>;
     async fn flush(&mut self) -> Result<()>;
 }
 
@@ -157,9 +266,36 @@ pub(crate) enum HttpBodyOutcome {
     Cancelled,
 }
 
+fn request_failed(error: reqwest::Error) -> PumasError {
+    PumasError::Network {
+        message: "HTTP artifact request failed".into(),
+        cause: Some(error.without_url().to_string()),
+    }
+}
+
+/// The error and its causes, without the request URL, so neither a query
+/// string nor URL userinfo can reach a log line.
+fn transport_cause(error: reqwest::Error) -> String {
+    let error = error.without_url();
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 /// Open the selected representation without putting access material into the
 /// manifest. A server which ignores Range returns a full response with
 /// `resumed == false`, requiring the caller to replace its partial file.
+///
+/// A credential-less `http://` source on a network host is requested over
+/// `https` first (see [`HttpRequestPlan`]). The plaintext URL is used only when
+/// that attempt gets no HTTP response. The scheme is a transport choice only:
+/// the same Range, strong-ETag and resource-identity checks apply to whichever
+/// response is used.
 pub(crate) async fn open_http_artifact(
     client: &AcquisitionHttpClient,
     url: &str,
@@ -176,26 +312,55 @@ pub(crate) async fn open_http_artifact(
     if resume_from > 0 && !manifest.permits_resume(file_index) {
         return Err(resume_identity_required());
     }
-    let client = client.for_request(url, authorization.is_some())?;
-    let mut request = client.get(url).header(ACCEPT_ENCODING, "identity");
-    if let Some(authorization) = authorization {
-        request = request.header(AUTHORIZATION, authorization);
-    }
+    let plan = client.plan(url, authorization.is_some())?;
+    let mut if_match = None;
     if resume_from > 0 {
-        request = request.header(RANGE, format!("bytes={resume_from}-"));
         if let Some(evidence) = continuation {
             if !is_strong_etag(&evidence.etag) {
                 return Err(resume_identity_required());
             }
-            request = request.header(IF_MATCH, &evidence.etag);
+            if_match = Some(evidence.etag.as_str());
         } else if file.expected_sha256().is_none() {
             return Err(resume_identity_required());
         }
     }
-    let response = request.send().await.map_err(|error| PumasError::Network {
-        message: "HTTP artifact request failed".into(),
-        cause: Some(error.without_url().to_string()),
-    })?;
+    let send = |client: &reqwest::Client, target: &str| {
+        let mut request = client.get(target).header(ACCEPT_ENCODING, "identity");
+        if let Some(authorization) = authorization {
+            request = request.header(AUTHORIZATION, authorization);
+        }
+        if resume_from > 0 {
+            request = request.header(RANGE, format!("bytes={resume_from}-"));
+        }
+        if let Some(etag) = if_match {
+            request = request.header(IF_MATCH, etag);
+        }
+        request.send()
+    };
+    let response = match plan {
+        HttpRequestPlan::AsGiven(client) => send(client, url).await.map_err(request_failed)?,
+        HttpRequestPlan::PreferHttps {
+            client,
+            https,
+            fallback,
+        } => match send(client, https.as_str()).await {
+            Ok(response) => response,
+            Err(error) => {
+                let Some(unavailable) = HttpsUnavailable::classify(&error).filter(|_| fallback)
+                else {
+                    return Err(request_failed(error));
+                };
+                tracing::warn!(
+                    host = https.host_str().unwrap_or_default(),
+                    port = https.port_or_known_default().unwrap_or(443),
+                    reason = unavailable.reason(),
+                    cause = %transport_cause(error),
+                    "HTTPS is unavailable for a plaintext artifact source; fetching it over plaintext HTTP"
+                );
+                send(client, url).await.map_err(request_failed)?
+            }
+        },
+    };
 
     validate_identity_encoding(&response)?;
     let resource = response.url().as_str().to_owned();
@@ -386,6 +551,23 @@ pub(crate) async fn stream_http_artifact(
     }
 }
 
+/// Received body chunks that are already buffered are coalesced into one sink
+/// write of up to about this many bytes. A chunk is never held back waiting
+/// for more network data, so every byte reported as progress is written.
+const HTTP_WRITE_BATCH_BYTES: usize = 1024 * 1024;
+
+fn checked_body_length(downloaded: u64, chunk: &[u8], total: Option<u64>) -> Result<u64> {
+    let next = downloaded
+        .checked_add(chunk.len() as u64)
+        .ok_or_else(|| invalid_response("HTTP artifact byte count overflowed"))?;
+    if total.is_some_and(|total| next > total) {
+        return Err(invalid_response(
+            "HTTP artifact body exceeded its selected representation length",
+        ));
+    }
+    Ok(next)
+}
+
 async fn stream_artifact_body(
     response: HttpArtifactResponse,
     requested_resume_from: u64,
@@ -399,17 +581,24 @@ async fn stream_artifact_body(
         0
     };
     let mut body = response.body;
+    // An item read while coalescing that ends the batch (an error, the end of
+    // the body, or a chunk that fails the length check) is handled next, in
+    // the same order as if it had been read on its own.
+    let mut deferred = None;
     loop {
-        let next = tokio::select! {
-            biased;
-            _ = host.pause_requested() => {
-                if host.cancel_requested() {
-                    return Ok(HttpBodyOutcome::Cancelled);
+        let next = match deferred.take() {
+            Some(next) => next,
+            None => tokio::select! {
+                biased;
+                _ = host.pause_requested() => {
+                    if host.cancel_requested() {
+                        return Ok(HttpBodyOutcome::Cancelled);
+                    }
+                    sink.flush().await?;
+                    return Ok(HttpBodyOutcome::Paused);
                 }
-                sink.flush().await?;
-                return Ok(HttpBodyOutcome::Paused);
-            }
-            next = body.next() => next,
+                next = body.next() => next,
+            },
         };
         let Some(chunk) = next else {
             break;
@@ -422,15 +611,30 @@ async fn stream_artifact_body(
             return Ok(HttpBodyOutcome::Paused);
         }
         let chunk = chunk?;
-        let next_downloaded = downloaded
-            .checked_add(chunk.len() as u64)
-            .ok_or_else(|| invalid_response("HTTP artifact byte count overflowed"))?;
-        if total.is_some_and(|total| next_downloaded > total) {
-            return Err(invalid_response(
-                "HTTP artifact body exceeded its selected representation length",
-            ));
+        let mut next_downloaded = checked_body_length(downloaded, &chunk, total)?;
+        let mut batch_bytes = chunk.len();
+        let mut batch = vec![chunk];
+        while batch_bytes < HTTP_WRITE_BATCH_BYTES {
+            match body.next().now_or_never() {
+                None => break,
+                Some(Some(Ok(more))) => match checked_body_length(next_downloaded, &more, total) {
+                    Ok(length) => {
+                        next_downloaded = length;
+                        batch_bytes += more.len();
+                        batch.push(more);
+                    }
+                    Err(_) => {
+                        deferred = Some(Some(Ok(more)));
+                        break;
+                    }
+                },
+                Some(other) => {
+                    deferred = Some(other);
+                    break;
+                }
+            }
         }
-        sink.write_all(&chunk).await?;
+        sink.write_all(batch).await?;
         downloaded = next_downloaded;
         host.record_progress(downloaded).await?;
     }
@@ -671,12 +875,16 @@ mod tests {
     struct TestSink {
         bytes: Vec<u8>,
         flushed: bool,
+        writes: usize,
     }
 
     #[async_trait::async_trait]
     impl HttpArtifactSink for TestSink {
-        async fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
-            self.bytes.extend_from_slice(bytes);
+        async fn write_all(&mut self, chunks: Vec<bytes::Bytes>) -> Result<()> {
+            self.writes += 1;
+            for chunk in chunks {
+                self.bytes.extend_from_slice(&chunk);
+            }
             Ok(())
         }
 
@@ -918,8 +1126,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn url_userinfo_requires_the_same_secure_transport_without_disclosure() {
+    // These refusal tests call `for_request`, where the scheme and credential
+    // decision is made before any request is built, rather than going through
+    // `open_http_artifact`. A refused source therefore never reaches a request
+    // call, so no connection is possible and no plaintext request URL is
+    // constructed from the fixture literals.
+    #[test]
+    fn url_userinfo_requires_the_same_secure_transport_without_disclosure() {
         let client = AcquisitionHttpClient::from(reqwest::Client::new());
         for (url, expected) in [
             (
@@ -935,17 +1148,7 @@ mod tests {
                 "HTTP artifact credentials require an HTTPS-only transport builder",
             ),
         ] {
-            let error = super::open_http_artifact(
-                &client,
-                url,
-                &manifest(weak_file(6), RevisionStrength::Weak),
-                0,
-                0,
-                None,
-                None,
-            )
-            .await
-            .unwrap_err();
+            let error = client.for_request(url, false).unwrap_err();
             assert!(
                 matches!(&error, PumasError::Validation { message, .. } if message == expected)
             );
@@ -1065,6 +1268,369 @@ mod tests {
         assert!(matches!(result, Err(PumasError::Network { .. })));
     }
 
+    // The decision only: `plan` builds no request, so these network-host
+    // sources are never contacted.
+    #[test]
+    fn plaintext_network_sources_prefer_https_and_keep_explicit_ports() {
+        let host = "198.51.100.7";
+        let client = AcquisitionHttpClient::from(reqwest::Client::new());
+        for (source, expected) in [
+            (
+                format!("http://{host}/a?x=1"),
+                format!("https://{host}/a?x=1"),
+            ),
+            (format!("http://{host}:80/a"), format!("https://{host}/a")),
+            (
+                format!("http://{host}:8080/a"),
+                format!("https://{host}:8080/a"),
+            ),
+            (
+                "http://localhost:8080/a".to_owned(),
+                "https://localhost:8080/a".to_owned(),
+            ),
+        ] {
+            match client.plan(&source, false).unwrap() {
+                HttpRequestPlan::PreferHttps {
+                    https, fallback, ..
+                } => {
+                    assert_eq!(https.as_str(), expected);
+                    assert!(fallback, "{source}");
+                }
+                other => panic!("{source} was not upgraded: {other:?}"),
+            }
+        }
+        assert_eq!(
+            client
+                .plan(&format!("http://{host}/a"), false)
+                .map(|plan| match plan {
+                    HttpRequestPlan::PreferHttps { https, .. } => https.port_or_known_default(),
+                    HttpRequestPlan::AsGiven(_) => None,
+                })
+                .unwrap(),
+            Some(443)
+        );
+        // HTTPS sources and literal loopback sources are sent as given.
+        for source in [
+            format!("https://{host}/a"),
+            "http://127.0.0.1:9/a".to_owned(),
+            "http://127.4.5.6/a".to_owned(),
+            "http://[::1]:9/a".to_owned(),
+        ] {
+            assert!(
+                matches!(client.plan(&source, false), Ok(HttpRequestPlan::AsGiven(_))),
+                "{source}"
+            );
+        }
+        // An HTTPS-only transport upgrades but never falls back.
+        let https_only = AcquisitionHttpClient::https(reqwest::Client::builder()).unwrap();
+        assert!(matches!(
+            https_only.plan(&format!("http://{host}/a"), false),
+            Ok(HttpRequestPlan::PreferHttps {
+                fallback: false,
+                ..
+            })
+        ));
+        // Credentials over plaintext are refused, not upgraded.
+        for (source, credentials) in [
+            (format!("http://{host}/a"), true),
+            (
+                format!("http://fixture-user:fixture-secret@{host}/a"),
+                false,
+            ),
+        ] {
+            assert!(matches!(
+                client.plan(&source, credentials),
+                Err(PumasError::Validation { ref message, .. })
+                    if message == "HTTP artifact credentials require an HTTPS source"
+            ));
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturedLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CapturedLog {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A plaintext-only peer. It records the first byte of the first
+    /// connection and closes it, as a plain HTTP server does on a TLS
+    /// ClientHello. With a `reply` it then serves one plain HTTP request and
+    /// returns it; without one it reports whether any second connection came.
+    async fn plaintext_only_peer(
+        reply: Option<String>,
+    ) -> (
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<(u8, Option<String>)>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            let mut byte = [0_u8];
+            first.read_exact(&mut byte).await.unwrap();
+            drop(first);
+            let Some(reply) = reply else {
+                let again =
+                    tokio::time::timeout(std::time::Duration::from_millis(150), listener.accept())
+                        .await;
+                return (byte[0], again.is_ok().then(String::new));
+            };
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            stream.write_all(reply.as_bytes()).await.unwrap();
+            let _ = stream.shutdown().await;
+            (byte[0], Some(String::from_utf8(request).unwrap()))
+        });
+        (address, server)
+    }
+
+    #[tokio::test]
+    async fn plaintext_source_tries_tls_first_then_falls_back_with_a_redacted_warning() {
+        let log = CapturedLog::default();
+        let writer = log.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _trace = tracing::subscriber::set_default(subscriber);
+        let (address, server) = plaintext_only_peer(Some(response("200 OK", "", "abcdef"))).await;
+        let client =
+            AcquisitionHttpClient::from(reqwest::Client::builder().no_proxy().build().unwrap())
+                .with_loopback_upgrade();
+        let url = format!("http://{address}/artifact?token=fixture-query-secret");
+        let reply = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            super::open_http_artifact(
+                &client,
+                &url,
+                &manifest(weak_file(6), RevisionStrength::Weak),
+                0,
+                0,
+                None,
+                None,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(!reply.resumed);
+        assert_eq!(reply.resource, url);
+        assert_eq!(body_bytes(reply.body).await.unwrap(), b"abcdef");
+        let (first_byte, request) = server.await.unwrap();
+        assert_eq!(
+            first_byte, 0x16,
+            "the first connection must be a TLS ClientHello"
+        );
+        assert!(request
+            .unwrap()
+            .starts_with("GET /artifact?token=fixture-query-secret HTTP/1.1\r\n"));
+        let log = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert!(log.contains("WARN"), "{log}");
+        assert!(log.contains("fetching it over plaintext HTTP"), "{log}");
+        assert!(
+            log.contains("host=\"127.0.0.1\"") || log.contains("host=127.0.0.1"),
+            "{log}"
+        );
+        assert!(log.contains(&format!("port={}", address.port())), "{log}");
+        assert!(!log.contains("fixture-query-secret"), "{log}");
+        assert!(!log.contains("/artifact"), "{log}");
+    }
+
+    #[tokio::test]
+    async fn https_only_transport_never_falls_back_to_plaintext() {
+        let (address, server) = plaintext_only_peer(None).await;
+        let client = AcquisitionHttpClient::https(reqwest::Client::builder().no_proxy())
+            .unwrap()
+            .with_loopback_upgrade();
+        let error = super::open_http_artifact(
+            &client,
+            &format!("http://{address}/artifact"),
+            &manifest(weak_file(6), RevisionStrength::Weak),
+            0,
+            0,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, PumasError::Network { ref message, .. }
+            if message == "HTTP artifact request failed"));
+        let (first_byte, followed) = server.await.unwrap();
+        assert_eq!(first_byte, 0x16);
+        assert!(followed.is_none(), "no plaintext connection may follow");
+    }
+
+    #[tokio::test]
+    async fn credentialed_plaintext_is_refused_before_any_https_attempt() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = AcquisitionHttpClient::from(reqwest::Client::new()).with_loopback_upgrade();
+        for (url, authorization) in [
+            (
+                format!("http://{address}/artifact"),
+                Some("Bearer fixture-only"),
+            ),
+            (
+                format!("http://fixture-user:fixture-secret@{address}/artifact"),
+                None,
+            ),
+        ] {
+            let error = super::open_http_artifact(
+                &client,
+                &url,
+                &manifest(weak_file(6), RevisionStrength::Weak),
+                0,
+                0,
+                authorization,
+                None,
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(error, PumasError::Validation { ref message, .. }
+                if message == "HTTP artifact credentials require an HTTPS source"));
+            assert!(!error.to_string().contains("fixture-secret"));
+        }
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), listener.accept())
+                .await
+                .is_err(),
+            "a refused source must not be contacted over either scheme"
+        );
+    }
+
+    /// The request a TLS fixture read, and whether a further connection came.
+    #[cfg(not(target_os = "macos"))]
+    type TlsAnswer = std::thread::JoinHandle<std::result::Result<(String, bool), String>>;
+
+    /// One TLS answer from the loopback fixture identity, then a report of
+    /// whether any further (plaintext fallback) connection arrived.
+    #[cfg(not(target_os = "macos"))]
+    fn tls_answer_once(reply: String) -> (std::net::SocketAddr, TlsAnswer) {
+        use std::io::{Read, Write};
+        use std::time::{Duration, Instant};
+        let identity = native_tls::Identity::from_pkcs12(
+            include_bytes!("../../tests/fixtures/http-tls/localhost.p12"),
+            "fixture",
+        )
+        .unwrap();
+        let acceptor = native_tls::TlsAcceptor::new(identity).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let accept = move |within: Duration| {
+            let deadline = Instant::now() + within;
+            loop {
+                match listener.accept() {
+                    Ok((socket, _)) => return Some(socket),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return None;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => return None,
+                }
+            }
+        };
+        let server = std::thread::spawn(move || {
+            let socket = accept(Duration::from_secs(5)).ok_or("TLS fixture accept failed")?;
+            socket.set_nonblocking(false).map_err(|e| e.to_string())?;
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .map_err(|e| e.to_string())?;
+            let mut tls = acceptor.accept(socket).map_err(|e| e.to_string())?;
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") && request.len() < 8192 {
+                let mut byte = [0];
+                tls.read_exact(&mut byte).map_err(|e| e.to_string())?;
+                request.push(byte[0]);
+            }
+            tls.write_all(reply.as_bytes()).map_err(|e| e.to_string())?;
+            tls.flush().map_err(|e| e.to_string())?;
+            let _ = tls.shutdown();
+            drop(tls);
+            let followed = accept(Duration::from_millis(150)).is_some();
+            Ok((
+                String::from_utf8(request).map_err(|e| e.to_string())?,
+                followed,
+            ))
+        });
+        (address, server)
+    }
+
+    // Apple's TLS stack refuses the long-lived fixture certificate; see
+    // `https_transport_preserves_custom_ca_and_refuses_same_port_downgrade`.
+    #[cfg(not(target_os = "macos"))]
+    #[tokio::test]
+    async fn any_https_answer_for_a_plaintext_source_is_used_without_fallback() {
+        let certificate = reqwest::Certificate::from_pem(include_bytes!(
+            "../../tests/fixtures/http-tls/localhost.pem"
+        ))
+        .unwrap();
+        let client = AcquisitionHttpClient::from(
+            reqwest::Client::builder()
+                .no_proxy()
+                .add_root_certificate(certificate)
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap(),
+        )
+        .with_loopback_upgrade();
+        for (status, body) in [("200 OK", "abcdef"), ("404 Not Found", "")] {
+            let (address, server) = tls_answer_once(response(status, "", body));
+            let result = super::open_http_artifact(
+                &client,
+                &format!("http://{address}/artifact"),
+                &manifest(weak_file(6), RevisionStrength::Weak),
+                0,
+                0,
+                None,
+                None,
+            )
+            .await;
+            let (request, followed) = tokio::task::spawn_blocking(move || server.join())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(
+                request.starts_with("GET /artifact HTTP/1.1\r\n"),
+                "{request}"
+            );
+            assert!(!followed, "{status}: an HTTPS answer must not fall back");
+            match result {
+                Ok(reply) => {
+                    assert_eq!(status, "200 OK");
+                    // The explicit port is kept on the upgraded request.
+                    assert_eq!(reply.resource, format!("https://{address}/artifact"));
+                    assert_eq!(body_bytes(reply.body).await.unwrap(), b"abcdef");
+                }
+                Err(error) => assert!(
+                    matches!(&error, PumasError::DownloadFailed { message, .. }
+                        if status == "404 Not Found" && message == "HTTP 404 Not Found"),
+                    "{status}: {error:?}"
+                ),
+            }
+        }
+    }
+
     #[test]
     fn signed_resource_renewal_preserves_origin_path_and_representation_query() {
         for (provider, prefix, auth) in [
@@ -1132,23 +1698,21 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn credentials_are_refused_before_plaintext_non_loopback_requests() {
+    // Targets `for_request`, the refusal point, for the reason given above
+    // `url_userinfo_requires_the_same_secure_transport_without_disclosure`.
+    // The loopback fixture is installed as the `open_http_artifact` test
+    // helper does, proving it does not exempt these non-literal-loopback or
+    // non-HTTP sources from the refusal.
+    #[test]
+    fn credentials_are_refused_before_plaintext_non_loopback_requests() {
+        let client = AcquisitionHttpClient::from(reqwest::Client::new())
+            .with_loopback_fixture(reqwest::Client::new());
         for url in [
             "http://example.invalid/artifact",
             "http://localhost/artifact",
             "ftp://127.0.0.1/artifact",
         ] {
-            let error = open_http_artifact(
-                &reqwest::Client::new(),
-                url,
-                &manifest(weak_file(6), RevisionStrength::Weak),
-                0,
-                0,
-                Some("Bearer seeded-test-credential"),
-            )
-            .await
-            .unwrap_err();
+            let error = client.for_request(url, true).unwrap_err();
             assert!(matches!(error, PumasError::Validation { ref message, .. }
                 if message == "HTTP artifact credentials require an HTTPS source"));
         }
@@ -1337,6 +1901,114 @@ mod tests {
         ));
         assert_eq!(sink.bytes, b"abc");
         let _ = server.await.unwrap();
+    }
+
+    fn ready_body(
+        items: Vec<Result<bytes::Bytes>>,
+        total_size: Option<u64>,
+    ) -> HttpArtifactResponse {
+        HttpArtifactResponse {
+            body: futures::stream::iter(items).boxed(),
+            resumed: false,
+            total_size,
+            resource: "fixture".into(),
+            strong_etag: None,
+            deadline: None,
+        }
+    }
+
+    fn idle_host() -> TestHost {
+        TestHost {
+            pause: false,
+            cancel: false,
+            progress: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_chunks_coalesce_into_bounded_writes_without_reordering() {
+        const CHUNK: usize = 16 * 1024;
+        let chunks: Vec<bytes::Bytes> = (0..100u8)
+            .map(|seed| bytes::Bytes::from(vec![seed; CHUNK]))
+            .collect();
+        let expected: Vec<u8> = chunks.iter().flat_map(|chunk| chunk.to_vec()).collect();
+        let total = expected.len() as u64;
+        let mut sink = TestSink::default();
+        let mut host = idle_host();
+
+        let outcome = stream_artifact_body(
+            ready_body(chunks.into_iter().map(Ok).collect(), Some(total)),
+            0,
+            &mut sink,
+            &mut host,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome, HttpBodyOutcome::Complete { downloaded: total });
+        assert_eq!(sink.bytes, expected);
+        let per_batch = (HTTP_WRITE_BATCH_BYTES / CHUNK) as u64;
+        assert_eq!(
+            sink.writes, 2,
+            "100 ready 16 KiB chunks fit two 1 MiB batches"
+        );
+        assert_eq!(
+            host.progress,
+            [per_batch * CHUNK as u64, total],
+            "progress is recorded once per written batch"
+        );
+        assert!(sink.flushed);
+    }
+
+    #[tokio::test]
+    async fn coalescing_writes_accepted_bytes_before_a_buffered_error_or_overflow() {
+        let mut sink = TestSink::default();
+        let mut host = idle_host();
+        let error = stream_artifact_body(
+            ready_body(
+                vec![
+                    Ok(bytes::Bytes::from_static(b"abc")),
+                    Ok(bytes::Bytes::from_static(b"def")),
+                    Err(PumasError::Network {
+                        message: "fixture body failed".into(),
+                        cause: None,
+                    }),
+                ],
+                Some(9),
+            ),
+            0,
+            &mut sink,
+            &mut host,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, PumasError::Network { .. }));
+        assert_eq!(sink.bytes, b"abcdef");
+        assert_eq!(host.progress, [6]);
+
+        let mut sink = TestSink::default();
+        let mut host = idle_host();
+        let error = stream_artifact_body(
+            ready_body(
+                vec![
+                    Ok(bytes::Bytes::from_static(b"abc")),
+                    Ok(bytes::Bytes::from_static(b"def")),
+                ],
+                Some(4),
+            ),
+            0,
+            &mut sink,
+            &mut host,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            PumasError::Validation { message, .. }
+                if message == "HTTP artifact body exceeded its selected representation length"
+        ));
+        assert_eq!(sink.bytes, b"abc");
+        assert_eq!(host.progress, [3]);
     }
 
     #[tokio::test]

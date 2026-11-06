@@ -149,6 +149,25 @@ impl ManagedListenerCustody {
 }
 
 impl ManagedChild {
+    /// Spawn like [`Self::spawn`], and on Linux also ask the kernel to SIGKILL
+    /// the child's leader when the spawning thread exits
+    /// (`PR_SET_PDEATHSIG`), so a crashed Pumas does not leave it running.
+    ///
+    /// Linux delivers the signal when the *thread* that forked exits, not the
+    /// whole process. Use this only when the calling thread supervises the
+    /// child for its entire life (for example the runtime-profile worker
+    /// thread). Only the leader receives the signal; descendants that survive
+    /// it are not covered. macOS has no equivalent; Windows children already
+    /// die with their kill-on-close Job.
+    pub fn spawn_bound_to_thread(
+        command: &mut Command,
+        custody: Arc<ManagedChildCustodySlot>,
+    ) -> io::Result<Self> {
+        #[cfg(target_os = "linux")]
+        set_parent_death_signal(command);
+        Self::spawn(command, custody)
+    }
+
     pub fn spawn(command: &mut Command, custody: Arc<ManagedChildCustodySlot>) -> io::Result<Self> {
         if custody
             .active
@@ -283,6 +302,8 @@ impl ManagedChild {
         #[cfg(target_os = "macos")]
         {
             use std::os::unix::process::ExitStatusExt;
+            // SAFETY: siginfo_t is a plain C struct; all-zero bytes are a
+            // valid value, and waitid overwrites it before it is read.
             #[allow(unsafe_code)]
             let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             // SAFETY: `info` is a valid output buffer; WNOWAIT retains the
@@ -346,6 +367,9 @@ impl ManagedChild {
     }
 
     /// Stop the owned generation, prove descendant drain, then reap its leader.
+    /// On Unix the group first receives SIGTERM and has up to half of
+    /// `deadline` to exit; SIGKILL follows on every later pass. Windows Jobs
+    /// have no graceful signal and are terminated directly.
     /// An error retains custody so callers can retry rather than publishing or
     /// deleting a still-owned staging directory.
     pub fn terminate_and_drain(&mut self, deadline: Duration) -> io::Result<ExitStatus> {
@@ -356,11 +380,31 @@ impl ManagedChild {
         {
             return Err(io::Error::other("Injected process observation failure"));
         }
-        let until = Instant::now() + deadline;
+        let started = Instant::now();
+        let until = started + deadline;
+        // Graceful phase: one SIGTERM, then up to half of the caller's
+        // deadline for the group to exit before SIGKILL on every pass.
+        #[cfg(unix)]
+        let grace_until = started + deadline / 2;
+        #[cfg(unix)]
+        let mut terminated = false;
         loop {
+            #[cfg(unix)]
+            let signal = if Instant::now() >= grace_until {
+                Some(libc::SIGKILL)
+            } else if !terminated {
+                terminated = true;
+                Some(libc::SIGTERM)
+            } else {
+                None
+            };
             #[cfg(target_os = "linux")]
             let incomplete_observation = {
-                super::linux_group::signal_group(self.id())?;
+                if let Some(signal) = signal {
+                    let signal = nix::sys::signal::Signal::try_from(signal)
+                        .map_err(|error| io::Error::other(error.to_string()))?;
+                    super::linux_group::signal_group_with(self.id(), signal)?;
+                }
                 match self.observe_linux_group() {
                     Ok(false) => break,
                     Ok(true) => None,
@@ -374,22 +418,28 @@ impl ManagedChild {
             {
                 let pid =
                     i32::try_from(self.id()).map_err(|_| io::Error::other("Invalid group ID"))?;
-                if !macos_drain_group_once(pid, macos_group_has_live_members, |group| {
-                    #[cfg(test)]
-                    if self
-                        .force_group_signal_permission_denied
-                        .load(std::sync::atomic::Ordering::Acquire)
-                    {
-                        return Err(io::Error::from_raw_os_error(libc::EPERM));
+                let live = match signal {
+                    Some(signal) => {
+                        macos_drain_group_once(pid, macos_group_has_live_members, |group| {
+                            #[cfg(test)]
+                            if self
+                                .force_group_signal_permission_denied
+                                .load(std::sync::atomic::Ordering::Acquire)
+                            {
+                                return Err(io::Error::from_raw_os_error(libc::EPERM));
+                            }
+                            // SAFETY: the unreaped direct child pins its group
+                            // ID; the group was created by this owner at spawn.
+                            #[allow(unsafe_code)]
+                            if unsafe { libc::killpg(group, signal) } != 0 {
+                                return Err(io::Error::last_os_error());
+                            }
+                            Ok(())
+                        })?
                     }
-                    // SAFETY: the unreaped direct child pins its group ID; the
-                    // group was created by this owner at spawn.
-                    #[allow(unsafe_code)]
-                    if unsafe { libc::killpg(group, libc::SIGKILL) } != 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                    Ok(())
-                })? {
+                    None => macos_group_has_live_members(pid)?,
+                };
+                if !live {
                     break;
                 }
             }
@@ -478,6 +528,38 @@ impl Drop for ManagedChild {
             *slot = Some(parked);
             custody.changed.notify_waiters();
         }
+    }
+}
+
+/// Make the kernel SIGKILL the child when the forking thread exits.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn set_parent_death_signal(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    let parent = libc::pid_t::try_from(std::process::id()).unwrap_or(0);
+    // SAFETY: pre_exec runs in the forked child before exec. The closure only
+    // calls the async-signal-safe prctl(2) and getppid(2) syscalls and builds
+    // io::Error from a raw errno, which does not allocate, so it touches no
+    // state shared with other threads of the forked parent.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(
+                libc::PR_SET_PDEATHSIG,
+                libc::SIGKILL as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            ) != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            // The parent may have died before prctl took effect; then no
+            // signal will ever arrive, so refuse to start orphaned.
+            if libc::getppid() != parent {
+                return Err(io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            Ok(())
+        });
     }
 }
 
@@ -594,8 +676,9 @@ fn macos_listener_attribution_requires_structured_listen_state() {
     assert!(!macos_lsof_has_listener(observation, "127.0.0.2", 8080));
 }
 
+// Each function below that crosses the Win32 FFI boundary carries its own
+// `#[allow(unsafe_code)]`, and every unsafe block states why it is sound.
 #[cfg(windows)]
-#[allow(unsafe_code)]
 mod windows {
     use super::*;
     use std::mem::{size_of, zeroed};
@@ -630,6 +713,7 @@ mod windows {
         Ok(count)
     }
 
+    #[allow(unsafe_code)]
     pub(super) fn spawn(
         command: &mut Command,
         custody: Arc<ManagedChildCustodySlot>,
@@ -637,13 +721,21 @@ mod windows {
         use std::os::windows::process::CommandExt;
         // The child cannot execute or create descendants before Job admission.
         command.creation_flags(CREATE_SUSPENDED);
+        // SAFETY: null security attributes and a null name are documented
+        // valid arguments; the call borrows no Rust memory.
         let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if raw_job.is_null() {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: `raw_job` is a fresh, non-null Job handle that nothing else
+        // owns; OwnedHandle closes it exactly once.
         let job = std::sync::Arc::new(unsafe { OwnedHandle::from_raw_handle(raw_job) });
+        // SAFETY: JOBOBJECT_EXTENDED_LIMIT_INFORMATION is a plain C struct of
+        // integers for which all-zero bytes are a valid value.
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `raw_job` is live (owned by `job`); the pointer and size
+        // describe `limits`, which outlives the call and is only read.
         if unsafe {
             SetInformationJobObject(
                 raw_job,
@@ -656,6 +748,8 @@ mod windows {
             return Err(io::Error::last_os_error());
         }
         let mut child = command.spawn()?;
+        // SAFETY: both handles are live: `job` owns the Job and `child` owns
+        // the suspended process handle for the duration of the call.
         if unsafe { AssignProcessToJobObject(raw_job, child.as_raw_handle()) } == 0 {
             let error = io::Error::last_os_error();
             // Still suspended: no child code or descendant could have run.
@@ -704,20 +798,30 @@ mod windows {
         })
     }
 
+    #[allow(unsafe_code)]
     fn resume_initial_thread(pid: u32) -> io::Result<()> {
+        // SAFETY: a thread snapshot takes no pointers; the result is checked
+        // against INVALID_HANDLE_VALUE before use.
         let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
         if snapshot == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: `snapshot` is a fresh valid handle owned by nothing else;
+        // OwnedHandle closes it exactly once.
         let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
+        // SAFETY: THREADENTRY32 is a plain C struct of integers; all-zero is
+        // a valid value, and dwSize is set before the first call.
         let mut entry: THREADENTRY32 = unsafe { zeroed() };
         entry.dwSize = size_of::<THREADENTRY32>() as u32;
         let mut found = Vec::new();
+        // SAFETY: the snapshot handle is live and `entry` is a writable
+        // THREADENTRY32 with dwSize set, as Thread32First requires.
         let mut has_entry = unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) } != 0;
         while has_entry {
             if entry.th32OwnerProcessID == pid {
                 found.push(entry.th32ThreadID);
             }
+            // SAFETY: same live snapshot and writable entry as above.
             has_entry = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) } != 0;
         }
         if found.len() != 1 {
@@ -725,23 +829,34 @@ mod windows {
                 "Suspended child did not have one initial thread",
             ));
         }
+        // SAFETY: OpenThread takes only integer arguments; a null result is
+        // checked before use.
         let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, found[0]) };
         if thread.is_null() {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: `thread` is a fresh non-null handle owned by nothing else;
+        // OwnedHandle closes it exactly once.
         let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
+        // SAFETY: the thread handle is live and was opened with
+        // THREAD_SUSPEND_RESUME access.
         if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
             return Err(io::Error::last_os_error());
         }
         Ok(())
     }
 
+    #[allow(unsafe_code)]
     pub(super) fn terminate_and_has_members(job: &OwnedHandle) -> io::Result<bool> {
         let raw = job.as_raw_handle() as HANDLE;
+        // SAFETY: `job` borrows a live Job handle for the whole call.
         if unsafe { TerminateJobObject(raw, 1) } == 0 {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: the accounting struct is plain integers; all-zero is valid.
         let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { zeroed() };
+        // SAFETY: the Job handle is live; the pointer and size describe the
+        // writable `accounting` buffer, and the optional length is null.
         if unsafe {
             QueryInformationJobObject(
                 raw,
@@ -757,6 +872,7 @@ mod windows {
         Ok(accounting.ActiveProcesses != 0)
     }
 
+    #[allow(unsafe_code)]
     pub(super) fn job_owns_listener(
         job: &OwnedHandle,
         endpoint: &RuntimeEndpointUrl,
@@ -787,6 +903,8 @@ mod windows {
             return Err(io::Error::other("IPv6 listener attribution unavailable"));
         }
         let mut size = 0;
+        // SAFETY: a null table with a writable size asks only for the
+        // required buffer size; nothing else is written.
         unsafe {
             GetExtendedTcpTable(
                 std::ptr::null_mut(),
@@ -801,6 +919,8 @@ mod windows {
             return Err(io::Error::other("Invalid TCP owner table size"));
         }
         let mut table = vec![0u64; (size as usize).div_ceil(8)];
+        // SAFETY: `table` is a writable, 8-byte-aligned buffer of at least
+        // `size` bytes, and `size` is a writable in/out length.
         let code = unsafe {
             GetExtendedTcpTable(
                 table.as_mut_ptr().cast(),
@@ -818,6 +938,8 @@ mod windows {
         if reported_size < size_of::<u32>() || reported_size > table.len() * size_of::<u64>() {
             return Err(io::Error::other("Invalid TCP owner table"));
         }
+        // SAFETY: `reported_size` was checked to cover at least the leading
+        // u32 row count inside `table`; read_unaligned needs no alignment.
         let count = unsafe { table.as_ptr().cast::<u32>().read_unaligned() } as usize;
         let row_size = size_of::<MIB_TCPROW_OWNER_PID>();
         for index in 0..checked_tcp_row_count(
@@ -827,6 +949,9 @@ mod windows {
             row_size,
         )? {
             let offset = size_of::<u32>() + index * row_size;
+            // SAFETY: checked_tcp_row_count bounds every row inside the
+            // reported table, so `offset..offset + row_size` is within
+            // `table`; the row is a plain C struct read without alignment.
             let row = unsafe {
                 table
                     .as_ptr()
@@ -841,13 +966,19 @@ mod windows {
             {
                 continue;
             }
+            // SAFETY: OpenProcess takes only integer arguments; a null result
+            // is checked before use.
             let process =
                 unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, row.dwOwningPid) };
             if process.is_null() {
                 return Err(io::Error::last_os_error());
             }
+            // SAFETY: `process` is a fresh non-null handle owned by nothing
+            // else; OwnedHandle closes it exactly once.
             let process = unsafe { OwnedHandle::from_raw_handle(process) };
             let mut member = 0;
+            // SAFETY: both handles are live for the call and `member` is a
+            // writable BOOL.
             if unsafe { IsProcessInJob(process.as_raw_handle(), job.as_raw_handle(), &mut member) }
                 == 0
             {
@@ -1092,6 +1223,84 @@ mod unix_tests {
         assert!(!super::super::linux_group::group_has_live_members(child.id() as i32).unwrap());
         #[cfg(target_os = "macos")]
         assert!(!macos_group_has_live_members(child.id() as i32).unwrap());
+    }
+
+    #[test]
+    fn drain_sends_sigterm_before_sigkill() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("terminated");
+        let ready = root.path().join("ready");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("trap 'touch \"$1\"; exit 0' TERM; touch \"$2\"; while :; do sleep 0.05; done")
+            .arg("sh")
+            .arg(&marker)
+            .arg(&ready);
+        let mut child = ManagedChild::spawn(&mut command, ManagedChildCustodySlot::new()).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(Instant::now() < until, "fixture did not start");
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        let status = child.terminate_and_drain(Duration::from_secs(5)).unwrap();
+        assert!(marker.exists(), "the group must see SIGTERM first");
+        assert!(status.success(), "graceful exit status: {status:?}");
+    }
+
+    #[test]
+    fn drain_escalates_to_sigkill_within_the_deadline() {
+        use std::os::unix::process::ExitStatusExt;
+        let root = tempfile::tempdir().unwrap();
+        let ready = root.path().join("ready");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("trap '' TERM; touch \"$1\"; while :; do sleep 0.05; done")
+            .arg("sh")
+            .arg(&ready);
+        let mut child = ManagedChild::spawn(&mut command, ManagedChildCustodySlot::new()).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(Instant::now() < until, "fixture did not start");
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        let started = Instant::now();
+        let status = child.terminate_and_drain(Duration::from_secs(2)).unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        assert!(started.elapsed() >= Duration::from_millis(900));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn thread_bound_child_dies_with_its_spawning_thread() {
+        use std::os::unix::process::ExitStatusExt;
+        let custody = ManagedChildCustodySlot::new();
+        let mut child = std::thread::spawn({
+            let custody = custody.clone();
+            move || {
+                let mut command = Command::new("sleep");
+                command.arg("30");
+                ManagedChild::spawn_bound_to_thread(&mut command, custody).unwrap()
+            }
+        })
+        .join()
+        .unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        let observed = loop {
+            if let Some(status) = child.observe_exit().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < until,
+                "child outlived its supervising thread"
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        assert_eq!(observed.signal(), Some(libc::SIGKILL));
+        child.terminate_and_drain(Duration::from_secs(5)).unwrap();
+        assert!(!custody.is_active());
     }
 
     #[test]

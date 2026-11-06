@@ -5,12 +5,21 @@ Starts a FastAPI server that provides:
   - /api/*  Pumas control endpoints (load/unload/status/devices)
             plus the private image provider operation
   - /health Health check endpoint
+
+When the launcher sets PUMAS_TORCH_API_TOKEN, every route except /health
+requires it. When it sets PUMAS_TORCH_PARENT_PID, the server exits once that
+process is gone, so a crashed launcher never leaves a GPU-holding orphan.
 """
 
 import argparse
 import logging
+import os
+import signal
 import sys
+import threading
+import time
 
+import psutil
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -22,6 +31,7 @@ from image_api import router as image_router
 from openai_api import router as openai_router
 from validation import (
     configured_api_token,
+    configured_parent_pid,
     extract_bearer_token,
     is_loopback_host,
     token_matches,
@@ -33,6 +43,10 @@ from validation import (
 logger = logging.getLogger(__name__)
 TORCH_PROTOCOL = 3
 TORCH_CAPABILITIES = ("image_generation",)
+PARENT_POLL_SECONDS = 1.0
+# After asking uvicorn to stop, wait this long for in-flight workers to observe
+# their disconnect before forcing exit.
+ORPHAN_SHUTDOWN_GRACE_SECONDS = 10.0
 
 
 def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -> FastAPI:
@@ -94,9 +108,73 @@ def install_token_auth(app: FastAPI, api_token: str) -> None:
             provided_token = extract_bearer_token(request.headers.get("authorization"))
 
         if not token_matches(provided_token, api_token):
-            return JSONResponse(status_code=401, content={"detail": "invalid or missing API token"})
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": {
+                        "code": "unauthorized",
+                        "message": "Missing or invalid x-pumas-torch-token header",
+                    }
+                },
+            )
 
         return await call_next(request)
+
+
+class ParentWatch:
+    """Identity of the launcher process: its pid plus its start time.
+
+    The start time guards against pid reuse after the launcher has exited.
+    """
+
+    def __init__(self, pid: int):
+        self.pid = pid
+        self.direct_parent = os.getppid() == pid
+        self.create_time = psutil.Process(pid).create_time()
+
+    def alive(self) -> bool:
+        # A reparented child sees a different getppid() immediately on POSIX.
+        if self.direct_parent and os.name != "nt" and os.getppid() != self.pid:
+            return False
+        try:
+            return psutil.Process(self.pid).create_time() == self.create_time
+        except psutil.Error:
+            return False
+
+
+def _stop_orphaned_server() -> None:
+    logger.warning("Launcher process exited; stopping the Torch server")
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(ORPHAN_SHUTDOWN_GRACE_SECONDS)
+    logger.error("Torch server did not stop after its launcher exited; forcing exit")
+    os._exit(1)
+
+
+def start_parent_watchdog(
+    parent_pid: int,
+    *,
+    interval: float = PARENT_POLL_SECONDS,
+    on_orphaned=_stop_orphaned_server,
+) -> threading.Thread:
+    """Poll the launcher's identity and call ``on_orphaned`` once it is gone.
+
+    Polling is used instead of PR_SET_PDEATHSIG because that signal follows
+    the launcher thread that spawned us, and the Rust runtime may retire that
+    thread while the launcher process lives on.
+    """
+    try:
+        watch = ParentWatch(parent_pid)
+    except psutil.Error:
+        watch = None
+
+    def run() -> None:
+        while watch is not None and watch.alive():
+            time.sleep(interval)
+        on_orphaned()
+
+    thread = threading.Thread(target=run, name="pumas-parent-watchdog", daemon=True)
+    thread.start()
+    return thread
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,8 +188,11 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     try:
+        parent_pid = configured_parent_pid()
         application = create_app(host=args.host, port=args.port, max_models=args.max_models)
     except ValueError as exc:
         print(f"Invalid Torch server configuration: {exc}", file=sys.stderr)
         sys.exit(2)
+    if parent_pid is not None:
+        start_parent_watchdog(parent_pid)
     uvicorn.run(application, host=args.host, port=args.port, log_level="info")

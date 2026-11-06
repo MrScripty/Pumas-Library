@@ -15,6 +15,50 @@ pub(crate) mod catalog_recovery;
 pub(crate) mod local_enumeration;
 pub(crate) mod pending_recovery;
 
+/// Create `dir` and missing parents; on Unix the created directories are
+/// owner-only (0700). Existing directories keep their mode.
+fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
+}
+
+/// Create the registry database owner-only if it is missing, and tighten an
+/// existing database and its SQLite side files to 0600 on Unix. SQLite
+/// creates `-wal`/`-shm` with the database file's mode, so they follow.
+fn restrict_registry_files(db_path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(db_path)?;
+        let side_file = |suffix: &str| {
+            let mut path = db_path.as_os_str().to_owned();
+            path.push(suffix);
+            PathBuf::from(path)
+        };
+        for path in [db_path.to_path_buf(), side_file("-wal"), side_file("-shm")] {
+            match std::fs::metadata(&path) {
+                Ok(metadata) if metadata.permissions().mode() & 0o077 != 0 => {
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = db_path;
+    Ok(())
+}
+
 /// A registered library entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryEntry {
@@ -156,17 +200,29 @@ impl LibraryRegistry {
 
     /// Open the registry at a specific path.
     ///
-    /// Creates the database and parent directories if they don't exist.
+    /// Creates the database and parent directories if they don't exist. The
+    /// registry holds the local IPC connection tokens, so on Unix a created
+    /// directory is private to the user (0700) and the database and its
+    /// WAL/SHM side files are kept owner-only (0600), including databases
+    /// created by earlier versions under the default umask.
     pub fn open_at(db_path: &Path) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             if !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
+                create_private_dir_all(parent).map_err(|e| PumasError::Io {
                     message: format!("Failed to create registry directory: {}", parent.display()),
                     path: Some(parent.to_path_buf()),
                     source: Some(e),
                 })?;
             }
         }
+        restrict_registry_files(db_path).map_err(|e| PumasError::Io {
+            message: format!(
+                "Failed to make the registry database owner-only: {}",
+                db_path.display()
+            ),
+            path: Some(db_path.to_path_buf()),
+            source: Some(e),
+        })?;
 
         let conn = Connection::open(db_path)?;
         Self::configure_connection(&conn)?;
@@ -906,7 +962,13 @@ impl LibraryRegistry {
         Ok(rows > 0)
     }
 
-    /// Register a running instance for a library path.
+    /// Register a running instance for a library path, bypassing the claim
+    /// protocol (`try_claim_instance` then `mark_instance_ready`).
+    ///
+    /// Test fixture only: it can overwrite a live owner's row, so it exists
+    /// only in unit tests and `test-support` builds.
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
     pub fn register_instance(&self, path: &Path, pid: u32, port: u16) -> Result<()> {
         let conn = self.lock_conn()?;
         let canonical = Self::canonicalize_library_path(path)?;
@@ -953,7 +1015,12 @@ impl LibraryRegistry {
         Ok(())
     }
 
-    /// Unregister a running instance for a library path.
+    /// Remove any instance row for a library path, bypassing generation
+    /// fencing (`release_ready_instance` is the owner's release path).
+    ///
+    /// Test fixture only, like [`Self::register_instance`].
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
     pub fn unregister_instance(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
         let canonical = Self::lookup_path(path);
@@ -1024,6 +1091,31 @@ mod tests {
         let db_path = temp_dir.path().join("test-registry.db");
         let registry = LibraryRegistry::open_at(&db_path).unwrap();
         (registry, temp_dir)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn registry_database_and_directory_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("config").join("pumas");
+        let db_path = dir.join("registry.db");
+        let registry = LibraryRegistry::open_at(&db_path).unwrap();
+        registry.list().unwrap();
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&db_path), 0o600);
+        let wal = dir.join("registry.db-wal");
+        if wal.exists() {
+            assert_eq!(mode(&wal), 0o600);
+        }
+        drop(registry);
+
+        // A database created by an older version under a permissive umask
+        // is tightened on the next open.
+        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        LibraryRegistry::open_at(&db_path).unwrap();
+        assert_eq!(mode(&db_path), 0o600);
     }
 
     fn create_library_dir(parent: &Path, name: &str) -> PathBuf {

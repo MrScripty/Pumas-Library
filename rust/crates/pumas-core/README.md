@@ -56,6 +56,10 @@ all attempts and backoff; retries do not reset it, and another file receives its
 own budget. The clock range is checked before public worker/store admission.
 HTTP `elapsed = Duration::ZERO` preserves the existing opt-out. Attempt limits,
 source identity, verification requirements, receipts and public shapes are unchanged.
+A credential-less `http://` source on a network host is tried over `https`
+first and falls back to plaintext only when that attempt gets no HTTP response;
+the HTTPS attempt counts against the same budget. See
+[Plaintext sources prefer HTTPS](../../../docs/contracts/artifact-acquisition.md#plaintext-sources-prefer-https).
 
 Expiry prevents a new source/body effect from starting, but already registered
 filesystem effects are still drained before retry or return. Partial inputs keep
@@ -512,6 +516,22 @@ coordinate filesystem state, metadata, index rows, and update events. A
 recoverable partial file, an automatically finalized download, and a complete
 model are different transitions even when the final UI presentation is simple.
 
+The SQLite index records its schema version in `PRAGMA user_version`. An index
+without one is new or was written by 0.8.0 or earlier: the first open
+recognises its shape, brings it to the current schema and records the version,
+all in one transaction. An index stamped by a newer release, or with a version
+or `models` table no release wrote, is refused with the reason before anything
+is changed. Older releases ignore the stamp, so a library still opens with
+them. Opening also refuses a `model_type_*_rules_legacy` table left beside its
+live table by an interrupted rule rebuild of an earlier release, naming the
+table, and
+finishes the copy when the live table is missing.
+
+Review edits (`submit_model_review`, `reset_model_review`) commit the overlay
+first; it is authoritative. `metadata.json` and the index row are derived from
+it, and a failure before they are written is replayed by the next index
+rebuild, which runs at startup.
+
 For managed HF downloads, Completed requires successful metadata publication
 and indexing before the durable download admission is settled. Startup
 finalization uses the same importer. An import failure retains the downloaded
@@ -709,7 +729,10 @@ failed outcomes instead of collapsing them into defaults.
 The default `full` feature enables `hf-client`, `process-manager`, `gpu-monitor`
 and `onnx-runtime`. `onnx-runtime` gates the ONNX execution module and its
 native dependencies; `s3`, `contract-schema` and `uniffi` gate their optional
-dependencies. The other three remove no dependency or module; the
+dependencies. The other three gate behavior without removing a dependency or
+module: without `hf-client` the HuggingFace client never starts, without
+`gpu-monitor` `nvidia-smi` is never run, and without `process-manager` the
+legacy process manager cannot be enabled. The
 [Rust guide](../../README.md#features-and-variants) owns the exact facts.
 
 ## Verification

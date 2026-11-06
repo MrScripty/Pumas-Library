@@ -802,4 +802,31 @@ test('update-stream payloads made by Rust decode exactly and stay closed', () =>
     const decode = value.snapshot ? decoders.status_telemetry_update : decoders.runtime_profile_update;
     assert.equal(decode(value).status, 'invalid', JSON.stringify(value).slice(0, 120));
   }
+  // Pull snapshots decode with the declarations their push notification uses.
+  for (const [value, decode] of [
+    [telemetry.snapshot, contract.decodeStatusTelemetrySnapshot],
+    [telemetry.snapshot.network, contract.decodeNetworkStatusResponse],
+    [telemetry.snapshot.library, contract.decodeLibraryStatusResponse],
+    [fixtures.runtime_profiles_snapshot, contract.decodeRuntimeProfilesSnapshotResponse],
+    [fixtures.serving_status, contract.decodeServingStatusResponse],
+    [fixtures.hf_model_search, contract.decodeHfModelSearchOutcome],
+    [fixtures.hf_model_search_failed, contract.decodeHfModelSearchOutcome],
+  ]) {
+    const result = decode(value);
+    assert.equal(result.status, 'valid', result.message);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), value);
+    assert.equal(decode({...value, extra: true}).status, 'invalid');
+  }
+  // Nested records are closed too; the free-form model card stays open.
+  const [model] = fixtures.hf_model_search.models;
+  assert.equal(contract.decodeHfModelSearchOutcome({...fixtures.hf_model_search,
+    models: [{...model, extra: true}]}).status, 'invalid');
+  assert.equal(contract.decodeHfModelSearchOutcome({...fixtures.hf_model_search,
+    models: [{...model, modelCard: {...model.modelCard, anything: [1, 'two']}}]}).status, 'valid');
+  const snapshot = fixtures.runtime_profiles_snapshot.snapshot;
+  assert.equal(contract.decodeRuntimeProfilesSnapshotResponse({...fixtures.runtime_profiles_snapshot,
+    snapshot: {...snapshot, profiles: [{...snapshot.profiles[0], provider: 'unknown'}]}}).status, 'invalid');
+  const serving = fixtures.serving_status.snapshot;
+  assert.equal(contract.decodeServingStatusResponse({...fixtures.serving_status,
+    snapshot: {...serving, served_models: [{...serving.served_models[0], extra: 1}]}}).status, 'invalid');
 });

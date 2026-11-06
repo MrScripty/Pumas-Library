@@ -12,7 +12,9 @@ usable without it.
 - Hooks own async work, cancellation, cleanup, stale-invocation protection and
   renderer subscriptions.
 - `src/api/` adapts the sandboxed `window.electronAPI` preload bridge. The
-  renderer has no filesystem, process or network access of its own.
+  renderer has no filesystem, process or network access of its own; the
+  shipped CSP in `index.html` grants `connect-src 'self'` only. `vite serve`
+  adds its HMR WebSocket through `src/config/devServerCsp.ts`.
 
 The Rust backend owns model availability, categories, download state, repair
 outcomes, runtime installations, runtime profiles, serving instances and status
@@ -41,7 +43,14 @@ Framer Motion, React Aria interactions, and Vitest with Testing Library/jsdom.
 - Responses are matched to the model or selection that requested them; a reply
   for another identity cannot replace the current view.
 - Cached startup data is a projection whose age, provenance, refresh state and
-  degraded outcome stay visible.
+  degraded outcome stay visible. The library snapshot stores when it was
+  written and a per-library revision. Its rows stay display-only until the
+  first load succeeds; later refreshes keep live rows actionable and downgrade
+  them only when the refresh fails.
+- A failed library load, scan or search, download-list read or runtime-state
+  refresh keeps its reason on screen. Disk usage that was never read shows as
+  unavailable. None of these fall back to an empty list, an idle status or a
+  0% reading.
 - Do not infer that a model is complete from its name, repository or a partial
   set of files. One Hugging Face repository can hold several files or
   quantizations, and the same weights in another repository are a separate
@@ -53,16 +62,20 @@ Framer Motion, React Aria interactions, and Vitest with Testing Library/jsdom.
 
 ## Accessibility and Themes
 
-Theme tokens live in `src/index.css`; programmatic mappings live in
-`src/config/theme.ts`. Use semantic tokens rather than hard-coded colors.
+Theme tokens live in `src/index.css` as CSS custom properties. Use semantic
+tokens rather than hard-coded colors.
 
 Prefer native semantic controls. Composite widgets must provide complete
 keyboard, focus, naming, dismissal and state behavior. The lint policy requires
-React Aria `useHover` instead of raw mouse hover handlers. Routine progress
-updates are not live announcements; one terminal region announces failure
-assertively and cancellation or success politely. The renderer follows the
-operating-system reduced-motion preference. jsdom tests do not prove real
-focus, layout, contrast, reduced motion or assistive-technology behavior.
+React Aria `useHover` instead of raw mouse hover handlers. `ui/Tooltip` opens
+on hover and on keyboard focus, closes on Escape, and describes its trigger
+through `aria-describedby`, so a hint on a control is never hover-only.
+Progress rings are decorative; the control that owns one states its progress
+as text. Routine progress updates are not live announcements; one terminal
+region announces failure assertively and cancellation or success politely.
+The renderer follows the operating-system reduced-motion preference. jsdom
+tests do not prove real focus, layout, contrast, reduced motion or
+assistive-technology behavior.
 
 ## Entry Points
 
@@ -73,13 +86,16 @@ npm run -w frontend dev
 npm run -w frontend lint
 npm run -w frontend check:types
 npm run -w frontend test:run
+npm run -w frontend test:library-only
 npm run -w frontend build
 npm run -w frontend build:library-only
 pnpm --dir frontend test:desktop-contract
 ```
 
 The default build includes inference integrations; `build:library-only` removes
-their UI. `test:desktop-contract` crosses the real bundled preload and renderer;
+their UI. `test:library-only` runs `*.library-only.test.tsx` with the same
+compiled-out feature flag and module replacements as that build; `test:run`
+does not include them. `test:desktop-contract` crosses the real bundled preload and renderer;
 [Development](../docs/DEVELOPMENT.md) describes its prerequisites. For
 representative desktop behavior, build and run through the root launcher.
 Open frontend findings are tracked in the

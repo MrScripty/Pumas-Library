@@ -4,7 +4,6 @@
 //! - Network connectivity checking before making requests
 //! - Circuit breaker management per domain
 //! - WebSource registration and management
-//! - Automatic offline fallback to cached data
 
 use crate::config::NetworkConfig;
 use crate::network::circuit_breaker::{CircuitBreaker, CircuitBreakerStats};
@@ -100,7 +99,6 @@ impl AtomicConnectivityState {
 /// - Connectivity state tracking (online/offline detection)
 /// - Circuit breaker management per domain
 /// - WebSource registration for extensible source management
-/// - Request execution with automatic cache fallback when offline
 pub struct NetworkManager {
     /// Shared HTTP client for connectivity probes.
     http_client: Arc<HttpClient>,
@@ -358,93 +356,6 @@ impl NetworkManager {
 
     // === Request Execution ===
 
-    /// Execute a network request with connectivity and circuit breaker checks.
-    ///
-    /// This method:
-    /// 1. Checks if we're offline - if so, returns cached data or error
-    /// 2. Checks circuit breaker - if open, returns cached data or error
-    /// 3. Executes the operation
-    /// 4. On failure, tries to return cached data
-    /// 5. Records success/failure with circuit breaker
-    ///
-    /// # Arguments
-    ///
-    /// * `domain` - The domain being accessed (for circuit breaker)
-    /// * `cache_key` - Key for cache lookup
-    /// * `operation` - The async operation to execute
-    /// * `get_cached` - Function to retrieve cached data
-    pub async fn execute<F, T, Fut>(
-        &self,
-        domain: &str,
-        cache_key: &str,
-        operation: F,
-        get_cached: impl FnOnce() -> Option<T>,
-    ) -> Result<T>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<T>>,
-        T: Clone,
-    {
-        // Check if we should skip network entirely
-        if self.should_skip_network(domain).await {
-            if let Some(cached) = get_cached() {
-                debug!(
-                    "Skipping network for {} (offline/circuit open), using cache",
-                    cache_key
-                );
-                return Ok(cached);
-            }
-
-            // No cache and offline
-            if self.is_offline() {
-                return Err(PumasError::Network {
-                    message: "Network unavailable and no cached data".to_string(),
-                    cause: None,
-                });
-            } else {
-                return Err(PumasError::CircuitBreakerOpen {
-                    domain: domain.to_string(),
-                });
-            }
-        }
-
-        // Execute operation
-        match operation().await {
-            Ok(result) => {
-                self.record_success(domain).await;
-                // Update connectivity state on success
-                if self.connectivity_state.load() != ConnectivityState::Online {
-                    self.connectivity_state.store(ConnectivityState::Online);
-                    *self.last_connectivity_check.write().await = Some(Instant::now());
-                }
-                Ok(result)
-            }
-            Err(e) => {
-                // Record failure if it's a network error
-                if e.is_retryable() {
-                    self.record_failure(domain).await;
-
-                    // Check if this looks like an offline situation
-                    if matches!(&e, PumasError::Network { .. } | PumasError::Timeout(_)) {
-                        // Try other probe URLs to confirm offline state
-                        let connectivity = self.check_connectivity().await;
-                        if connectivity == ConnectivityState::Offline {
-                            debug!("Confirmed offline state after request failure");
-                        }
-                    }
-                }
-
-                // Try cache on failure
-                if let Some(cached) = get_cached() {
-                    warn!("Request failed for {}, using cached data: {}", cache_key, e);
-                    return Ok(cached);
-                }
-
-                Err(e)
-            }
-        }
-    }
-
     // === Background Monitoring ===
 
     /// Start background connectivity monitoring.
@@ -606,34 +517,6 @@ mod tests {
 
         // Circuit should be open now
         assert!(!manager.can_request("example.com").await);
-    }
-
-    #[tokio::test]
-    async fn test_execute_with_cache_fallback() {
-        let manager = NetworkManager::new().unwrap();
-
-        // Create a circuit breaker and open it
-        manager.get_or_create_circuit_breaker("test.com").await;
-        for _ in 0..5 {
-            manager.record_failure("test.com").await;
-        }
-
-        // Execute should fall back to cache
-        let result: Result<String> = manager
-            .execute(
-                "test.com",
-                "test-key",
-                || async {
-                    Err(PumasError::Network {
-                        message: "test".into(),
-                        cause: None,
-                    })
-                },
-                || Some("cached-value".to_string()),
-            )
-            .await;
-
-        assert_eq!(result.unwrap(), "cached-value");
     }
 
     #[tokio::test]

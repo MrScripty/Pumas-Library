@@ -138,97 +138,162 @@ pub fn configure_detached_command(command: &mut Command) {
     }
 }
 
-/// Terminate a process gracefully, then forcefully if needed.
+/// The outcome of stopping a process named by a recorded identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordedStop {
+    /// The recorded process was running and has now stopped.
+    Stopped,
+    /// The recorded process was no longer running; nothing was signalled.
+    AlreadyGone {
+        /// Why the record no longer names a live process.
+        reason: String,
+    },
+    /// Pumas could not prove custody of the live process and sent no signal
+    /// (or the operating system refused the signal).
+    Refused {
+        /// Why the stop was refused.
+        reason: String,
+    },
+}
+
+/// Stop the process named by a recorded identity, gracefully then forcefully.
+///
+/// Every signal is preceded by an identity check (see
+/// [`process_identity`](super::process_identity)); a PID whose identity no
+/// longer matches is never signalled.
 ///
 /// # Platform Behavior
-/// - **Linux/macOS**: Sends SIGTERM, waits, then SIGKILL if still running
-/// - **Windows**: Uses `taskkill /PID {pid} /F /T` to kill process tree
-///
-/// # Arguments
-/// - `pid`: The process ID to terminate
-/// - `timeout_ms`: How long to wait after graceful termination before force kill (Unix only)
-///
-/// # Returns
-/// `true` if the process was terminated (or wasn't running), `false` on error
-pub fn terminate_process(pid: u32, timeout_ms: u64) -> Result<bool> {
-    #[cfg(not(unix))]
-    let _ = timeout_ms;
-    if !is_process_alive(pid) {
-        debug!("Process {} is not running", pid);
-        return Ok(true);
+/// - **Linux/macOS**: SIGTERM, wait up to `timeout_ms`, then SIGKILL. The
+///   signal goes to the process group only while the verified process still
+///   leads that group (Pumas launches legacy runtimes with `setsid`), so a
+///   group is never signalled through a reused or foreign PID. Descendants
+///   that outlive their leader receive the group SIGTERM but are not
+///   force-killed afterwards, because nothing then proves the group is ours.
+/// - **Windows**: `taskkill /PID {pid} /T /F` after the identity check. The
+///   check and the kill are not atomic; see the weaker identity guarantee
+///   documented in `process_identity`.
+pub fn terminate_recorded_process(
+    identity: &super::process_identity::ProcessIdentity,
+    timeout_ms: u64,
+) -> Result<RecordedStop> {
+    use super::process_identity::{verify, IdentityCheck};
+
+    match verify(identity) {
+        IdentityCheck::Alive => {}
+        IdentityCheck::Gone { reason } => return Ok(RecordedStop::AlreadyGone { reason }),
+        IdentityCheck::Unverifiable { reason } => return Ok(RecordedStop::Refused { reason }),
     }
 
     #[cfg(unix)]
     {
-        terminate_process_unix(pid, timeout_ms)
+        terminate_recorded_unix(identity, timeout_ms)
     }
 
     #[cfg(windows)]
     {
-        terminate_process_windows(pid)
+        let _ = timeout_ms;
+        if !terminate_process_windows(identity.pid)? {
+            return Ok(RecordedStop::Refused {
+                reason: format!("taskkill could not stop process {}", identity.pid),
+            });
+        }
+        match verify(identity) {
+            IdentityCheck::Alive => Err(PumasError::Other(format!(
+                "Process {} is still running after taskkill",
+                identity.pid
+            ))),
+            _ => Ok(RecordedStop::Stopped),
+        }
     }
 
     #[cfg(not(any(unix, windows)))]
     {
-        Err(PumasError::Other(
-            "Process termination not implemented for this platform".into(),
-        ))
+        let _ = timeout_ms;
+        Ok(RecordedStop::Refused {
+            reason: "process termination is not implemented for this platform".into(),
+        })
     }
 }
 
 #[cfg(unix)]
-fn terminate_process_unix(pid: u32, timeout_ms: u64) -> Result<bool> {
-    use nix::sys::signal::{kill, Signal};
-    use nix::sys::wait::{waitpid, WaitPidFlag};
-    use nix::unistd::Pid;
+fn terminate_recorded_unix(
+    identity: &super::process_identity::ProcessIdentity,
+    timeout_ms: u64,
+) -> Result<RecordedStop> {
+    use super::process_identity::{verify, IdentityCheck};
+    use nix::errno::Errno;
+    use nix::sys::signal::{kill, killpg, Signal};
+    use nix::unistd::{getpgid, Pid};
     use std::thread::sleep;
     use std::time::Duration;
 
-    let nix_pid = Pid::from_raw(pid as i32);
-
-    // First try SIGTERM (graceful)
-    debug!("Sending SIGTERM to process {}", pid);
-    if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
-        if e == nix::errno::Errno::ESRCH {
-            // Process doesn't exist
-            return Ok(true);
+    let Ok(raw) = i32::try_from(identity.pid) else {
+        return Ok(RecordedStop::Refused {
+            reason: format!("PID {} is out of range", identity.pid),
+        });
+    };
+    let pid = Pid::from_raw(raw);
+    // Signal only after a fresh identity check, and the group only while the
+    // verified process still leads it.
+    let send = |signal: Signal| -> Result<Option<RecordedStop>> {
+        match verify(identity) {
+            IdentityCheck::Alive => {}
+            IdentityCheck::Gone { .. } => return Ok(Some(RecordedStop::Stopped)),
+            IdentityCheck::Unverifiable { reason } => {
+                return Ok(Some(RecordedStop::Refused { reason }))
+            }
         }
-        warn!("Failed to send SIGTERM to {}: {}", pid, e);
+        let result = if getpgid(Some(pid)) == Ok(pid) {
+            killpg(pid, signal)
+        } else {
+            kill(pid, signal)
+        };
+        match result {
+            Ok(()) => Ok(None),
+            Err(Errno::ESRCH) => Ok(Some(RecordedStop::Stopped)),
+            Err(Errno::EPERM) => Ok(Some(RecordedStop::Refused {
+                reason: format!(
+                    "the operating system denied signalling process {} (it belongs to another user)",
+                    identity.pid
+                ),
+            })),
+            Err(error) => Err(PumasError::Other(format!(
+                "Failed to send {signal:?} to process {}: {error}",
+                identity.pid
+            ))),
+        }
+    };
+    let gone = || !matches!(verify(identity), IdentityCheck::Alive);
+
+    debug!("Sending SIGTERM to recorded process {}", identity.pid);
+    if let Some(outcome) = send(Signal::SIGTERM)? {
+        return Ok(outcome);
     }
-
-    // Wait for process to exit
-    let wait_interval = Duration::from_millis(100);
-    let iterations = (timeout_ms / 100).max(1);
-
-    for _ in 0..iterations {
-        sleep(wait_interval);
-        // Try to reap zombie (non-blocking)
-        let _ = waitpid(nix_pid, Some(WaitPidFlag::WNOHANG));
-        if !is_process_alive(pid) {
-            debug!("Process {} terminated gracefully", pid);
-            return Ok(true);
+    let interval = Duration::from_millis(100);
+    for _ in 0..(timeout_ms / 100).max(1) {
+        sleep(interval);
+        if gone() {
+            debug!("Recorded process {} stopped after SIGTERM", identity.pid);
+            return Ok(RecordedStop::Stopped);
         }
     }
-
-    // Process still running, use SIGKILL
-    debug!("Process {} still running, sending SIGKILL", pid);
-    if let Err(e) = kill(nix_pid, Signal::SIGKILL) {
-        if e == nix::errno::Errno::ESRCH {
-            return Ok(true);
-        }
-        return Err(PumasError::Other(format!(
-            "Failed to kill process {}: {}",
-            pid, e
-        )));
+    debug!(
+        "Recorded process {} still running, sending SIGKILL",
+        identity.pid
+    );
+    if let Some(outcome) = send(Signal::SIGKILL)? {
+        return Ok(outcome);
     }
-
-    // Brief wait then reap the zombie
-    sleep(Duration::from_millis(100));
-
-    // Reap the zombie to remove it from process table
-    let _ = waitpid(nix_pid, Some(WaitPidFlag::WNOHANG));
-
-    Ok(!is_process_alive(pid))
+    for _ in 0..10 {
+        sleep(interval);
+        if gone() {
+            return Ok(RecordedStop::Stopped);
+        }
+    }
+    Err(PumasError::Other(format!(
+        "Process {} is still running after SIGKILL",
+        identity.pid
+    )))
 }
 
 #[cfg(windows)]
@@ -255,90 +320,6 @@ fn terminate_process_windows(pid: u32) -> Result<bool> {
             warn!("taskkill failed for {}: {}", pid, stderr);
             Ok(false)
         }
-    }
-}
-
-/// Terminate a process and its children (Unix) or process tree (Windows).
-///
-/// # Platform Behavior
-/// - **Linux/macOS**: Signals the process group first, then falls back to the
-///   process PID if no matching group exists
-/// - **Windows**: Uses `taskkill /T` which already handles the tree
-///
-/// This PID-only interface is best-effort and does not establish exclusive
-/// custody of a Child or its reaper. Managed Linux children use the separate
-/// borrowed-Child stop under their shared observation/stop mutex.
-pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
-    #[cfg(not(unix))]
-    let _ = timeout_ms;
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::Signal;
-        use nix::sys::wait::{waitpid, WaitPidFlag};
-        use nix::unistd::Pid;
-        use std::thread::sleep;
-        use std::time::Duration;
-
-        if !is_process_alive(pid) {
-            debug!("Process {} is not running", pid);
-            // Try to reap in case it's a zombie we haven't reaped yet
-            let _ = waitpid(Pid::from_raw(pid as i32), Some(WaitPidFlag::WNOHANG));
-            return Ok(true);
-        }
-
-        let nix_pid = Pid::from_raw(pid as i32);
-
-        send_tree_signal(nix_pid, Signal::SIGTERM)?;
-
-        // Wait for graceful termination
-        let wait_interval = Duration::from_millis(100);
-        let iterations = (timeout_ms / 100).max(1);
-
-        for _ in 0..iterations {
-            sleep(wait_interval);
-            // Try to reap (non-blocking) - this handles zombies
-            let _ = waitpid(nix_pid, Some(WaitPidFlag::WNOHANG));
-            if !is_process_alive(pid) {
-                debug!("Process {} terminated gracefully", pid);
-                return Ok(true);
-            }
-        }
-
-        // Process still running, use SIGKILL
-        debug!("Process {} still running, sending SIGKILL", pid);
-        send_tree_signal(nix_pid, Signal::SIGKILL)?;
-
-        // Brief wait then reap the zombie
-        sleep(Duration::from_millis(100));
-
-        // Reap the zombie - this is critical!
-        // waitpid() collects the exit status and removes the zombie from the process table.
-        // Without this, the process stays as a zombie and is_process_alive() returns true.
-        match waitpid(nix_pid, Some(WaitPidFlag::WNOHANG)) {
-            Ok(status) => {
-                debug!("Reaped process {}: {:?}", pid, status);
-            }
-            Err(e) => {
-                // ECHILD means we're not the parent - that's fine, init will reap it
-                if e != nix::errno::Errno::ECHILD {
-                    debug!("waitpid({}) failed: {} (this is usually OK)", pid, e);
-                }
-            }
-        }
-
-        Ok(!is_process_alive(pid))
-    }
-
-    #[cfg(windows)]
-    {
-        // taskkill /T already handles the tree
-        terminate_process_windows(pid)
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        // Fall back to single process termination
-        terminate_process(pid, timeout_ms)
     }
 }
 
@@ -412,153 +393,6 @@ pub(crate) fn terminate_owned_linux_group(
         // A caller may retry while the owned child continues to pin PGID.
         Ok(false)
     }
-}
-
-#[cfg(unix)]
-fn send_tree_signal(pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) -> Result<()> {
-    use nix::sys::signal::{kill, killpg};
-
-    let raw_pid = pid.as_raw();
-    debug!(
-        "Sending {:?} to process group {}, falling back to process if needed",
-        signal, raw_pid
-    );
-
-    match killpg(pid, signal) {
-        Ok(()) => return Ok(()),
-        Err(nix::errno::Errno::ESRCH) => {
-            debug!(
-                "Process group {} not found while sending {:?}; trying process PID",
-                raw_pid, signal
-            );
-        }
-        Err(error) => {
-            warn!(
-                "Failed to send {:?} to process group {}: {}",
-                signal, raw_pid, error
-            );
-        }
-    }
-
-    match kill(pid, signal) {
-        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
-        Err(error) => Err(PumasError::Other(format!(
-            "Failed to send {signal:?} to process {raw_pid}: {error}"
-        ))),
-    }
-}
-
-/// Scan for processes matching a pattern in their command line.
-///
-/// # Platform Behavior
-/// - **Linux/macOS**: Uses `ps -eo pid=,args=`
-/// - **Windows**: Uses `wmic process get processid,commandline`
-///
-/// Returns a list of (pid, cmdline) tuples.
-pub fn find_processes_by_cmdline(pattern: &str) -> Vec<(u32, String)> {
-    #[cfg(unix)]
-    {
-        find_processes_unix(pattern)
-    }
-
-    #[cfg(windows)]
-    {
-        find_processes_windows(pattern)
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        vec![]
-    }
-}
-
-#[cfg(unix)]
-fn find_processes_unix(pattern: &str) -> Vec<(u32, String)> {
-    use std::process::Command;
-
-    let output = match Command::new("ps").args(["-eo", "pid=,args="]).output() {
-        Ok(o) => o,
-        Err(e) => {
-            debug!("Failed to run ps: {}", e);
-            return vec![];
-        }
-    };
-
-    if !output.status.success() {
-        return vec![];
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pattern_lower = pattern.to_lowercase();
-
-    stdout
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
-            if parts.len() != 2 {
-                return None;
-            }
-
-            let pid: u32 = parts[0].trim().parse().ok()?;
-            let cmdline = parts[1].trim();
-
-            if cmdline.to_lowercase().contains(&pattern_lower) {
-                Some((pid, cmdline.to_string()))
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-#[cfg(windows)]
-fn find_processes_windows(pattern: &str) -> Vec<(u32, String)> {
-    use std::process::Command;
-
-    let output = match Command::new("wmic")
-        .args(["process", "get", "processid,commandline", "/format:csv"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            debug!("Failed to run wmic: {}", e);
-            return vec![];
-        }
-    };
-
-    if !output.status.success() {
-        return vec![];
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pattern_lower = pattern.to_lowercase();
-
-    stdout
-        .lines()
-        .skip(1) // Skip header
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                return None;
-            }
-
-            // CSV format: Node,CommandLine,ProcessId
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() < 3 {
-                return None;
-            }
-
-            let cmdline = parts[1];
-            let pid: u32 = parts[2].trim().parse().ok()?;
-
-            if cmdline.to_lowercase().contains(&pattern_lower) {
-                Some((pid, cmdline.to_string()))
-            } else {
-                None
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -664,19 +498,53 @@ mod tests {
     }
 
     #[test]
-    fn test_terminate_nonexistent() {
-        // Terminating a nonexistent process should succeed
-        let result = terminate_process(4_000_000_000, 1000);
-        assert!(result.is_ok());
-        assert!(result.unwrap());
+    fn recorded_stop_of_an_exited_identity_sends_nothing() {
+        use super::super::process_identity::capture;
+        let mut child = Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
+            .args(if cfg!(windows) {
+                &["/d", "/c", "ping -n 30 127.0.0.1 >NUL"][..]
+            } else {
+                &["30"][..]
+            })
+            .spawn()
+            .unwrap();
+        let identity = capture(child.id()).unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(matches!(
+            terminate_recorded_process(&identity, 100).unwrap(),
+            RecordedStop::AlreadyGone { .. }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recorded_stop_refuses_a_live_process_it_cannot_prove() {
+        use super::super::process_identity::{capture, ProcessIdentity};
+        let mut unrelated = Command::new("sleep").arg("30").spawn().unwrap();
+        let recorded = ProcessIdentity {
+            executable: std::path::PathBuf::from("/nonexistent/ollama"),
+            ..capture(unrelated.id()).unwrap()
+        };
+        let outcome = terminate_recorded_process(&recorded, 100).unwrap();
+        let survived = unrelated.try_wait().unwrap().is_none();
+        let _ = unrelated.kill();
+        unrelated.wait().unwrap();
+        assert!(
+            matches!(outcome, RecordedStop::Refused { .. }),
+            "{outcome:?}"
+        );
+        assert!(survived, "an unproven process must not be signalled");
     }
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn pid_only_stop_preserves_another_owned_child_in_the_callers_group() {
+    fn recorded_stop_of_a_group_member_preserves_the_callers_group() {
+        use super::super::process_identity::capture;
         let mut child = Command::new("sleep").arg("60").spawn().unwrap();
         let mut sibling = Command::new("sleep").arg("60").spawn().unwrap();
-        let result = terminate_process_tree(child.id(), 100);
+        let identity = capture(child.id()).unwrap();
+        let result = terminate_recorded_process(&identity, 100);
         let sibling_running = sibling.try_wait().unwrap().is_none();
         if super::super::linux_group::observe_exit(child.id()).is_ok() {
             let _ = child.kill();
@@ -684,21 +552,14 @@ mod tests {
         let _ = child.wait();
         let _ = sibling.kill();
         sibling.wait().unwrap();
-        assert!(result.unwrap());
+        assert_eq!(result.unwrap(), RecordedStop::Stopped);
         assert!(sibling_running);
-    }
-
-    #[test]
-    fn test_find_processes() {
-        // Should find at least something (like our test runner)
-        let processes = find_processes_by_cmdline("rust");
-        // May or may not find matches depending on how tests are run
-        let _ = processes;
     }
 
     #[cfg(unix)]
     #[test]
-    fn test_terminate_process_tree_stops_detached_child_processes() {
+    fn recorded_stop_stops_a_detached_process_group() {
+        use super::super::process_identity::capture;
         use std::process::{Command, Stdio};
         use std::time::Duration;
         use tempfile::TempDir;
@@ -732,10 +593,11 @@ mod tests {
         assert!(is_process_alive(parent_pid));
         assert!(is_process_alive(worker_pid));
 
-        let stopped = terminate_process_tree(parent_pid, 1_000).unwrap();
+        let identity = capture(parent_pid).unwrap();
+        let stopped = terminate_recorded_process(&identity, 1_000).unwrap();
         let _ = child.wait();
 
-        assert!(stopped);
+        assert_eq!(stopped, RecordedStop::Stopped);
         #[cfg(target_os = "linux")]
         assert!(!super::super::linux_group::group_has_live_members(
             i32::try_from(parent_pid).unwrap()

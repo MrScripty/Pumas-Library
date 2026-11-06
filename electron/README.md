@@ -29,10 +29,37 @@ Node access or add a generic IPC/RPC escape hatch. The executable RPC method
 and request registry is `src/rpc-method-registry.ts`; `src/ipc-validation.ts`
 applies it before dispatch.
 
+The preload exposes the whole desktop bridge to any document it runs in, so
+`src/window-security.ts` keeps every renderer on the bundled application
+(installed for each `web-contents-created`, not only the main window):
+
+- child windows are always denied; an http/https URL is handed to the system
+  browser after `validateExternalUrl`, anything else is refused with a logged
+  reason;
+- `will-navigate` and `will-redirect` are denied unless the target is the
+  bundled entry document (or, unpackaged with `--dev`, the dev-server origin);
+  webview attachment is denied;
+- browser permissions and device access are denied, except
+  `clipboard-sanitized-write` for the application document (copy buttons);
+- every `ipcMain` handler checks that the sender is the main window's top frame
+  showing an application document; a refused `api:call` never reaches the
+  backend.
+
+The renderer opens external URLs only through `ExternalLink` /
+`openExternalUrl` (`frontend/src/components/ui/`), which call `api.open_url`.
+Frontend lint forbids `target` on links and `window.open`.
+
+`--dev` (dev server) and `--debug` (DevTools, debug sidecar logging) apply only
+to unpackaged builds. Packaged builds disable DevTools and install a menu
+without DevTools or reload accelerators.
+
 TypeScript interfaces are compile-time projections, not validation of runtime
 messages. A contract change must update the receiver decoder, producer,
 consumer, and negative tests together. Treat sidecar logs as sensitive: they
-can contain backend diagnostics and must not expose credentials.
+can contain backend diagnostics and must not expose credentials. Electron logs
+sidecar stdout/stderr at `debug`, below the persisted file level (`info`), and
+an unparseable RPC response is reported by method, HTTP status and size, never
+by its body.
 
 ### Backend setup observation
 
@@ -69,6 +96,23 @@ by Electron's registry and Rust. They do not promise every standalone Rust
 deserialization alias; methods still dispatched through the `Legacy` command
 remain outside the generated contract.
 
+Main decodes a request with its exported declaration even when preload already
+did, because a renderer can bypass preload: credential (`set_hf_token`),
+import (`import_model`, `import_batch`), deletion (`delete_model_with_cascade`,
+`get_links_for_model`), the Torch runtime requests, HF download details,
+catalog search, notes/settings mutations and conversion setup. Methods Rust
+decodes as empty are `empty-record` in the registry. `torch_configure` has no
+exported declaration (`TorchServerConfig` lives in `pumas-app-manager`, which
+the inference-disabled contract export does not build), so `ipc-validation.ts`
+mirrors its complete shape by hand. The remaining
+shape-only methods (54 of 178, listed by probing `validateApiCallPayload` with
+an unknown field) accept any object until their Rust request types are
+exported. The status-telemetry, network and library pull snapshots decode with
+the declarations their push notification already uses; the runtime-profiles
+snapshot (`RuntimeProfilesSnapshotResponse`), serving status
+(`ServingStatusResponse`) and HuggingFace search (`HfModelSearchOutcome`) decode
+with their exported Rust declarations too.
+
 `pnpm --dir electron run generate:desktop-contract` rebuilds that exporter and
 generates identical `src/generated/desktop-contract*` artifacts in Electron
 and frontend. `check:desktop-contract` regenerates from current Rust source
@@ -82,17 +126,30 @@ merges them with the Rust export, so main, preload and the frontend share one
 generated type and validator; a name declared by both sources is an error.
 These declarations ship with their consumers and stay closed.
 
+The response and stream validators generated from the Rust export are closed
+as well (`additionalProperties: false`): the desktop and its backend ship and
+upgrade as one unit. A packaged desktop ignores `PUMAS_RPC_BINARY` and always
+runs the `pumas-rpc` in its own resources (`src/backend-path.ts`), so a newer
+backend is never paired with older validators; the override remains for
+source checkouts (`./launcher.sh`). An additive backend field reaches the
+desktop only after regeneration. The "additive changes are non-breaking" rule
+applies to external RPC consumers, whose clients ignore unknown fields; it
+does not apply to this bundled pairing.
+
 Update streams (model library, downloads, runtime profiles, serving status and
 status telemetry) are declared by the backend and decoded in preload. Each
 subscription takes a required `onError`: a payload that fails its contract is
 never dropped silently. Its reason, naming the failed rule and location, goes
 to `onError`, and the renderer reloads from the RPC snapshot. Decoders never
-put a field's value in a rejection reason.
+put a field's value in a rejection reason. Transport loss reaches the same
+`onError`: main forwards each stream's "ended"/"failed" outcome on
+`<stream>:error` (an `UpdateStreamError`), and a refused subscription is
+reported there too.
 
 The backend's startup diagnostic is the exception to closed declarations. Rust
 writes one `PUMAS_STARTUP_FAILURE=` line holding a `StartupFailureFrame`
 (`pumas-rpc/src/startup_failure.rs`) for every fatal startup error, with a
-bounded `detail`. Electron may run a backend from another build, so the frame's
+bounded `detail`. An unpackaged Electron may run a backend from another build, so the frame's
 schema is open: readers ignore unknown fields and treat an unknown `reason` as
 `backend-unavailable`. The detail reaches the recovery screen as the startup
 state's `detail`.
@@ -130,6 +187,22 @@ renderer. It must make startup, ready, timeout, exit, and shutdown outcomes
 distinct. Events coordinate or invalidate cached state; they do not transfer
 durable ownership into Electron.
 
+A ready backend is health-checked every 30 seconds. Three consecutive failed
+checks mark it hung: Electron sends SIGTERM (SIGKILL after the force-wait on
+Unix; Windows terminates directly), and the exit takes the normal crash
+restart path, bounded by `maxRestarts`.
+
+Electron launches `pumas-rpc` with `--port 0`, so the backend binds and
+reports its own port; no port is chosen, released and raced for. Each launch
+passes a fresh 256-bit `PUMAS_RPC_LAUNCH_NONCE` in the child environment (never
+argv). Electron takes the port only from a
+`PUMAS_RPC_READY={"version":1,"port":N,"nonce":...}` stdout line that echoes
+that nonce, and treats the backend as ready (and, later, healthy) only when
+`health_check` also echoes it, so another process on the same port is never
+mistaken for its child. A readiness line with another nonce refuses startup.
+The child's stdin stays piped and unwritten, and `--exit-on-stdin-eof` makes
+the backend drain and exit when Electron dies and the pipe closes.
+
 The RPC server binds loopback only and has no LAN mode; see
 [Security](../docs/SECURITY.md) for its Host/Origin admission checks.
 
@@ -154,6 +227,9 @@ sidecar. For the supported end-to-end workflow, use:
 ```
 
 Packaging requires `frontend/dist` plus a matching `pumas-rpc` staged under
-`electron/resources/bin/`. Do not treat a successful package assembly as proof
+`electron/resources/bin/`. Packages carry the compiled JavaScript only:
+`dist/**/*.map` and `dist/**/*.d.ts` are excluded. CI packages with
+`CSC_IDENTITY_AUTO_DISCOVERY=false`, so installers are unsigned and the
+config declares no signing identity. Do not treat a successful package assembly as proof
 that the application runs on that platform. See [Releasing](../RELEASING.md)
 and the [current standards audit](../docs/audits/current-standards-2026-09-03/README.md).

@@ -80,6 +80,58 @@ def report(
     return {"install": entries}
 
 
+def selected_wheel(version="2.10.0", build="cpu"):
+    return {"wheelUrl": native_wheel(version, build), "sha256": "a" * 64, "torch": version}
+
+
+def stage_dist_info(fixture, target_dir):
+    """Write the dist-info pip would stage for each report entry."""
+    for item in fixture["install"]:
+        name = item["metadata"]["name"]
+        version = item["metadata"]["version"]
+        metadata = target_dir / f"{name}-{version}.dist-info"
+        metadata.mkdir(parents=True)
+        metadata_file = metadata / "METADATA"
+        metadata_file.write_text(
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+            encoding="utf-8",
+        )
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(metadata_file.read_bytes()).digest())
+            .rstrip(b"=")
+            .decode()
+        )
+        (metadata / "RECORD").write_text(
+            f"{metadata.name}/METADATA,sha256={digest},{metadata_file.stat().st_size}\n"
+            f"{metadata.name}/RECORD,,\n",
+            encoding="utf-8",
+        )
+
+
+def write_lock(output, fixture, version="2.10.0", build="cpu", adapter="none"):
+    """Write the phase-1 hash lock and resolution for a report fixture."""
+    with patch.object(resolver, "native_target", return_value="linux"):
+        lines, resolution = resolver.requirements_from_report(fixture, version, build, adapter)
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "requirements.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (output / "resolution.json").write_text(json.dumps(resolution), encoding="utf-8")
+
+
+def install_argv(target, output, version="2.10.0", build="cpu"):
+    return [
+        "resolve_runtime.py",
+        "--version",
+        version,
+        "--build",
+        build,
+        "--install",
+        "--target",
+        str(target),
+        "--output",
+        str(output),
+    ]
+
+
 class ResolverTests(unittest.TestCase):
     def test_copyable_download_sources_accept_any_safe_https_host_and_path(self):
         safe = (
@@ -331,11 +383,13 @@ class ResolverTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unreported"):
                 resolver.installed_file_manifest(target)
             (target / "unreported.pth").unlink()
-            wheel.write_bytes(b"changed")
-            changed = resolver.installed_file_manifest(target)
-            current = next(item for item in changed["files"] if item["path"] == "torch.pth")
-            self.assertEqual(current["sha256"], hashlib.sha256(b"changed").hexdigest())
-            self.assertEqual(current["size"], len(b"changed"))
+            current = next(item for item in manifest["files"] if item["path"] == "torch.pth")
+            self.assertEqual(current["sha256"], hashlib.sha256(b"safe staged data").hexdigest())
+            self.assertEqual(current["size"], len(b"safe staged data"))
+            # Same size, different bytes: the wheel RECORD digest refuses it.
+            wheel.write_bytes(b"tampered staged!")
+            with self.assertRaisesRegex(ValueError, "differs from its wheel RECORD"):
+                resolver.installed_file_manifest(target)
             wheel.write_bytes(b"safe staged data")
             (target / "linked.pth").symlink_to(wheel)
             with self.assertRaisesRegex(ValueError, "symlink"):
@@ -444,46 +498,24 @@ class ResolverTests(unittest.TestCase):
             [resolver.sys.executable, "-I", "-B", "-m", "pip", "--version"],
         )
 
-    def test_install_mode_stages_once_and_validates_report_before_writing_lock(self):
+    def test_lock_phase_resolves_once_and_writes_the_hash_lock_without_installing(self):
         fixture = report()
         commands = []
 
         def fake_run(command, **_kwargs):
             commands.append(command)
-            self.assertEqual(command[1:3], ["-I", "-B"])
-            self.assertIn("--target", command)
-            self.assertNotIn("--dry-run", command)
+            self.assertIn("--dry-run", command)
+            self.assertNotIn("--target", command)
             self.assertIn("--only-binary=:all:", command)
-            self.assertIn("torch==2.10.0+cpu", command)
+            # The Torch wheel is pinned by URL and the index SHA-256.
+            self.assertIn(f"torch @ {native_wheel()}#sha256={'a' * 64}", command)
             pathlib.Path(command[command.index("--report") + 1]).write_text(
                 json.dumps(fixture), encoding="utf-8"
             )
-            target_dir = pathlib.Path(command[command.index("--target") + 1])
-            for item in fixture["install"]:
-                name = item["metadata"]["name"]
-                version = item["metadata"]["version"]
-                metadata = target_dir / f"{name}-{version}.dist-info"
-                metadata.mkdir()
-                metadata_file = metadata / "METADATA"
-                metadata_file.write_text(
-                    f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
-                    encoding="utf-8",
-                )
-                digest = (
-                    base64.urlsafe_b64encode(hashlib.sha256(metadata_file.read_bytes()).digest())
-                    .rstrip(b"=")
-                    .decode()
-                )
-                (metadata / "RECORD").write_text(
-                    f"{metadata.name}/METADATA,sha256={digest},{metadata_file.stat().st_size}\n"
-                    f"{metadata.name}/RECORD,,\n",
-                    encoding="utf-8",
-                )
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / "manifest"
-            target = pathlib.Path(directory) / "staged packages"
             progress_file = output / "download-progress.json"
             with (
                 patch.object(
@@ -495,9 +527,6 @@ class ResolverTests(unittest.TestCase):
                         "2.10.0",
                         "--build",
                         "cpu",
-                        "--install",
-                        "--target",
-                        str(target),
                         "--progress-file",
                         str(progress_file),
                         "--output",
@@ -505,26 +534,174 @@ class ResolverTests(unittest.TestCase):
                     ],
                 ),
                 patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver,
+                    "select_official_torch_wheel",
+                    return_value=selected_wheel(),
+                ) as select,
                 patch.object(resolver.subprocess, "run", side_effect=fake_run),
             ):
                 resolver.main()
+            select.assert_called_once_with("2.10.0", "cpu")
             self.assertEqual(len(commands), 1)
             self.assertEqual(commands[0][1:3], ["-I", "-B"])
             self.assertEqual(commands[0][4], "--_pumas-pip-progress-worker")
             self.assertEqual(commands[0][5], str(progress_file))
-            self.assertEqual(commands[0][commands[0].index("--target") + 1], str(target))
-            self.assertTrue(target.is_dir())
             self.assertEqual(
                 json.loads((output / "resolution.json").read_text())["artifacts"][0]["sha256"],
                 "a" * 64,
             )
             self.assertIn("--hash=sha256:" + "a" * 64, (output / "requirements.txt").read_text())
+            self.assertFalse((output / "installed-files.json").exists())
+
+    def test_install_phase_installs_only_the_validated_lock_with_require_hashes(self):
+        fixture = report()
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            for flag in ("--require-hashes", "--no-deps", "--no-index", "--only-binary=:all:"):
+                self.assertIn(flag, command)
+            for flag in ("--dry-run", "--index-url", "--extra-index-url", "--constraint"):
+                self.assertNotIn(flag, command)
+            self.assertEqual(
+                command[command.index("--requirement") + 1], str(output / "requirements.txt")
+            )
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(fixture), encoding="utf-8"
+            )
+            stage_dist_info(fixture, pathlib.Path(command[command.index("--target") + 1]))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            write_lock(output, fixture)
+            with (
+                patch.object(resolver.sys, "argv", install_argv(target, output)),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            self.assertEqual(len(commands), 1)
+            self.assertEqual(commands[0][commands[0].index("--target") + 1], str(target))
             self.assertEqual(
                 len(json.loads((output / "installed-files.json").read_text())["files"]),
                 2 * len(fixture["install"]),
             )
 
-    def test_install_mode_rejects_untrusted_or_hashless_report_before_lock_publication(self):
+    def test_install_phase_refuses_a_lock_that_differs_from_its_resolution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            with patch.object(resolver, "native_target", return_value="linux"):
+                write_lock(output, report())
+            lock = output / "requirements.txt"
+            lock.write_text(lock.read_text().replace("a" * 64, "f" * 64, 1), encoding="utf-8")
+            with (
+                patch.object(resolver.sys, "argv", install_argv(target, output)),
+                patch.object(resolver.subprocess, "run") as run,
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("hash lock differs from its resolution", stderr.getvalue())
+            run.assert_not_called()
+
+    def test_install_phase_refuses_installed_artifacts_that_differ_from_the_lock(self):
+        fixture = report()
+        installed = json.loads(json.dumps(fixture))
+        installed["install"][1]["download_info"]["archive_info"]["hashes"]["sha256"] = "e" * 64
+
+        def fake_run(command, **_kwargs):
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(installed), encoding="utf-8"
+            )
+            stage_dist_info(fixture, pathlib.Path(command[command.index("--target") + 1]))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            with patch.object(resolver, "native_target", return_value="linux"):
+                write_lock(output, fixture)
+            with (
+                patch.object(resolver.sys, "argv", install_argv(target, output)),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("differ from the hash lock", stderr.getvalue())
+            self.assertFalse((output / "installed-files.json").exists())
+
+    def test_install_phase_names_a_hash_mismatch_reported_by_pip(self):
+        # pip's own wording when a locked wheel's bytes differ from the lock.
+        mismatch = SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="ERROR: THESE PACKAGES DO NOT MATCH THE HASHES FROM THE REQUIREMENTS FILE.",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            write_lock(output, report())
+            with (
+                patch.object(resolver.sys, "argv", install_argv(target, output)),
+                patch.object(resolver.subprocess, "run", return_value=mismatch),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("does not match its SHA-256 in the hash lock", stderr.getvalue())
+            self.assertFalse((output / "installed-files.json").exists())
+
+    def test_install_phase_refuses_resolution_inputs(self):
+        for extra in (
+            ["--constraints", "constraints.txt"],
+            ["--torch-wheel", native_wheel()],
+        ):
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory) / "manifest"
+                target = pathlib.Path(directory) / "staged packages"
+                with (
+                    patch.object(resolver.sys, "argv", [*install_argv(target, output), *extra]),
+                    patch.object(resolver.subprocess, "run") as run,
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                self.assertEqual(exit_result.exception.code, 2)
+                run.assert_not_called()
+
+    def test_official_wheel_selection_prefers_the_best_tag_and_requires_an_index_hash(self):
+        best, fallback = "cp312-cp312-manylinux_2_28_x86_64", "cp312-cp312-manylinux_2_17_x86_64"
+        index = [
+            f"torch-2.10.0%2Bcpu-{fallback}.whl#sha256={'1' * 64}",
+            f"torch-2.10.0%2Bcpu-{best}.whl#sha256={'2' * 64}",
+            f"torch-2.10.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl#sha256={'3' * 64}",
+        ]
+        selected = resolver.select_official_torch_wheel(
+            "2.10.0", "cpu", lambda _build: index, ordered_tags=[best, fallback]
+        )
+        self.assertEqual(selected["sha256"], "2" * 64)
+        self.assertTrue(selected["wheelUrl"].endswith(f"{best}.whl"))
+        with self.assertRaisesRegex(ValueError, "no SHA-256"):
+            resolver.select_official_torch_wheel(
+                "2.10.0",
+                "cpu",
+                lambda _build: [f"torch-2.10.0%2Bcpu-{best}.whl"],
+                ordered_tags=[best],
+            )
+        with self.assertRaises(LookupError):
+            resolver.select_official_torch_wheel(
+                "2.10.0", "cpu", lambda _build: index, ordered_tags=["cp39-cp39-win_amd64"]
+            )
+
+    def test_lock_phase_rejects_untrusted_or_hashless_report_before_lock_publication(self):
         fixtures = {
             "untrusted origin": report(url="https://example.com/torch.whl"),
             "missing digest": report(),
@@ -552,12 +729,12 @@ class ResolverTests(unittest.TestCase):
                             "2.10.0",
                             "--build",
                             "cpu",
-                            "--install",
-                            "--target",
-                            str(target),
                             "--output",
                             str(output),
                         ],
+                    ),
+                    patch.object(
+                        resolver, "select_official_torch_wheel", return_value=selected_wheel()
                     ),
                     patch.object(resolver.subprocess, "run", side_effect=fake_run),
                     redirect_stderr(StringIO()),
@@ -567,6 +744,7 @@ class ResolverTests(unittest.TestCase):
                 self.assertEqual(exit_result.exception.code, 3)
                 self.assertFalse((output / "requirements.txt").exists())
                 self.assertFalse((output / "resolution.json").exists())
+                self.assertFalse(target.exists())
 
     def test_install_mode_requires_an_empty_explicit_staged_target(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -600,10 +778,9 @@ class ResolverTests(unittest.TestCase):
             run.assert_not_called()
             self.assertEqual((target / "existing.py").read_text(), "leave intact")
 
-    def test_install_mode_reports_pip_failure_without_publishing_a_lock(self):
+    def test_lock_phase_reports_pip_failure_without_publishing_a_lock(self):
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / "manifest"
-            target = pathlib.Path(directory) / "staged packages"
             failed = SimpleNamespace(
                 returncode=1,
                 stdout="",
@@ -619,14 +796,14 @@ class ResolverTests(unittest.TestCase):
                         "2.10.0",
                         "--build",
                         "cpu",
-                        "--install",
-                        "--target",
-                        str(target),
                         "--output",
                         str(output),
                     ],
                 ),
                 patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver, "select_official_torch_wheel", return_value=selected_wheel()
+                ),
                 patch.object(resolver.subprocess, "run", return_value=failed),
                 redirect_stderr(StringIO()),
             ):
@@ -1144,29 +1321,37 @@ class ResolverTests(unittest.TestCase):
             self.assertEqual(exit_result.exception.code, 3)
             self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
 
-    def test_cli_requires_discovered_wheel_for_resolution(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with (
-                patch.object(
-                    resolver.sys,
-                    "argv",
-                    [
-                        "resolve_runtime.py",
-                        "--version",
-                        "2.10.0",
-                        "--build",
-                        "cpu",
-                        "--output",
-                        directory,
-                    ],
-                ),
-                patch.object(resolver.subprocess, "run") as run,
-                redirect_stderr(StringIO()),
-            ):
-                with self.assertRaises(SystemExit) as exit_result:
-                    resolver.main()
-            self.assertEqual(exit_result.exception.code, 2)
-            run.assert_not_called()
+    def test_cli_without_a_discovered_wheel_refuses_when_none_can_be_pinned(self):
+        cases = (
+            (OSError("index offline"), 75),
+            (LookupError("no wheel"), 4),
+            (ValueError("The official cpu index publishes no SHA-256"), 3),
+        )
+        for failure, code in cases:
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                with (
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--output",
+                            directory,
+                        ],
+                    ),
+                    patch.object(resolver, "select_official_torch_wheel", side_effect=failure),
+                    patch.object(resolver.subprocess, "run") as run,
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                self.assertEqual(exit_result.exception.code, code)
+                run.assert_not_called()
+                self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
 
     def test_release_options_match_native_windows_and_macos_wheels(self):
         fixtures = (
@@ -1762,22 +1947,21 @@ class ResolverTests(unittest.TestCase):
                 self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
                 self.assertFalse((pathlib.Path(directory) / "resolution.json").exists())
 
-    def test_cli_passes_recipe_constraints_to_normal_staged_pip_install(self):
+    def test_cli_passes_recipe_constraints_to_the_lock_resolution(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             constraints = root / "candidate-constraints.txt"
             constraints.write_text("numpy==2.5.3\n", encoding="utf-8")
-            target = root / "packages"
             output = root / "result"
 
             def fake_run(command, **_kwargs):
                 self.assertEqual(command[command.index("--constraint") + 1], str(constraints))
-                self.assertEqual(command[command.index("--target") + 1], str(target))
+                self.assertIn("--dry-run", command)
                 self.assertEqual(
                     command[command.index("--index-url") + 1],
                     "https://download.pytorch.org/whl/cpu",
                 )
-                self.assertIn("torch==2.10.0+cpu", command)
+                self.assertIn(f"torch @ {native_wheel()}#sha256={'a' * 64}", command)
                 self.assertTrue(all(name in command for name in resolver.CORE))
                 self.assertNotIn("--no-deps", command)
                 pathlib.Path(command[command.index("--report") + 1]).write_text(
@@ -1795,9 +1979,6 @@ class ResolverTests(unittest.TestCase):
                         "2.10.0",
                         "--build",
                         "cpu",
-                        "--install",
-                        "--target",
-                        str(target),
                         "--output",
                         str(output),
                         "--constraints",
@@ -1806,8 +1987,10 @@ class ResolverTests(unittest.TestCase):
                 ),
                 # The `+cpu` local version is Linux/Windows wheel naming; pin the host.
                 patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver, "select_official_torch_wheel", return_value=selected_wheel()
+                ),
                 patch.object(resolver.subprocess, "run", side_effect=fake_run),
-                patch.object(resolver, "installed_file_manifest", return_value={"files": []}),
             ):
                 resolver.main()
             self.assertTrue((output / "resolution.json").is_file())

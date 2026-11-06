@@ -3,7 +3,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  ExternalLink,
+  ExternalLink as ExternalLinkIcon,
   FileBox,
   Folder,
   Package2,
@@ -12,6 +12,7 @@ import {
   getTrustBadge,
 } from './metadataUtils';
 import type { ImportEntryStatus } from './useModelImportWorkflow';
+import { ExternalLink } from '../ui/ExternalLink';
 import { ImportBundleComponents } from './ImportBundleComponents';
 import { ImportMetadataDetails } from './ImportMetadataDetails';
 
@@ -45,16 +46,14 @@ function RepoLink({
   stopPropagation?: boolean;
 }) {
   return (
-    <a
+    <ExternalLink
       href={`https://huggingface.co/${repoId}`}
-      target="_blank"
-      rel="noopener noreferrer"
+      stopPropagation={stopPropagation}
       className="flex items-center gap-1 truncate text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline"
-      onClick={stopPropagation ? (event) => event.stopPropagation() : undefined}
     >
       {repoId}
-      <ExternalLink className="h-3 w-3 flex-shrink-0" />
-    </a>
+      <ExternalLinkIcon className="h-3 w-3 flex-shrink-0" />
+    </ExternalLink>
   );
 }
 

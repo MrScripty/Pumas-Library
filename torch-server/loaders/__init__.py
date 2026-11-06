@@ -33,7 +33,9 @@ def load_model(
         from .cohere_asr_loader import load_cohere_asr
 
         return load_cohere_asr(path, device)
-    elif model_type == "dllm":
+
+    _require_safetensors_weights(path)
+    if model_type == "dllm":
         from .dllm_loader import load_dllm
 
         return load_dllm(path, device)
@@ -45,6 +47,20 @@ def load_model(
         from .safetensors_loader import load_safetensors
 
         return load_safetensors(path, device)
+
+
+def _require_safetensors_weights(path: Path) -> None:
+    """Text loaders read safetensors only; say so before transformers fails opaquely."""
+    # Imported here: the owned audio worker imports this package with a code
+    # root that does not ship the HTTP sidecar's validation module.
+    from validation import ModelLoadRefusal
+
+    weights = [path] if path.is_file() else list(path.glob("*.safetensors"))
+    if not any(candidate.suffix == ".safetensors" for candidate in weights):
+        raise ModelLoadRefusal(
+            "Torch text models must provide .safetensors weights; "
+            "pickle checkpoints (.bin, .pt) are not loaded"
+        )
 
 
 def _detect_model_type(path: Path) -> str:

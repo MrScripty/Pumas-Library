@@ -1,16 +1,17 @@
 //! UniFFI bindings for pumas-core.
 //!
-//! This crate provides cross-language bindings for the pumas-core library,
-//! enabling native access from Python, C#, Swift, Kotlin, Go, and Ruby.
+//! This crate is an experimental UniFFI adapter over the pumas-core library.
 //!
-//! # Supported Languages
+//! # Support status
 //!
-//! - **Python** - Official UniFFI support
-//! - **C#** - Via uniffi-bindgen-cs
-//! - **Kotlin** - Official UniFFI support
-//! - **Swift** - Official UniFFI support
-//! - **Ruby** - Official UniFFI support
-//! - **Go** - Via uniffi-bindgen-go
+//! No host-language binding is supported. `bindings/support-matrix.json`
+//! accepts no host tuple and lists every generator below as an unsupported
+//! surface pending removal; see `docs/native-bindings.md`. The generators that
+//! exist for local experiments are:
+//!
+//! - **Python, Kotlin, Swift, Ruby** - the in-tree `pumas-uniffi-bindgen`,
+//!   built from the workspace's locked `uniffi` 0.28 version
+//! - **C#** - `uniffi-bindgen-cs` v0.9.0+v0.28.3
 //!
 //! # Usage
 //!
@@ -18,10 +19,11 @@
 //!
 //! ```bash
 //! # Build the cdylib
-//! cargo build -p pumas-uniffi --release
+//! cargo build --locked -p pumas-uniffi --release
 //!
 //! # Generate Python bindings
-//! pumas-uniffi-bindgen generate --library --language python \
+//! cargo run --locked -p pumas-uniffi --features cli --bin pumas-uniffi-bindgen -- \
+//!     generate --library --language python \
 //!     --out-dir ./bindings/python target/release/libpumas_uniffi.so
 //!
 //! # Generate C# bindings

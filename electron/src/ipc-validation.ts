@@ -19,6 +19,22 @@ import {
   decodeInstallVersionParams,
   decodeSetDefaultVersionParams,
   decodeStartBackendSetupParams,
+  decodeSetHfTokenParams,
+  decodeModelIdParams,
+  decodeImportModelParams,
+  decodeImportBatchParams,
+  decodeGetTorchReleaseOptionsParams,
+  decodePreviewTorchRuntimeParams,
+  decodeGetTorchRuntimeProbeParams,
+  decodeTrialTorchRuntimeParams,
+  decodeStopRuntimeProfileGenerationParams,
+  decodeFindTorchAlternativesParams,
+  decodeGetHfDownloadDetailsParams,
+  decodeSearchCatalogParams,
+  decodeUpdateInferenceSettingsParams,
+  decodeUpdateModelNotesParams,
+  decodeStartConversionSetupParams,
+  type DecodeOutcome,
 } from './generated/desktop-contract';
 import {
   getRpcParamsValidationPolicy,
@@ -156,10 +172,120 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
     }
     return { method, params: decoded.value };
   }
+  const exportedDecoder = EXPORTED_REQUEST_DECODERS[method];
+  if (exportedDecoder) {
+    const decoded = exportedDecoder(withoutUndefinedFields(rawParams === undefined ? {} : rawParams));
+    if (decoded.status !== 'valid') {
+      throw new Error(`Invalid API params for method: ${method}: ${decoded.message}`);
+    }
+    return { method, params: decoded.value as Record<string, unknown> };
+  }
+
+  // Mutating requests decoded with Rust's exported request declarations.
+  // Omitted optionals may arrive as undefined, which JSON (and the decoder)
+  // cannot represent, so they are dropped first.
+  if (
+    method === 'set_hf_token'
+    || method === 'delete_model_with_cascade'
+    || method === 'get_links_for_model'
+    || method === 'import_model'
+    || method === 'import_batch'
+  ) {
+    const request = withoutUndefinedFields(rawParams);
+    const decoded = method === 'set_hf_token'
+      ? decodeSetHfTokenParams(request)
+      : method === 'import_model'
+        ? decodeImportModelParams(request)
+        : method === 'import_batch'
+          ? decodeImportBatchParams(request)
+          : decodeModelIdParams(request);
+    // The reason names the rule and location only; never a value (tokens).
+    if (decoded.status !== 'valid') {
+      throw new Error(`Invalid API params for method: ${method}: ${decoded.message}`);
+    }
+    if (method === 'set_hf_token' && (decoded.value as { token: string }).token.trim().length === 0) {
+      throw new Error('Invalid API params for method: set_hf_token: token must not be empty');
+    }
+    if ((method === 'delete_model_with_cascade' || method === 'get_links_for_model')
+      && (decoded.value as { model_id: string }).model_id.trim().length === 0) {
+      throw new Error(`Invalid API params for method: ${method}: model_id must not be empty`);
+    }
+    return { method, params: decoded.value as Record<string, unknown> };
+  }
+  if (method === 'torch_configure') {
+    return { method, params: validateTorchConfigureParams(rawParams) };
+  }
+
   const params = normalizeApiParams(rawParams);
   validateApiParamsForMethod(method, params);
 
   return { method, params };
+}
+
+/**
+ * Requests whose Rust declaration is exported and which preload already
+ * decodes; main decodes them again because a renderer can bypass preload.
+ */
+const EXPORTED_REQUEST_DECODERS: Partial<Record<RpcMethodName, (value: unknown) => DecodeOutcome<unknown>>> = {
+  get_torch_release_options: decodeGetTorchReleaseOptionsParams,
+  preview_torch_runtime: decodePreviewTorchRuntimeParams,
+  get_torch_runtime_probe: decodeGetTorchRuntimeProbeParams,
+  trial_torch_runtime: decodeTrialTorchRuntimeParams,
+  stop_runtime_profile_if_generation: decodeStopRuntimeProfileGenerationParams,
+  find_torch_alternatives: decodeFindTorchAlternativesParams,
+  get_hf_download_details: decodeGetHfDownloadDetailsParams,
+  search_models_fts: decodeSearchCatalogParams,
+  update_inference_settings: decodeUpdateInferenceSettingsParams,
+  update_model_notes: decodeUpdateModelNotesParams,
+  start_conversion_setup: decodeStartConversionSetupParams,
+};
+
+/** Drop undefined-valued fields from plain objects, recursively (JSON omits them). */
+function withoutUndefinedFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutUndefinedFields);
+  if (!isPlainRecord(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (field !== undefined) result[key] = withoutUndefinedFields(field);
+  }
+  return result;
+}
+
+const TORCH_CONFIG_FIELDS = ['api_port', 'host', 'max_loaded_models', 'lan_access'] as const;
+
+/**
+ * `torch_configure` reaches `pumas_app_manager::TorchServerConfig`, which has
+ * no exported schema yet. Mirror its complete shape here: `{ connection_url?,
+ * config: { api_port, host, max_loaded_models, lan_access } }`. Host and LAN
+ * policy stay with `TorchServerConfig::validate` in Rust.
+ */
+function validateTorchConfigureParams(rawParams: unknown): Record<string, unknown> {
+  const params = withoutUndefinedFields(rawParams);
+  const fail = (reason: string): never => {
+    throw new Error(`Invalid API params for method: torch_configure: ${reason}`);
+  };
+  if (!isPlainRecord(params)) return fail('params must be an object');
+  for (const key of Object.keys(params)) {
+    if (key !== 'config' && key !== 'connection_url') fail(`unexpected field ${JSON.stringify(key.slice(0, 64))}`);
+  }
+  if (params.connection_url !== undefined && params.connection_url !== null
+    && (typeof params.connection_url !== 'string' || params.connection_url.length === 0)) {
+    fail('connection_url must be a non-empty string');
+  }
+  const config = params.config;
+  if (!isPlainRecord(config)) return fail('config must be an object');
+  for (const key of Object.keys(config)) {
+    if (!(TORCH_CONFIG_FIELDS as readonly string[]).includes(key)) fail(`unexpected config field ${JSON.stringify(key.slice(0, 64))}`);
+  }
+  if (!Number.isInteger(config.api_port) || (config.api_port as number) < 1 || (config.api_port as number) > 65_535) {
+    fail('config.api_port must be an integer port (1-65535)');
+  }
+  if (typeof config.host !== 'string' || config.host.length === 0) fail('config.host must be a non-empty string');
+  if (!Number.isSafeInteger(config.max_loaded_models) || (config.max_loaded_models as number) < 0) {
+    fail('config.max_loaded_models must be a non-negative integer');
+  }
+  if (typeof config.lan_access !== 'boolean') fail('config.lan_access must be a boolean');
+  return params;
 }
 
 function normalizeApiParams(rawParams: unknown): Record<string, unknown> {

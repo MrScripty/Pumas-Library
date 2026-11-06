@@ -705,7 +705,7 @@
     },
     {
       "name": "mio",
-      "version": "1.1.1"
+      "version": "1.2.4"
     },
     {
       "name": "monostate",
@@ -1065,7 +1065,7 @@
     },
     {
       "name": "socket2",
-      "version": "0.6.1"
+      "version": "0.6.5"
     },
     {
       "name": "spinning_top",
@@ -1090,6 +1090,10 @@
     {
       "name": "syn",
       "version": "2.0.114"
+    },
+    {
+      "name": "syn",
+      "version": "3.0.9"
     },
     {
       "name": "sync_wrapper",
@@ -1161,11 +1165,11 @@
     },
     {
       "name": "tokio",
-      "version": "1.49.0"
+      "version": "1.54.1"
     },
     {
       "name": "tokio-macros",
-      "version": "2.6.0"
+      "version": "2.7.2"
     },
     {
       "name": "tokio-native-tls",
@@ -1349,10 +1353,6 @@
     },
     {
       "name": "windows-sys",
-      "version": "0.60.2"
-    },
-    {
-      "name": "windows-sys",
       "version": "0.61.2"
     },
     {
@@ -1364,20 +1364,12 @@
       "version": "0.52.6"
     },
     {
-      "name": "windows-targets",
-      "version": "0.53.5"
-    },
-    {
       "name": "windows_x86_64_msvc",
       "version": "0.48.5"
     },
     {
       "name": "windows_x86_64_msvc",
       "version": "0.52.6"
-    },
-    {
-      "name": "windows_x86_64_msvc",
-      "version": "0.53.1"
     },
     {
       "name": "winx",
@@ -1445,7 +1437,7 @@
     },
     {
       "name": "zstd",
-      "version": "0.13.3"
+      "version": "0.13.4"
     },
     {
       "name": "zstd",
@@ -1453,7 +1445,7 @@
     },
     {
       "name": "zstd-safe",
-      "version": "7.2.4"
+      "version": "7.4.0"
     },
     {
       "name": "zstd-safe",
@@ -4384,9 +4376,9 @@
     },
     {
       "name": "mio",
-      "version": "1.1.1",
+      "version": "1.2.4",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/mio/1.1.1/download",
+      "source": "https://crates.io/api/v1/crates/mio/1.2.4/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5882,9 +5874,9 @@
     },
     {
       "name": "socket2",
-      "version": "0.6.1",
+      "version": "0.6.5",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/socket2/0.6.1/download",
+      "source": "https://crates.io/api/v1/crates/socket2/0.6.5/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5979,6 +5971,23 @@
       "version": "2.0.114",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/syn/2.0.114/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "3.0.9",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/syn/3.0.9/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6270,9 +6279,9 @@
     },
     {
       "name": "tokio",
-      "version": "1.49.0",
+      "version": "1.54.1",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/tokio/1.49.0/download",
+      "source": "https://crates.io/api/v1/crates/tokio/1.54.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6283,9 +6292,9 @@
     },
     {
       "name": "tokio-macros",
-      "version": "2.6.0",
+      "version": "2.7.2",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/tokio-macros/2.6.0/download",
+      "source": "https://crates.io/api/v1/crates/tokio-macros/2.7.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7049,23 +7058,6 @@
     },
     {
       "name": "windows-sys",
-      "version": "0.60.2",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/windows-sys/0.60.2/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "license-apache-2.0",
-          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
-        },
-        {
-          "path": "license-mit",
-          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
-        }
-      ]
-    },
-    {
-      "name": "windows-sys",
       "version": "0.61.2",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/windows-sys/0.61.2/download",
@@ -7116,23 +7108,6 @@
       ]
     },
     {
-      "name": "windows-targets",
-      "version": "0.53.5",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/windows-targets/0.53.5/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "license-apache-2.0",
-          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
-        },
-        {
-          "path": "license-mit",
-          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
-        }
-      ]
-    },
-    {
       "name": "windows_x86_64_msvc",
       "version": "0.48.5",
       "license_declared": "MIT OR Apache-2.0",
@@ -7154,23 +7129,6 @@
       "version": "0.52.6",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/windows_x86_64_msvc/0.52.6/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "license-apache-2.0",
-          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
-        },
-        {
-          "path": "license-mit",
-          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
-        }
-      ]
-    },
-    {
-      "name": "windows_x86_64_msvc",
-      "version": "0.53.1",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/windows_x86_64_msvc/0.53.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7421,14 +7379,14 @@
     },
     {
       "name": "zstd",
-      "version": "0.13.3",
-      "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/zstd/0.13.3/download",
+      "version": "0.13.4",
+      "license_declared": "BSD-3-Clause",
+      "source": "https://crates.io/api/v1/crates/zstd/0.13.4/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "129e8edef29e9abcd2ebabe252f4ef1b1289cdca356bf0040284a2fbccfb96c8"
+          "sha256": "ce4868c8e4ebe47a7d4b3c93dbf6b802033e5ae2fa7638098173f80836daac60"
         }
       ]
     },
@@ -7447,22 +7405,14 @@
     },
     {
       "name": "zstd-safe",
-      "version": "7.2.4",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/zstd-safe/7.2.4/download",
+      "version": "7.4.0",
+      "license_declared": "BSD-3-Clause",
+      "source": "https://crates.io/api/v1/crates/zstd-safe/7.4.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "a77b7cfeaf911ed410ffbe76f0cb2b24ad8a4d94e7ead5727e914425c416cc63"
-        },
-        {
-          "path": "LICENSE.Apache-2.0",
-          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
-        },
-        {
-          "path": "LICENSE.Mit",
-          "sha256": "129e8edef29e9abcd2ebabe252f4ef1b1289cdca356bf0040284a2fbccfb96c8"
+          "sha256": "ce4868c8e4ebe47a7d4b3c93dbf6b802033e5ae2fa7638098173f80836daac60"
         }
       ]
     },
@@ -8602,10 +8552,10 @@
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json": "d8b9826efc0aa5fedd0353f5227b1001cfe6bda96287ff3136b81b513c71e104",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json": "a280a955f040983398474af0c34f92e9172fc3c69ef22f7422ac990ed0554e26",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json": "3e2f6e67e3a4492c01232778191871e9f39543f02996349f055272f2d19fbb89",
-    "electron/package.json": "8cbc7f386272a24120ccbea6049b77f49e5d61de7723cd7ddc98ca442844644a",
-    "frontend/package.json": "6cf8ed7dcfb8be39f22448d270dd4117441732e5297fcf7369e3274512468ef6",
+    "electron/package.json": "ddd4d64189f5c7540d05b61937da5fc59730053e66b757bd2ea7ebdb187d5beb",
+    "frontend/package.json": "a9d0bb73a804659e9c301754a5fdbfb180ef1bdbf11eb2c6139d4214b524a42e",
     "pnpm-lock.yaml": "0f25d007f6ae3475700651c82c6dfc281b4bfdeb6b3b5c14ce87397fa428f82e",
-    "rust/Cargo.lock": "d5a65a1a0cac3038cfd9c2377f23a84de2f6940311fb5b22bff54f006568faa8",
+    "rust/Cargo.lock": "e7b8afbae2d73dc71047aec9b667467fc51fa7bb111193f6c8fa6a28b15be3ef",
     "rust/Cargo.toml": "9bb326e811b909788989701c39342fdf2fe714d6eaaf91cca98f3b729d4c7534",
     "rust/crates/pumas-app-manager/Cargo.toml": "f344b89815164c0acc2f6758ad8313a2b8cccba1004354046d542ca5a3d22a73",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "c990968b92e6e8218b69f90601ddb80cfc6bcfdf39360279af3e181fbbc4d901",
@@ -8619,5 +8569,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "75bace3f75f90facfdee20a3c560c9db4f0ba24fcb555e4cea58ca46446fd555"
+  "notices_sha256": "19efed1afeca09a7f2dc6a1341e3d119486c885b3c308c6110bbdf0ac93c431d"
 }

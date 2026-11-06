@@ -54,6 +54,68 @@ class ContractFixtures(unittest.TestCase):
                     consumer._advertisements(value, protocols=protocols)
 
 
+class DescriptorFixtures(unittest.TestCase):
+    BUILD_INFO = {
+        "component": "pumas-rpc",
+        "build_info_schema_version": 1,
+        "protocols": [{"name": "pumas.local-http", "versions": [1]}],
+        "schemas": [{"name": name, "version": 1} for name in (
+            "pumas.http-advertisement", "pumas.http-admission-fence",
+            "pumas.http-owner-retention", "pumas.model-operations.image-to-text")],
+    }
+
+    @staticmethod
+    def descriptor(**changes):
+        value = {
+            "capability": "image_to_text", "semantic_task": "image_to_text",
+            "input_formats": ["messages_image"], "output_formats": ["text"],
+            "streaming": False, "availability": {"state": "available"},
+            "option_bounds": [{"option": "max_tokens", "minimum": 1, "maximum": 4096}],
+            "future_field": {"kept": True},
+        }
+        value.update(changes)
+        return json.dumps(value).encode()
+
+    def decode(self, data):
+        return consumer.decode_capability_descriptor(
+            data, build_info=self.BUILD_INFO, contract_version=1)
+
+    def test_committed_schema_matches_its_pin(self):
+        schema = consumer._descriptor_schema()
+        # Documented variants are `oneOf` entries; they still decode.
+        self.assertIn("decision", consumer._enum_values(schema, "Capability"))
+        self.assertIn("multimodal_embedding", consumer._enum_values(schema, "Capability"))
+        self.assertIn("image_to_text", consumer._enum_values(schema, "SemanticTask"))
+
+    def test_valid_descriptor_keeps_additional_fields(self):
+        self.assertEqual(self.decode(self.descriptor())["future_field"], {"kept": True})
+        unavailable = self.descriptor(availability={"state": "unavailable", "reason": "runtime_unavailable"})
+        self.assertEqual(self.decode(unavailable)["availability"]["reason"], "runtime_unavailable")
+        self.assertEqual(self.decode(self.descriptor(capability="decision", semantic_task="decision"))["capability"],
+                         "decision")
+
+    def test_closed_values_and_shapes_are_refused_with_a_reason(self):
+        cases = {
+            "unknown descriptor discriminant": [
+                self.descriptor(capability="teleport"), self.descriptor(input_formats=["gif"]),
+                self.descriptor(availability={"state": "unavailable", "reason": "tired"}),
+                self.descriptor(option_bounds=[{"option": "speed", "minimum": 0, "maximum": 1}]),
+            ],
+            "descriptor streaming must be Boolean": [self.descriptor(streaming="no")],
+            "missing descriptor fields": [self.descriptor(availability={"state": "unavailable"})],
+            "unknown descriptor availability": [self.descriptor(availability={"state": "maybe"})],
+        }
+        for reason, values in cases.items():
+            for data in values:
+                with self.subTest(data=data), self.assertRaisesRegex(ValueError, reason):
+                    self.decode(data)
+
+    def test_changed_schema_bytes_are_refused(self):
+        with patch.object(consumer, "DESCRIPTOR_SCHEMA_SHA256", "0" * 64), \
+                self.assertRaisesRegex(ValueError, "pinned capability descriptor schema changed"):
+            self.decode(self.descriptor())
+
+
 @unittest.skipUnless(sys.platform == "linux", "controlled Unix helper fixture")
 class ChildReaderFixtures(unittest.IsolatedAsyncioTestCase):
     async def test_post_ready_reader_failure_drains_and_surfaces_after_exit_zero(self):
@@ -207,8 +269,10 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
                 self.remember(borrowed, "generic-http-actual-borrowed-selection")
                 capabilities = await borrowed.capabilities("operator-missing-model")
                 self.assertEqual(capabilities["status"], 404)
-                self.assertEqual(capabilities["body"]["error"],
+                error = capabilities["body"]["error"]
+                self.assertEqual({key: error[key] for key in ("code", "outcome")},
                                  {"code": "model_not_found", "outcome": "not_admitted"})
+                self.assertIn("operator-missing-model", error["message"])
                 for kind, source in (("text", {"kind": "text", "text": "hello"}),
                                      ("audio", {"kind": "audio", "encoding": "pcm_s16le",
                                                 "sample_rate_hz": 16000, "channels": 1,
@@ -217,9 +281,12 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
                              "model": "operator-missing-model", "input": source, "output": "text"}
                     reply = await borrowed.model_operation(value)
                     self.assertEqual(reply["status"], 404)
-                    self.assertEqual(reply["body"], {"contract_version": 1,
-                        "request_id": value["request_id"],
-                        "error": {"code": "model_not_found", "outcome": "not_admitted"}})
+                    error = reply["body"]["error"]
+                    self.assertEqual({key: reply["body"][key] for key in ("contract_version", "request_id")},
+                                     {"contract_version": 1, "request_id": value["request_id"]})
+                    self.assertEqual({key: error[key] for key in ("code", "outcome")},
+                                     {"code": "model_not_found", "outcome": "not_admitted"})
+                    self.assertIn("operator-missing-model", error["message"])
                     self.records.append({"event": "actual-generic-modality-refused", "request": value,
                                          "reply": reply, "runtime_or_model_loaded": False})
             self.assertIsNone(owned._bootstrap.process.returncode)
@@ -236,7 +303,12 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
                     "model": "operator-missing-model", "input": {"kind": "text", "text": "hello"},
                     "output": "text"})
                 self.assertEqual(reply["status"], 412)
-                self.assertIsNone(reply["body"], "pre-handler fencing supplies no operation envelope")
+                # Pre-handler fencing names its reason but supplies no operation envelope.
+                body = reply["body"]
+                self.assertEqual(body["error"]["code"], "generation_mismatch")
+                self.assertIsInstance(body["error"]["message"], str)
+                self.assertNotIn("contract_version", body)
+                self.assertNotIn("request_id", body)
                 self.records.append({"event": "actual-native-refuses-controlled-stale-fence", "reply": reply})
             finally:
                 held._fence = original

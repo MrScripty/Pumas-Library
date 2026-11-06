@@ -112,6 +112,8 @@ export function schemaType(schema) {
         return `{ readonly [key: string]: ${schemaType(schema.additionalProperties)} }`;
       }
       if (!fields.length && schema.additionalProperties === false) return 'Readonly<Record<string, never>>';
+      // A free-form JSON object (for example `HashMap<String, Value>`).
+      if (!fields.length && schema.additionalProperties === true) return '{ readonly [key: string]: unknown }';
       return `{ ${fields.join('; ')} }`;
     }
     default: throw new Error('Unsupported unclassified schema');

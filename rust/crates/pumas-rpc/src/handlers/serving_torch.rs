@@ -175,6 +175,7 @@ pub(super) async fn serve_torch_model(
         )
         .await;
     }
+    let version_dir = manager.version_path(&tag)?;
     let existing = state
         .api
         .observe_owned_runtime_profile(&request.config.profile_id)?;
@@ -188,7 +189,7 @@ pub(super) async fn serve_torch_model(
                 .launch_runtime_profile_for_model_with_receipt(
                     request.config.profile_id.clone(),
                     &tag,
-                    &manager.version_path(&tag),
+                    &version_dir,
                     None,
                     None,
                 )
@@ -212,7 +213,7 @@ pub(super) async fn serve_torch_model(
         }
     };
     drop(torch_lifecycle_lease);
-    let client = TorchClient::new(Some(owned.endpoint_url.as_str()));
+    let client = TorchClient::for_owned_sidecar(owned.endpoint_url.as_str());
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         if state
@@ -535,7 +536,9 @@ pub(super) async fn unserve_torch_model(
             Some(profile_id.clone()),
         )
         .await?;
-    let client = TorchClient::new(Some(endpoint.as_str()));
+    // A configured endpoint is not proof that this backend's sidecar is the
+    // one listening there; only a proven owned sidecar receives the token.
+    let client = super::torch::torch_client_for_destination(state, Some(endpoint.as_str())).await?;
     let slots = client.list_slots().await?;
     for slot in slots
         .iter()

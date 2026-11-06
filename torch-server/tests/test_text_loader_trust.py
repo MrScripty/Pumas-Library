@@ -41,8 +41,12 @@ class TextLoaderTrustTests(unittest.TestCase):
                 self.assertIs(model, model_factory.return_value)
                 self.assertIs(tokenizer, tokenizer_factory.return_value)
                 self.assertEqual(actual_type, model_type)
-                tokenizer_factory.assert_called_once_with("model", trust_remote_code=False)
+                tokenizer_factory.assert_called_once_with(
+                    "model", trust_remote_code=False, local_files_only=True
+                )
                 self.assertIs(model_factory.call_args.kwargs["trust_remote_code"], False)
+                self.assertIs(model_factory.call_args.kwargs["use_safetensors"], True)
+                self.assertIs(model_factory.call_args.kwargs["local_files_only"], True)
                 self.assertEqual(model_factory.call_count, 1)
                 model.eval.assert_called_once_with()
 

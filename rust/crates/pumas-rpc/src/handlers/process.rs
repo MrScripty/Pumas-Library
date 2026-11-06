@@ -28,7 +28,7 @@ pub async fn launch_ollama(state: &AppState) -> pumas_library::Result<RuntimeLau
             "launch_ollama: active version resolved"
         );
         if let Some(tag) = active {
-            let version_dir = vm.version_path(&tag);
+            let version_dir = vm.version_path(&tag)?;
             info!("launch_ollama: launching active version");
             let response = state.api.launch_ollama(&tag, &version_dir).await?;
             info!("launch_ollama: result success={}", response.success);
@@ -49,7 +49,11 @@ pub async fn launch_ollama(state: &AppState) -> pumas_library::Result<RuntimeLau
 
 #[cfg(feature = "inference-plugins")]
 pub async fn stop_ollama(state: &AppState) -> pumas_library::Result<RuntimeStopOutcome> {
-    state.api.stop_ollama().await.map(RuntimeStopOutcome::new)
+    state
+        .api
+        .stop_ollama_report()
+        .await
+        .map(RuntimeStopOutcome::from_report)
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -69,7 +73,7 @@ pub async fn launch_torch(state: &AppState) -> pumas_library::Result<RuntimeLaun
             "launch_torch: active version resolved"
         );
         if let Some(tag) = active {
-            let version_dir = vm.version_path(&tag);
+            let version_dir = vm.version_path(&tag)?;
             info!("launch_torch: launching active version");
             let response = state.api.launch_torch(&tag, &version_dir).await?;
             info!("launch_torch: result success={}", response.success);
@@ -88,7 +92,11 @@ pub async fn launch_torch(state: &AppState) -> pumas_library::Result<RuntimeLaun
 
 #[cfg(feature = "inference-plugins")]
 pub async fn stop_torch(state: &AppState) -> pumas_library::Result<RuntimeStopOutcome> {
-    state.api.stop_torch().await.map(RuntimeStopOutcome::new)
+    state
+        .api
+        .stop_torch_report()
+        .await
+        .map(RuntimeStopOutcome::from_report)
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -127,7 +135,7 @@ pub async fn open_active_install(state: &AppState, params: &Value) -> pumas_libr
     // Get the active version from version_manager and open its directory
     if let Some(vm) = get_version_manager(state, &app_id_str).await {
         if let Some(tag) = vm.get_active_version().await? {
-            let version_dir = vm.version_path(&tag);
+            let version_dir = vm.version_path(&tag)?;
             if path_exists(&version_dir).await? {
                 match state.api.open_directory(&version_dir).await {
                     Ok(()) => Ok(json!({"success": true})),

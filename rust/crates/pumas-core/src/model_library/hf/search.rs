@@ -315,7 +315,10 @@ impl HuggingFaceClient {
                 "automatic-speech-recognition" | "audio" => "automatic-speech-recognition",
                 _ => kind,
             };
-            url.push_str(&format!("&pipeline_tag={}", pipeline_tag));
+            url.push_str(&format!(
+                "&pipeline_tag={}",
+                urlencoding::encode(pipeline_tag)
+            ));
         }
 
         // Execute request
@@ -341,10 +344,15 @@ impl HuggingFaceClient {
             source: None,
         })?;
 
-        // Convert to our model type
+        // Convert to our model type, recording when HuggingFace answered.
+        let observed_at = chrono::Utc::now().to_rfc3339();
         let models: Vec<HuggingFaceModel> = results
             .into_iter()
-            .map(Self::convert_search_result)
+            .map(|result| HuggingFaceModel {
+                observed_at: Some(observed_at.clone()),
+                cached: false,
+                ..Self::convert_search_result(result)
+            })
             .collect();
 
         Ok(models)
@@ -631,6 +639,8 @@ impl HuggingFaceClient {
             total_size_bytes: None,
             quant_sizes: None,
             compatible_engines,
+            observed_at: None,
+            cached: false,
         }
     }
 
@@ -743,6 +753,57 @@ mod tests {
             size,
             sha256: String::new(),
         }
+    }
+
+    #[cfg(feature = "test-support")]
+    #[tokio::test]
+    async fn live_search_results_record_their_fetch_time_and_are_not_cached() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = TempDir::new().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let fixture =
+            crate::model_library::test_support::HfLoopbackFixture::parse(&origin).unwrap();
+        let client =
+            HuggingFaceClient::new_with_loopback_fixture(root.path().into(), fixture).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                assert!(request.len() < 8192);
+                request.push(stream.read_u8().await.unwrap());
+            }
+            assert!(String::from_utf8(request)
+                .unwrap()
+                .starts_with("GET /models?search=fixture"));
+            let body = br#"[{"modelId":"fixture/model","downloads":3}]"#;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(body).await.unwrap();
+        });
+        let before = chrono::Utc::now();
+        let models = client
+            .search_api(&HfSearchParams {
+                query: "fixture".into(),
+                kind: None,
+                limit: Some(1),
+                hydrate_limit: Some(0),
+                offset: None,
+                format: None,
+            })
+            .await
+            .unwrap();
+        let after = chrono::Utc::now();
+        server.await.unwrap();
+        assert_eq!(models.len(), 1);
+        assert!(!models[0].cached);
+        let observed_at =
+            chrono::DateTime::parse_from_rfc3339(models[0].observed_at.as_deref().unwrap())
+                .unwrap();
+        assert!(before <= observed_at && observed_at <= after);
     }
 
     #[test]
@@ -996,6 +1057,8 @@ mod tests {
             total_size_bytes: None,
             quant_sizes: None,
             compatible_engines: vec!["ollama".to_string()],
+            observed_at: None,
+            cached: false,
         };
 
         let mut cached = model.clone();

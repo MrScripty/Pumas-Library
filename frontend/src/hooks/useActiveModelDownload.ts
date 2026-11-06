@@ -36,9 +36,12 @@ function isActiveDownload(download: ModelDownloadSnapshotEntry): download is Act
 export function useActiveModelDownload() {
   const [activeDownload, setActiveDownload] = useState<ActiveModelDownload | null>(null);
   const [activeDownloadCount, setActiveDownloadCount] = useState(0);
+  // Distinguishes "the download list could not be read" from "nothing is downloading".
+  const [activeDownloadError, setActiveDownloadError] = useState<string | null>(null);
 
   const applyDownloads = useCallback((downloads: ModelDownloadSnapshotEntry[]) => {
     const activeDownloads = downloads.filter(isActiveDownload);
+    setActiveDownloadError(null);
     setActiveDownloadCount(activeDownloads.length);
 
     const active = activeDownloads
@@ -85,6 +88,7 @@ export function useActiveModelDownload() {
         if (!cancelled) {
           setActiveDownload(null);
           setActiveDownloadCount(0);
+          setActiveDownloadError('The desktop backend is not available.');
         }
         return;
       }
@@ -101,7 +105,12 @@ export function useActiveModelDownload() {
 
         applyDownloads(result.downloads.map(projectDownloadProgress));
       } catch (error) {
-        logger.debug('Failed to load active model download snapshot', { error });
+        logger.warn('Failed to load active model download snapshot', { error });
+        if (!cancelled && !startupSuperseded) {
+          setActiveDownloadError(error instanceof Error && error.message.trim()
+            ? error.message
+            : 'The download list could not be loaded.');
+        }
       }
     };
 
@@ -128,5 +137,5 @@ export function useActiveModelDownload() {
     };
   }, [applyDownloads]);
 
-  return { activeDownload, activeDownloadCount };
+  return { activeDownload, activeDownloadCount, activeDownloadError };
 }

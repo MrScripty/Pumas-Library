@@ -135,6 +135,24 @@ impl PublicError {
         }
     }
 
+    /// [`Self::invalid_params`] whose message says which parameter is wrong
+    /// and why. `detail` passes through [`crate::public_text::public_reason`].
+    pub(crate) fn invalid_params_because(detail: impl AsRef<str>) -> Self {
+        Self {
+            message: Cow::Owned(crate::public_text::public_reason(&format!(
+                "Request parameters are invalid: {}",
+                detail.as_ref()
+            ))),
+            ..Self::invalid_params()
+        }
+    }
+
+    /// Typed-parameter decoding failure. Serde names the unknown, missing or
+    /// mistyped field; caller-supplied string values are not echoed.
+    pub(crate) fn invalid_params_from_serde(error: &serde_json::Error) -> Self {
+        Self::invalid_params_because(without_string_values(&error.to_string()))
+    }
+
     pub(crate) const fn internal() -> Self {
         Self {
             code: -32603,
@@ -148,6 +166,14 @@ impl PublicError {
             code: -32000,
             class: PublicErrorClass::Unavailable,
             message: Cow::Borrowed("A required operation is currently unavailable."),
+        }
+    }
+
+    /// [`Self::unavailable`] whose message says what is unavailable and why.
+    pub(crate) fn unavailable_because(reason: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            message: reason.into(),
+            ..Self::unavailable()
         }
     }
 
@@ -335,6 +361,7 @@ pub(crate) enum RpcCommand {
         build: String,
         python: String,
         adapter: String,
+        verified_versions: bool,
     },
     #[cfg(feature = "inference-plugins")]
     GetTorchRuntimeProbe {
@@ -929,11 +956,37 @@ impl RpcOutcome {
 #[derive(Serialize)]
 pub(crate) struct HealthOutcome {
     status: &'static str,
+    /// Echo of `PUMAS_RPC_LAUNCH_NONCE`, so a parent can tell its own child
+    /// from another process on the same port. Absent when none was supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    launch_nonce: Option<&'static str>,
 }
 
 impl HealthOutcome {
-    pub(crate) const fn ok() -> Self {
-        Self { status: "ok" }
+    pub(crate) fn ok() -> Self {
+        Self::with_nonce(crate::launch::nonce())
+    }
+
+    pub(crate) const fn with_nonce(launch_nonce: Option<&'static str>) -> Self {
+        Self {
+            status: "ok",
+            launch_nonce,
+        }
+    }
+}
+
+#[cfg(test)]
+mod health_outcome_tests {
+    #[test]
+    fn health_echoes_the_launch_nonce_only_when_one_was_supplied() {
+        assert_eq!(
+            serde_json::to_value(super::HealthOutcome::with_nonce(None)).unwrap(),
+            serde_json::json!({"status": "ok"})
+        );
+        assert_eq!(
+            serde_json::to_value(super::HealthOutcome::with_nonce(Some("n0nce"))).unwrap(),
+            serde_json::json!({"status": "ok", "launch_nonce": "n0nce"})
+        );
     }
 }
 
@@ -1048,6 +1101,36 @@ pub(crate) struct SuccessOutcome {
 impl SuccessOutcome {
     pub(crate) const fn new() -> Self {
         Self { success: true }
+    }
+}
+
+/// `search_hf_models` result. A failed search keeps `models` empty and names
+/// the public reason.
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct HfModelSearchOutcome {
+    success: bool,
+    models: Vec<pumas_library::models::HuggingFaceModel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "String"))]
+    error: Option<String>,
+}
+
+impl HfModelSearchOutcome {
+    pub(crate) fn found(models: Vec<pumas_library::models::HuggingFaceModel>) -> Self {
+        Self {
+            success: true,
+            models,
+            error: None,
+        }
+    }
+
+    pub(crate) fn failed(error: &pumas_library::PumasError) -> Self {
+        Self {
+            success: false,
+            models: Vec::new(),
+            error: Some(PublicError::from(error).message.into_owned()),
+        }
     }
 }
 
@@ -4172,6 +4255,35 @@ mod torch_release_options_contract_tests {
         .is_err());
     }
 
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn preview_parser_accepts_an_optional_verified_versions_flag() {
+        let preview = |extra: serde_json::Value| {
+            let mut params =
+                serde_json::json!({"tag": "v2.10.0", "build": "cu130", "python": "python3.12"});
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            parse_command("preview_torch_runtime", Some(&params))
+        };
+        assert!(matches!(
+            preview(serde_json::json!({})),
+            Ok(RpcCommand::PreviewTorchRuntime {
+                verified_versions: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            preview(serde_json::json!({"verified_versions": true})),
+            Ok(RpcCommand::PreviewTorchRuntime {
+                verified_versions: true,
+                ..
+            })
+        ));
+        assert!(preview(serde_json::json!({"verified_versions": "yes"})).is_err());
+    }
+
     #[test]
     fn typed_release_options_use_the_expected_wire_shape() {
         let outcome = TorchReleaseOptionsOutcome {
@@ -4284,6 +4396,10 @@ pub(crate) struct PreviewTorchRuntimeParams {
     python: String,
     #[serde(default = "default_torch_adapter")]
     adapter: String,
+    /// Constrain resolution to the package versions a verified combination
+    /// recorded. The selection must then match that combination exactly.
+    #[serde(default)]
+    verified_versions: bool,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -4870,12 +4986,49 @@ impl RuntimeRunningOutcome {
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct RuntimeStopOutcome {
     success: bool,
+    /// Recorded processes the stop left running, each with a reason. Omitted
+    /// when nothing was skipped, so the established `{success}` wire holds.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skipped: Vec<RuntimeStopSkipped>,
+}
+
+/// A recorded runtime process a stop refused to signal, and why.
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeStopSkipped {
+    /// The recorded PID, when the PID file named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "u32"))]
+    pid: Option<u32>,
+    reason: String,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
 impl RuntimeStopOutcome {
+    #[cfg(any(feature = "export-contract", test))]
     pub(crate) fn new(success: bool) -> Self {
-        Self { success }
+        Self {
+            success,
+            skipped: Vec::new(),
+        }
+    }
+
+    /// The wire outcome of a core stop report. The PID file path stays
+    /// server-side; the reason already names the process.
+    pub(crate) fn from_report(report: pumas_library::process::RuntimeStopReport) -> Self {
+        Self {
+            success: report.stopped_any(),
+            skipped: report
+                .skipped
+                .into_iter()
+                .map(|skip| RuntimeStopSkipped {
+                    pid: skip.pid,
+                    reason: skip.reason,
+                })
+                .collect(),
+        }
     }
 }
 
@@ -5240,6 +5393,39 @@ mod runtime_stop_tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn runtime_stop_reports_skipped_processes_with_reasons() {
+        use pumas_library::process::{RuntimeStopReport, RuntimeStopSkip};
+        let report = RuntimeStopReport {
+            stopped: vec![],
+            skipped: vec![
+                RuntimeStopSkip {
+                    pid: Some(4242),
+                    pid_file: "/private/ollama.pid".into(),
+                    reason: "skipped: not owned by Pumas".into(),
+                },
+                RuntimeStopSkip {
+                    pid: None,
+                    pid_file: "/private/torch.pid".into(),
+                    reason: "the PID record is unreadable".into(),
+                },
+            ],
+        };
+        let wire = serde_json::to_value(RuntimeStopOutcome::from_report(report)).unwrap();
+        assert_eq!(
+            wire,
+            json!({"success":false,"skipped":[
+                {"pid":4242,"reason":"skipped: not owned by Pumas"},
+                {"reason":"the PID record is unreadable"}
+            ]})
+        );
+        // An empty report keeps the established boolean-only wire.
+        let wire =
+            serde_json::to_value(RuntimeStopOutcome::from_report(RuntimeStopReport::default()))
+                .unwrap();
+        assert_eq!(wire, json!({"success":false}));
     }
 }
 
@@ -6004,7 +6190,9 @@ impl InferenceSettingInput {
                     })
             })
         {
-            return Err(PublicError::invalid_params());
+            return Err(PublicError::invalid_params_because(
+                "`settings` contain a non-finite number or a value JSON cannot represent",
+            ));
         }
         Ok(pumas_library::models::InferenceParamSchema {
             key: self.key,
@@ -6081,6 +6269,7 @@ struct GetAppStatusParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 struct SetHfTokenParams {
     token: String,
 }
@@ -6101,6 +6290,7 @@ struct VersionTagParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 struct ModelIdParams {
     #[serde(alias = "modelId")]
     model_id: String,
@@ -6291,26 +6481,34 @@ struct DownloadModelFromHfParams {
 impl DownloadModelFromHfParams {
     fn into_request(self) -> Result<DownloadRequest, PublicError> {
         Ok(DownloadRequest {
-            repo_id: validate_bounded_non_empty(self.repo_id, MAX_IDENTIFIER_BYTES)?,
-            family: validate_bounded_non_empty(self.family, MAX_IDENTIFIER_BYTES)?,
-            official_name: validate_bounded_non_empty(self.official_name, MAX_IDENTIFIER_BYTES)?,
-            model_type: validate_optional_bounded(self.model_type)?,
-            quant: validate_optional_bounded(self.quant)?,
-            filename: validate_optional_bounded(self.filename)?,
+            repo_id: validate_bounded_non_empty("repo_id", self.repo_id, MAX_IDENTIFIER_BYTES)?,
+            family: validate_bounded_non_empty("family", self.family, MAX_IDENTIFIER_BYTES)?,
+            official_name: validate_bounded_non_empty(
+                "official_name",
+                self.official_name,
+                MAX_IDENTIFIER_BYTES,
+            )?,
+            model_type: validate_optional_bounded("model_type", self.model_type)?,
+            quant: validate_optional_bounded("quant", self.quant)?,
+            filename: validate_optional_bounded("filename", self.filename)?,
             filenames: self
                 .filenames
-                .map(validate_bounded_collection)
+                .map(|filenames| validate_bounded_collection("filenames", filenames))
                 .transpose()?,
-            pipeline_tag: validate_optional_bounded(self.pipeline_tag.or(self.subtype))?,
+            pipeline_tag: validate_optional_bounded(
+                "pipeline_tag",
+                self.pipeline_tag.or(self.subtype),
+            )?,
             bundle_format: None,
             pipeline_class: None,
-            release_date: validate_optional_bounded(self.release_date)?,
-            download_url: validate_optional_bounded(self.download_url)?,
+            release_date: validate_optional_bounded("release_date", self.release_date)?,
+            download_url: validate_optional_bounded("download_url", self.download_url)?,
             model_card_json: validate_optional_bounded_with_limit(
+                "model_card_json",
                 self.model_card_json,
                 MAX_METADATA_JSON_BYTES,
             )?,
-            license_status: validate_optional_bounded(self.license_status)?,
+            license_status: validate_optional_bounded("license_status", self.license_status)?,
         })
     }
 }
@@ -6541,11 +6739,11 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         "get_library_status" => empty().map(|()| RpcCommand::GetLibraryStatus),
         #[cfg(feature = "inference-plugins")]
         "get_app_status" => parse_params::<GetAppStatusParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.app_id, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("app_id", params.app_id, MAX_IDENTIFIER_BYTES)
                 .map(|app_id| RpcCommand::GetAppStatus { app_id })
         }),
         "set_hf_token" => parse_params::<SetHfTokenParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.token, MAX_CREDENTIAL_BYTES)
+            validate_bounded_non_empty("token", params.token, MAX_CREDENTIAL_BYTES)
                 .map(SecretToken)
                 .map(|token| RpcCommand::SetHfToken { token })
         }),
@@ -6554,35 +6752,37 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         "get_link_health" => parse_params::<GetLinkHealthParams>(params).and_then(|params| {
             params
                 .version_tag
-                .map(|value| validate_bounded_non_empty(value, MAX_IDENTIFIER_BYTES))
+                .map(|value| validate_bounded_non_empty("version_tag", value, MAX_IDENTIFIER_BYTES))
                 .transpose()
                 .map(|version_tag| RpcCommand::GetLinkHealth { version_tag })
         }),
         "clean_broken_links" => empty().map(|()| RpcCommand::CleanBrokenLinks),
         "remove_orphaned_links" => parse_params::<VersionTagParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.version_tag, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("version_tag", params.version_tag, MAX_IDENTIFIER_BYTES)
                 .map(|version_tag| RpcCommand::RemoveOrphanedLinks { version_tag })
         }),
         "get_links_for_model" => parse_params::<ModelIdParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.model_id, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
                 .map(|model_id| RpcCommand::GetLinksForModel { model_id })
         }),
         "delete_model_with_cascade" => parse_params::<ModelIdParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.model_id, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
                 .map(|model_id| RpcCommand::DeleteModelWithCascade { model_id })
         }),
         "get_file_link_count" => parse_params::<FilePathParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.file_path, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("file_path", params.file_path, MAX_IDENTIFIER_BYTES)
                 .map(|file_path| RpcCommand::GetFileLinkCount { file_path })
         }),
         "check_files_writable" => parse_params::<FilePathsParams>(params).and_then(|params| {
-            validate_bounded_collection(params.file_paths)
+            validate_bounded_collection("file_paths", params.file_paths)
                 .map(|file_paths| RpcCommand::CheckFilesWritable { file_paths })
         }),
         "set_model_link_exclusion" => {
             parse_params::<SetModelLinkExclusionParams>(params).and_then(|params| {
-                let model_id = validate_bounded_non_empty(params.model_id, MAX_IDENTIFIER_BYTES)?;
-                let app_id = validate_bounded_non_empty(params.app_id, MAX_IDENTIFIER_BYTES)?;
+                let model_id =
+                    validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)?;
+                let app_id =
+                    validate_bounded_non_empty("app_id", params.app_id, MAX_IDENTIFIER_BYTES)?;
                 Ok(RpcCommand::SetModelLinkExclusion {
                     model_id,
                     app_id,
@@ -6591,17 +6791,20 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         "get_link_exclusions" => parse_params::<AppIdParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.app_id, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("app_id", params.app_id, MAX_IDENTIFIER_BYTES)
                 .map(|app_id| RpcCommand::GetLinkExclusions { app_id })
         }),
         "start_model_conversion" => {
             parse_params::<StartModelConversionParams>(params).and_then(|params| {
-                let model_id = validate_bounded_non_empty(params.model_id, MAX_IDENTIFIER_BYTES)?;
+                let model_id =
+                    validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)?;
                 let direction = parse_conversion_direction(&params.direction)?;
-                let target_quant = validate_optional_bounded(params.target_quant)?;
-                let output_name = validate_optional_bounded(params.output_name)?;
-                let imatrix_calibration_file =
-                    validate_optional_bounded(params.imatrix_calibration_file)?;
+                let target_quant = validate_optional_bounded("target_quant", params.target_quant)?;
+                let output_name = validate_optional_bounded("output_name", params.output_name)?;
+                let imatrix_calibration_file = validate_optional_bounded(
+                    "imatrix_calibration_file",
+                    params.imatrix_calibration_file,
+                )?;
                 Ok(RpcCommand::StartModelConversion {
                     request: ConversionRequest {
                         model_id,
@@ -6616,14 +6819,22 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         }
         "get_conversion_progress" => {
             parse_params::<ConversionIdParams>(params).and_then(|params| {
-                validate_bounded_non_empty(params.conversion_id, MAX_IDENTIFIER_BYTES)
-                    .map(|conversion_id| RpcCommand::GetConversionProgress { conversion_id })
+                validate_bounded_non_empty(
+                    "conversion_id",
+                    params.conversion_id,
+                    MAX_IDENTIFIER_BYTES,
+                )
+                .map(|conversion_id| RpcCommand::GetConversionProgress { conversion_id })
             })
         }
         "cancel_model_conversion" => {
             parse_params::<ConversionIdParams>(params).and_then(|params| {
-                validate_bounded_non_empty(params.conversion_id, MAX_IDENTIFIER_BYTES)
-                    .map(|conversion_id| RpcCommand::CancelModelConversion { conversion_id })
+                validate_bounded_non_empty(
+                    "conversion_id",
+                    params.conversion_id,
+                    MAX_IDENTIFIER_BYTES,
+                )
+                .map(|conversion_id| RpcCommand::CancelModelConversion { conversion_id })
             })
         }
         "list_model_conversions" => empty().map(|()| RpcCommand::ListModelConversions),
@@ -6642,7 +6853,9 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     .as_deref()
                     .is_some_and(|id| !canonical_setup_id(id))
                 {
-                    return Err(PublicError::invalid_params());
+                    return Err(PublicError::invalid_params_because(
+                        "`expected_previous_operation_id` is not a setup operation id",
+                    ));
                 }
                 Ok(RpcCommand::StartBackendSetup {
                     backend: params.backend,
@@ -6657,7 +6870,9 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     .as_deref()
                     .is_some_and(|id| !canonical_setup_id(id))
                 {
-                    return Err(PublicError::invalid_params());
+                    return Err(PublicError::invalid_params_because(
+                        "`expected_previous_operation_id` is not a setup operation id",
+                    ));
                 }
                 Ok(RpcCommand::StartConversionSetup {
                     expected_previous_operation_id: params.expected_previous_operation_id,
@@ -6672,11 +6887,11 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     .map(|backend| RpcCommand::SetupQuantizationBackend { backend })
             }),
         "open_path" => parse_params::<OpenPathParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.path, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("path", params.path, MAX_IDENTIFIER_BYTES)
                 .map(|path| RpcCommand::OpenPath { path })
         }),
         "open_url" => parse_params::<OpenUrlParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.url, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("url", params.url, MAX_IDENTIFIER_BYTES)
                 .map(|url| RpcCommand::OpenUrl { url })
         }),
         "download_model_from_hf" => {
@@ -6687,25 +6902,25 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         }
         "get_model_download_status" => {
             parse_params::<DownloadIdParams>(params).and_then(|params| {
-                validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+                validate_bounded_non_empty("download_id", params.download_id, MAX_IDENTIFIER_BYTES)
                     .map(|download_id| RpcCommand::GetModelDownloadStatus { download_id })
             })
         }
         "cancel_model_download" => parse_params::<DownloadIdParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("download_id", params.download_id, MAX_IDENTIFIER_BYTES)
                 .map(|download_id| RpcCommand::CancelModelDownload { download_id })
         }),
         "pause_model_download" => parse_params::<DownloadIdParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("download_id", params.download_id, MAX_IDENTIFIER_BYTES)
                 .map(|download_id| RpcCommand::PauseModelDownload { download_id })
         }),
         "resume_model_download" => parse_params::<DownloadIdParams>(params).and_then(|params| {
-            validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+            validate_bounded_non_empty("download_id", params.download_id, MAX_IDENTIFIER_BYTES)
                 .map(|download_id| RpcCommand::ResumeModelDownload { download_id })
         }),
         "inspect_retained_download" => {
             parse_params::<DownloadIdParams>(params).and_then(|params| {
-                validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+                validate_bounded_non_empty("download_id", params.download_id, MAX_IDENTIFIER_BYTES)
                     .map(|download_id| RpcCommand::InspectRetainedDownload { download_id })
             })
         }
@@ -6713,7 +6928,7 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             parse_params::<DownloadResolutionRequest>(params).and_then(|request| {
                 request
                     .validate()
-                    .map_err(|_| PublicError::invalid_params())?;
+                    .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
                 Ok(RpcCommand::ResolveRetainedDownload { request })
             })
         }
@@ -6721,10 +6936,18 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         "list_interrupted_downloads" | "recover_download" => Err(PublicError::method_not_found()),
         "resume_partial_download" => {
             parse_params::<RecoverDownloadParams>(params).and_then(|params| {
-                let model_id = DownloadRecoveryModelId::parse(&params.model_id)
-                    .ok_or_else(PublicError::invalid_params)?;
+                let model_id =
+                    DownloadRecoveryModelId::parse(&params.model_id).ok_or_else(|| {
+                        PublicError::invalid_params_because(
+                            "`model_id` is not a recoverable download model id",
+                        )
+                    })?;
                 let recovery_token = DownloadRecoveryToken::parse(&params.recovery_token)
-                    .ok_or_else(PublicError::invalid_params)?;
+                    .ok_or_else(|| {
+                        PublicError::invalid_params_because(
+                            "`recovery_token` is not a valid download recovery token",
+                        )
+                    })?;
                 Ok(RpcCommand::ResumePartialDownload {
                     model_id,
                     recovery_token,
@@ -6812,6 +7035,7 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     build: params.build,
                     python: params.python,
                     adapter: params.adapter,
+                    verified_versions: params.verified_versions,
                 }
             })
         }
@@ -6824,7 +7048,9 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                 Ok(RpcCommand::TrialTorchRuntime {
                     tag: params.tag,
                     profile_id: pumas_library::models::RuntimeProfileId::parse(&params.profile_id)
-                        .map_err(|_| PublicError::invalid_params())?,
+                        .map_err(|error| {
+                            PublicError::invalid_params_because(format!("`profile_id`: {error}"))
+                        })?,
                 })
             })
         }
@@ -6843,13 +7069,19 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             parse_params::<StopRuntimeProfileGenerationParams>(params).and_then(|params| {
                 Ok(RpcCommand::StopRuntimeProfileIfGeneration {
                     profile_id: pumas_library::models::RuntimeProfileId::parse(&params.profile_id)
-                        .map_err(|_| PublicError::invalid_params())?,
+                        .map_err(|error| {
+                            PublicError::invalid_params_because(format!("`profile_id`: {error}"))
+                        })?,
                     generation: params
                         .generation
                         .parse::<u64>()
                         .ok()
                         .filter(|generation| *generation > 0)
-                        .ok_or_else(PublicError::invalid_params)?,
+                        .ok_or_else(|| {
+                            PublicError::invalid_params_because(
+                                "`generation` must be a positive integer in a string",
+                            )
+                        })?,
                 })
             })
         }
@@ -6903,15 +7135,20 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         "search_models_fts" => parse_params::<SearchCatalogParams>(params).and_then(|params| {
             // An empty query is the core's supported paginated catalog listing.
             if params.query.len() > MAX_IDENTIFIER_BYTES {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because(format!(
+                    "`query` is {} bytes; the limit is {MAX_IDENTIFIER_BYTES} bytes",
+                    params.query.len()
+                )));
             }
             let query = params.query;
             let limit = usize::try_from(params.limit.unwrap_or(100))
-                .map_err(|_| PublicError::invalid_params())?;
+                .map_err(|_| PublicError::invalid_params_because("`limit` is out of range"))?;
             let offset = usize::try_from(params.offset.unwrap_or(0))
-                .map_err(|_| PublicError::invalid_params())?;
+                .map_err(|_| PublicError::invalid_params_because("`offset` is out of range"))?;
             if limit == 0 || limit > MAX_COLLECTION_ITEMS {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because(format!(
+                    "`limit` is {limit}; it must be 1 to {MAX_COLLECTION_ITEMS}"
+                )));
             }
             Ok(RpcCommand::SearchCatalog {
                 query,
@@ -6965,9 +7202,9 @@ fn parse_intent_requirement_params(
     validate_object_fields(&value, &["requirement"])?;
     let requirement = value
         .get("requirement")
-        .ok_or_else(PublicError::invalid_params)?;
+        .ok_or_else(|| PublicError::invalid_params_because("`requirement` is required"))?;
     validate_intent_requirement_shape(requirement)?;
-    serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
+    serde_json::from_value(value).map_err(|error| PublicError::invalid_params_from_serde(&error))
 }
 
 fn parse_intent_ensure_params(params: Option<&Value>) -> Result<IntentEnsureParams, PublicError> {
@@ -6975,13 +7212,13 @@ fn parse_intent_ensure_params(params: Option<&Value>) -> Result<IntentEnsurePara
     validate_object_fields(&value, &["request"])?;
     let request = value
         .get("request")
-        .ok_or_else(PublicError::invalid_params)?;
+        .ok_or_else(|| PublicError::invalid_params_because("`request` is required"))?;
     validate_object_fields(request, &["consumer_key", "requirement"])?;
     let requirement = request
         .get("requirement")
-        .ok_or_else(PublicError::invalid_params)?;
+        .ok_or_else(|| PublicError::invalid_params_because("`request.requirement` is required"))?;
     validate_intent_requirement_shape(requirement)?;
-    serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
+    serde_json::from_value(value).map_err(|error| PublicError::invalid_params_from_serde(&error))
 }
 
 fn parse_intent_reference_params(
@@ -6991,16 +7228,16 @@ fn parse_intent_reference_params(
     validate_object_fields(&value, &["reference"])?;
     let reference = value
         .get("reference")
-        .ok_or_else(PublicError::invalid_params)?;
+        .ok_or_else(|| PublicError::invalid_params_because("`reference` is required"))?;
     validate_object_fields(reference, &["consumer_key", "declaration_id", "generation"])?;
-    serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
+    serde_json::from_value(value).map_err(|error| PublicError::invalid_params_from_serde(&error))
 }
 
 fn validate_intent_requirement_shape(value: &Value) -> Result<(), PublicError> {
     validate_object_fields(value, &["selector", "artifact", "acquisition_policy"])?;
     let selector = value
         .get("selector")
-        .ok_or_else(PublicError::invalid_params)?;
+        .ok_or_else(|| PublicError::invalid_params_because("`requirement.selector` is required"))?;
     let selector_object = validate_object_fields(
         selector,
         &["kind", "model_ref", "repository_id", "revision"],
@@ -7011,11 +7248,15 @@ fn validate_intent_requirement_shape(value: &Value) -> Result<(), PublicError> {
                 .keys()
                 .any(|key| !matches!(key.as_str(), "kind" | "model_ref"))
             {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because(
+                    "a `local_model` selector accepts only `kind` and `model_ref`",
+                ));
             }
-            let model_ref = selector_object
-                .get("model_ref")
-                .ok_or_else(PublicError::invalid_params)?;
+            let model_ref = selector_object.get("model_ref").ok_or_else(|| {
+                PublicError::invalid_params_because(
+                    "`selector.model_ref` is required for a `local_model` selector",
+                )
+            })?;
             let model_ref_object = validate_object_fields(
                 model_ref,
                 &[
@@ -7028,9 +7269,11 @@ fn validate_intent_requirement_shape(value: &Value) -> Result<(), PublicError> {
                 ],
             )?;
             if let Some(diagnostics) = model_ref_object.get("migration_diagnostics") {
-                let diagnostics = diagnostics
-                    .as_array()
-                    .ok_or_else(PublicError::invalid_params)?;
+                let diagnostics = diagnostics.as_array().ok_or_else(|| {
+                    PublicError::invalid_params_because(
+                        "`model_ref.migration_diagnostics` must be an array",
+                    )
+                })?;
                 for diagnostic in diagnostics {
                     validate_object_fields(diagnostic, &["code", "message", "input"])?;
                 }
@@ -7041,7 +7284,7 @@ fn validate_intent_requirement_shape(value: &Value) -> Result<(), PublicError> {
                 .keys()
                 .any(|key| !matches!(key.as_str(), "kind" | "repository_id" | "revision"))
             {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because("an `upstream_repository` selector accepts only `kind`, `repository_id` and `revision`"));
             }
         }
         _ => {}
@@ -7059,12 +7302,21 @@ fn validate_object_fields<'a>(
     value: &'a Value,
     allowed: &[&str],
 ) -> Result<&'a Map<String, Value>, PublicError> {
-    let object = value.as_object().ok_or_else(PublicError::invalid_params)?;
-    if object
+    let object = value
+        .as_object()
+        .ok_or_else(|| PublicError::invalid_params_because("expected a JSON object"))?;
+    if let Some(unknown) = object
         .keys()
-        .any(|key| !allowed.iter().any(|allowed| key == allowed))
+        .find(|key| !allowed.iter().any(|allowed| key == allowed))
     {
-        return Err(PublicError::invalid_params());
+        return Err(PublicError::invalid_params_because(format!(
+            "unknown field `{unknown}`, expected one of {}",
+            allowed
+                .iter()
+                .map(|field| format!("`{field}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
     }
     Ok(object)
 }
@@ -7075,9 +7327,45 @@ where
 {
     let value = params.cloned().unwrap_or_else(|| Value::Object(Map::new()));
     if !value.is_object() {
-        return Err(PublicError::invalid_params());
+        return Err(PublicError::invalid_params_because(
+            "params must be a JSON object",
+        ));
     }
-    serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
+    serde_json::from_value(value).map_err(|error| PublicError::invalid_params_from_serde(&error))
+}
+
+/// Replace serde's `string "value"` (a caller-supplied value, which may be a
+/// credential) with `a string`, keeping field names and expected types.
+fn without_string_values(message: &str) -> String {
+    const MARKER: &str = "string \"";
+    let mut output = String::with_capacity(message.len());
+    let mut rest = message;
+    while let Some(at) = rest.find(MARKER) {
+        output.push_str(&rest[..at]);
+        output.push_str("a string");
+        let mut chars = rest[at + MARKER.len()..].char_indices();
+        let mut end = None;
+        while let Some((index, c)) = chars.next() {
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                '"' => {
+                    end = Some(at + MARKER.len() + index + 1);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match end {
+            Some(end) => rest = &rest[end..],
+            None => {
+                rest = "";
+            }
+        }
+    }
+    output.push_str(rest);
+    output
 }
 
 fn validate_lookup_model_id(value: String) -> Result<String, PublicError> {
@@ -7092,39 +7380,61 @@ fn validate_lookup_model_id(value: String) -> Result<String, PublicError> {
                 || part.chars().any(|ch| ch.is_whitespace() || ch.is_control())
         })
     {
-        return Err(PublicError::invalid_params());
+        return Err(PublicError::invalid_params_because("`model_id` must be a relative library path of at most 1024 bytes, without empty, `.` or `..` segments, backslashes, drive letters or whitespace"));
     }
     Ok(value)
 }
 
-fn validate_bounded_non_empty(value: String, max_bytes: usize) -> Result<String, PublicError> {
+fn validate_bounded_non_empty(
+    field: &str,
+    value: String,
+    max_bytes: usize,
+) -> Result<String, PublicError> {
     let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.len() > max_bytes {
-        return Err(PublicError::invalid_params());
+    if trimmed.is_empty() {
+        return Err(PublicError::invalid_params_because(format!(
+            "`{field}` must not be empty"
+        )));
+    }
+    if trimmed.len() > max_bytes {
+        return Err(PublicError::invalid_params_because(format!(
+            "`{field}` is {} bytes; the limit is {max_bytes} bytes",
+            trimmed.len()
+        )));
     }
     Ok(trimmed.to_string())
 }
 
-fn validate_bounded_collection(values: Vec<String>) -> Result<Vec<String>, PublicError> {
+fn validate_bounded_collection(
+    field: &str,
+    values: Vec<String>,
+) -> Result<Vec<String>, PublicError> {
     if values.is_empty() || values.len() > MAX_COLLECTION_ITEMS {
-        return Err(PublicError::invalid_params());
+        return Err(PublicError::invalid_params_because(format!(
+            "`{field}` has {} items; it must have 1 to {MAX_COLLECTION_ITEMS}",
+            values.len()
+        )));
     }
     values
         .into_iter()
-        .map(|value| validate_bounded_non_empty(value, MAX_IDENTIFIER_BYTES))
+        .map(|value| validate_bounded_non_empty(field, value, MAX_IDENTIFIER_BYTES))
         .collect()
 }
 
-fn validate_optional_bounded(value: Option<String>) -> Result<Option<String>, PublicError> {
-    validate_optional_bounded_with_limit(value, MAX_IDENTIFIER_BYTES)
+fn validate_optional_bounded(
+    field: &str,
+    value: Option<String>,
+) -> Result<Option<String>, PublicError> {
+    validate_optional_bounded_with_limit(field, value, MAX_IDENTIFIER_BYTES)
 }
 
 fn validate_optional_bounded_with_limit(
+    field: &str,
     value: Option<String>,
     max_bytes: usize,
 ) -> Result<Option<String>, PublicError> {
     value
-        .map(|value| validate_bounded_non_empty(value, max_bytes))
+        .map(|value| validate_bounded_non_empty(field, value, max_bytes))
         .transpose()
 }
 
@@ -7145,7 +7455,9 @@ fn parse_conversion_direction(value: &str) -> Result<ConversionDirection, Public
         "safetensors_to_sherry_qat" | "SafetensorsToSherryQat" => {
             Ok(ConversionDirection::SafetensorsToSherryQat)
         }
-        _ => Err(PublicError::invalid_params()),
+        _ => Err(PublicError::invalid_params_because(
+            "`direction` is not a supported conversion direction",
+        )),
     }
 }
 
@@ -7156,7 +7468,9 @@ fn parse_quant_backend(value: &str) -> Result<QuantBackend, PublicError> {
         "fp8" | "Fp8" => Ok(QuantBackend::Fp8),
         "sherry" | "Sherry" => Ok(QuantBackend::Sherry),
         "python_conversion" | "PythonConversion" => Ok(QuantBackend::PythonConversion),
-        _ => Err(PublicError::invalid_params()),
+        _ => Err(PublicError::invalid_params_because(
+            "`backend` is not a supported quantization backend",
+        )),
     }
 }
 
@@ -7173,6 +7487,48 @@ mod tests {
     use std::path::PathBuf;
 
     const SECRET: &str = "hf_test_rpc_secret_do_not_disclose";
+
+    /// Invalid parameters keep their stable code and class and explain why.
+    fn assert_invalid_params(error: &PublicError) {
+        assert_eq!(error.code, -32602, "{error:?}");
+        assert_eq!(error.class, PublicErrorClass::InvalidRequest, "{error:?}");
+        assert!(
+            error
+                .message
+                .starts_with("Request parameters are invalid: "),
+            "the rejection must carry a reason: {error:?}"
+        );
+    }
+
+    #[test]
+    fn invalid_params_name_the_field_without_echoing_string_values() {
+        let unknown = admission_error(&request(
+            "get_link_exclusions",
+            Some(json!({"app_id": "comfyui", "newer_optional_field": true})),
+        ));
+        assert_invalid_params(&unknown.error);
+        assert!(
+            unknown.error.message.contains("`newer_optional_field`"),
+            "{:?}",
+            unknown.error
+        );
+        let mistyped = admission_error(&request(
+            "set_model_link_exclusion",
+            Some(json!({"model_id": "m", "app_id": "a", "excluded": SECRET})),
+        ));
+        assert_invalid_params(&mistyped.error);
+        assert!(mistyped.error.message.contains("expected a boolean"));
+        assert!(!mistyped.error.message.contains(SECRET));
+        assert_eq!(
+            without_string_values(r#"invalid type: string "a\"b", expected u64"#),
+            "invalid type: a string, expected u64"
+        );
+        let empty = admission_error(&request(
+            "get_link_exclusions",
+            Some(json!({"app_id": "  "})),
+        ));
+        assert!(empty.error.message.contains("`app_id` must not be empty"));
+    }
     const PRIVATE_PATH: &str = "/private/rpc-sentinel/model.gguf";
     const PRIVATE_URL: &str = "https://example.invalid/private/rpc-sentinel/model.gguf";
 
@@ -7636,7 +7992,7 @@ mod tests {
             ),
         ] {
             let error = admission_error(&request(method, Some(params)));
-            assert_eq!(error.error, PublicError::invalid_params());
+            assert_invalid_params(&error.error);
         }
     }
 
@@ -7744,7 +8100,7 @@ mod tests {
             ("setup_quantization_backend", json!({"backend": "unknown"})),
         ] {
             let error = admission_error(&request(method, Some(params)));
-            assert_eq!(error.error, PublicError::invalid_params());
+            assert_invalid_params(&error.error);
         }
     }
 
@@ -8034,7 +8390,7 @@ mod tests {
             ),
         ] {
             let error = admission_error(&request(method, Some(params)));
-            assert_eq!(error.error, PublicError::invalid_params());
+            assert_invalid_params(&error.error);
         }
     }
 
@@ -8094,10 +8450,11 @@ mod tests {
                 "target_unused": null,
             })),
         ));
-        assert_eq!(
-            unknown_field.error,
-            PublicError::invalid_params(),
-            "unknown download fields must fail closed"
+        assert_invalid_params(&unknown_field.error);
+        assert!(
+            unknown_field.error.message.contains("`target_unused`"),
+            "unknown download fields must fail closed and be named: {:?}",
+            unknown_field.error
         );
 
         let start = AdmittedRpcRequest::decode(&request(
@@ -8214,7 +8571,7 @@ mod tests {
             ),
         ] {
             let error = admission_error(&request(method, Some(params)));
-            assert_eq!(error.error, PublicError::invalid_params());
+            assert_invalid_params(&error.error);
         }
     }
 
@@ -8546,7 +8903,7 @@ mod tests {
             ("refresh_model_index", json!({"unexpected": true})),
         ] {
             let error = admission_error(&request(method, Some(params)));
-            assert_eq!(error.error, PublicError::invalid_params());
+            assert_invalid_params(&error.error);
         }
 
         let model = pumas_library::ModelRecord {
@@ -9188,7 +9545,7 @@ mod tests {
             let Err(error) = parse_command(method, Some(&json!({}))) else {
                 panic!("{method} accepted an empty parameter object");
             };
-            assert_eq!(error, PublicError::invalid_params());
+            assert_invalid_params(&error);
         }
         let Err(error) = parse_command(
             "intent_list_declarations",
@@ -9196,7 +9553,7 @@ mod tests {
         ) else {
             panic!("intent_list_declarations accepted unknown parameters");
         };
-        assert_eq!(error, PublicError::invalid_params());
+        assert_invalid_params(&error);
     }
 
     #[test]
@@ -9212,7 +9569,7 @@ mod tests {
         ) else {
             panic!("unknown nested artifact field was accepted");
         };
-        assert_eq!(error, PublicError::invalid_params());
+        assert_invalid_params(&error);
 
         let Err(error) = parse_command(
             "intent_release_model",
@@ -9227,7 +9584,7 @@ mod tests {
         ) else {
             panic!("unknown nested reference field was accepted");
         };
-        assert_eq!(error, PublicError::invalid_params());
+        assert_invalid_params(&error);
     }
 
     #[test]

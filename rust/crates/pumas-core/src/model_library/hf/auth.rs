@@ -3,10 +3,10 @@
 //! Handles token resolution from multiple sources, persistence to disk,
 //! and validation against the HuggingFace API.
 
-use crate::error::Result;
+use crate::error::{PumasError, Result};
 use crate::platform::paths::pumas_config_dir;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// HuggingFace token filename within the Pumas config directory.
 const HF_TOKEN_FILENAME: &str = "hf_token";
@@ -78,22 +78,38 @@ pub(super) fn resolve_token_from_disk() -> Option<(String, &'static str)> {
 }
 
 /// Save a token to the Pumas config directory.
-///
-/// Creates the directory if needed and sets restrictive file permissions
-/// (0600) on Unix systems.
 pub(super) fn save_token(token: &str) -> Result<()> {
-    let path = hf_token_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, token.trim())?;
+    save_token_at(&hf_token_path()?, token)
+}
 
+/// Replace the token file atomically.
+///
+/// The token is written to a sibling temporary file that is created with
+/// mode 0600 on Unix, flushed, and renamed over the destination. The secret
+/// is therefore never readable under the default umask, and a crash leaves
+/// either the old token or the new one, never a truncated file.
+fn save_token_at(path: &Path, token: &str) -> Result<()> {
+    use std::io::Write;
+
+    let parent = path.parent().ok_or_else(|| PumasError::Config {
+        message: "HuggingFace token path has no parent directory".into(),
+    })?;
+    std::fs::create_dir_all(parent)?;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".hf_token.").suffix(".tmp");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        builder.permissions(std::fs::Permissions::from_mode(0o600));
     }
-
+    let mut staged = builder.tempfile_in(parent)?;
+    staged.write_all(token.trim().as_bytes())?;
+    staged.as_file().sync_all()?;
+    staged
+        .persist(path)
+        .map_err(|error| PumasError::io_with_path(error.error, path))?;
+    #[cfg(unix)]
+    std::fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
 
@@ -120,11 +136,24 @@ mod tests {
     #[test]
     fn test_save_token_then_read_returns_saved_value() {
         let temp = TempDir::new().unwrap();
-        let token_path = temp.path().join(HF_TOKEN_FILENAME);
-        std::fs::write(&token_path, "hf_test_token_123").unwrap();
+        let token_path = temp.path().join("config").join(HF_TOKEN_FILENAME);
 
-        let content = std::fs::read_to_string(&token_path).unwrap();
-        assert_eq!(content.trim(), "hf_test_token_123");
+        save_token_at(&token_path, "  hf_test_token_123\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&token_path).unwrap(),
+            "hf_test_token_123"
+        );
+
+        save_token_at(&token_path, "hf_replacement").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&token_path).unwrap(),
+            "hf_replacement"
+        );
+        let names: Vec<_> = std::fs::read_dir(token_path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [std::ffi::OsString::from(HF_TOKEN_FILENAME)]);
     }
 
     #[test]
@@ -153,12 +182,18 @@ mod tests {
 
         let temp = TempDir::new().unwrap();
         let token_path = temp.path().join(HF_TOKEN_FILENAME);
-        std::fs::write(&token_path, "secret_token").unwrap();
-        std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        // A pre-existing world-readable file is replaced, not rewritten in place.
+        std::fs::write(&token_path, "old_token").unwrap();
+        std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-        let metadata = std::fs::metadata(&token_path).unwrap();
-        let mode = metadata.permissions().mode() & 0o777;
+        save_token_at(&token_path, "secret_token").unwrap();
+
+        let mode = std::fs::metadata(&token_path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "Token file should have 0600 permissions");
+        assert_eq!(
+            std::fs::read_to_string(&token_path).unwrap(),
+            "secret_token"
+        );
     }
 
     #[test]

@@ -107,7 +107,6 @@ test('Torch runtime options require verified records and an offered default adap
     { ...options, adapterRequirements: undefined },
     { ...options, adapterRequirements: [{ adapter: 'flux2', tag: 'v2.9.1', build: 'cu130' }] },
     { ...options, verified: [{ ...options.verified[0], packages: [{ name: 'diffusers' }] }] },
-    { ...options, bundledPresetAvailable: true },
     { ...options, defaultAdapter: undefined },
     { ...options, defaultAdapter: 'bundled' },
     { ...options, adapters: ['none'], defaultAdapter: 'flux2' },
@@ -1457,11 +1456,51 @@ test('preload apiCall methods are registered or tracked deferred drift', () => {
   assert.deepEqual(unregisteredMethods, DEFERRED_UNREGISTERED_PRELOAD_METHODS);
 });
 
-test('preload exposes the status telemetry snapshot method used by the renderer', () => {
-  assert.match(
-    PRELOAD_SOURCE,
-    /get_status_telemetry_snapshot:\s*\(\)\s*=>\s*apiCall\('get_status_telemetry_snapshot'\)/
-  );
+test('preload decodes pull snapshots with the declarations their push streams use', async () => {
+  const harness = loadCompiledPreload();
+  const network = {
+    success: true, total_requests: 3, successful_requests: 2, failed_requests: 1,
+    circuit_breaker_rejections: 0, retries: 1, success_rate: 0.66, circuit_states: { 'huggingface.co': 'closed' },
+    is_offline: false,
+  };
+  const library = { success: true, indexing: false, deep_scan_in_progress: false, model_count: 4 };
+  for (const [method, value] of [['get_network_status', network], ['get_library_status', library]]) {
+    harness.respondWith(value);
+    assert.deepEqual(toPlainValue(await harness.api[method]()), value);
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', method, {}]);
+    harness.respondWith({ ...value, extra: 'synthetic-pull-secret' });
+    await assert.rejects(harness.api[method](), (error) =>
+      error.name === 'DesktopContractError' && !error.message.includes('synthetic-pull-secret'));
+  }
+  for (const invalid of [null, {}, { ...network }]) {
+    harness.respondWith(invalid);
+    await assert.rejects(harness.api.get_status_telemetry_snapshot(), { name: 'DesktopContractError' });
+  }
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'get_status_telemetry_snapshot', {}]);
+});
+
+test('preload decodes credential, import and delete requests before IPC', async () => {
+  const harness = loadCompiledPreload();
+  harness.respondWith({ success: true });
+  await harness.api.set_hf_token('hf_synthetic');
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'set_hf_token', { token: 'hf_synthetic' }]);
+  await harness.api.import_model('/m/a.gguf', 'llama', 'A');
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)),
+    ['api:call', 'import_model', { local_path: '/m/a.gguf', family: 'llama', official_name: 'A' }]);
+  await harness.api.import_batch([{ path: '/m/a.gguf', family: 'llama', official_name: 'A', repo_id: undefined }]);
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)),
+    ['api:call', 'import_batch', { imports: [{ path: '/m/a.gguf', family: 'llama', official_name: 'A' }] }]);
+  await harness.api.delete_model_with_cascade('llm/a');
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'delete_model_with_cascade', { model_id: 'llm/a' }]);
+  const config = { api_port: 8400, host: '127.0.0.1', max_loaded_models: 4, lan_access: false };
+  await harness.api.torch_configure(config);
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'torch_configure', { config }]);
+
+  const before = harness.invocations.length;
+  assert.throws(() => harness.api.set_hf_token(42), { name: 'DesktopContractError' });
+  assert.throws(() => harness.api.import_batch([{ path: '/m/a.gguf' }]), { name: 'DesktopContractError' });
+  assert.throws(() => harness.api.delete_model_with_cascade(['llm/a']), { name: 'DesktopContractError' });
+  assert.equal(harness.invocations.length, before, 'invalid requests never reach IPC');
 });
 
 test('preload runtime-decodes launcher-root startup and selection IPC values', () => {
@@ -1580,7 +1619,7 @@ test('main delegates first visibility to one current-document presentation owner
   );
   assert.match(
     MAIN_SOURCE,
-    /ipcMain\.handle\([\s\S]*?LAUNCHER_ROOT_PRESENTATION_COMMITTED_CHANNEL[\s\S]*?event\.sender\s*===\s*targetWindow\.webContents[\s\S]*?event\.senderFrame\s*===\s*targetWindow\.webContents\.mainFrame/
+    /ipcMain\.handle\([\s\S]*?LAUNCHER_ROOT_PRESENTATION_COMMITTED_CHANNEL[\s\S]*?currentTopDocument:\s*isApplicationSender\(event\)/
   );
   assert.match(MAIN_SOURCE, /handleBrowserReady[\s\S]*?\.browserReady\(\)/);
   assert.match(MAIN_SOURCE, /\.on\('ready-to-show',\s*handleBrowserReady\)/);
@@ -1746,4 +1785,37 @@ test('update streams deliver decoded payloads and report undeliverable ones', ()
   harness.emit('model-library:update', {cursor:'model-library-updates:1', stale_cursor:false});
   assert.equal(libraryErrors.length, 1);
   assert.match(libraryErrors[0], /^Desktop contract invalid for model-library update: /);
+});
+
+test('every update stream reports transport loss and subscription failure to onError', async () => {
+  const streams = [
+    ['model-library', 'onModelLibraryUpdate', false],
+    ['model-download', 'onModelDownloadUpdate', true],
+    ['runtime-profile', 'onRuntimeProfileUpdate', true],
+    ['serving-status', 'onServingStatusUpdate', true],
+    ['status-telemetry', 'onStatusTelemetryUpdate', true],
+  ];
+  for (const [stream, subscribe, refcounted] of streams) {
+    const harness = loadCompiledPreload();
+    harness.respondWith(() => Promise.reject(new Error(`${stream} subscribe refused`)));
+    const errors = [];
+    const unsubscribe = harness.api[subscribe](() => assert.fail('no payload was sent'), (message) => errors.push(message));
+    await new Promise((resolve) => setImmediate(resolve));
+    harness.emit(`${stream}:error`, { message: `${stream} stream ended` });
+    harness.emit(`${stream}:error`, { message: 'x', extra: true });
+    const expected = [
+      ...(refcounted ? [`${stream} subscribe refused`] : []),
+      `${stream} stream ended`,
+    ];
+    assert.deepEqual(errors.slice(0, expected.length), expected, `${stream} errors reach onError`);
+    assert.match(errors.at(-1), new RegExp(`^Desktop contract invalid for ${stream} error update: `));
+    assert.deepEqual(
+      harness.invocations.map(([channel]) => channel),
+      refcounted ? [`${stream}:subscribe`] : [],
+    );
+    unsubscribe();
+    harness.emit(`${stream}:error`, { message: 'after unsubscribe' });
+    assert.ok(!errors.includes('after unsubscribe'), `${stream} error listener is removed`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 });

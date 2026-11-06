@@ -39,6 +39,30 @@ Current protocol: `3`.
 - `capabilities`: additive list of provider abilities. Unknown entries are
   ignored by the gateway; absence of an entry only withholds that ability.
 
+## Authentication
+
+Every route except `GET /health` requires the header
+`x-pumas-torch-token: <token>` (a bearer `Authorization` header is also
+accepted). The Pumas launcher generates the token once per backend process,
+never persists it, and passes it to the sidecar only through
+`PUMAS_TORCH_API_TOKEN` in the environment, never argv. Every sidecar launched
+by that backend process shares it, so a sidecar left running by an earlier
+backend refuses the new one. A missing or wrong token is refused with
+`401` and `detail: {"code": "unauthorized", "message": ...}`.
+`TorchClient::for_owned_sidecar` sends the token on every request and is used
+only for an endpoint proven to be a running sidecar this backend launched
+(a current owned-process observation of a running Torch profile at that
+endpoint whose child owns the listener).
+`TorchClient::new`, used for any other server, including a caller-named
+`connection_url`, never sends it. Neither client follows redirects, and both
+bypass proxies for loopback servers.
+
+The launcher also sets `PUMAS_TORCH_MODEL_ROOTS` (the library root plus the
+directory of each external-reference model known at launch; load paths
+outside them are refused, and a model imported by external reference after
+launch needs a Torch restart) and `PUMAS_TORCH_PARENT_PID` (the sidecar exits
+once that process is gone).
+
 ## Capability semantics
 
 - `image_generation` advertises that the provider process can execute image
@@ -83,6 +107,13 @@ A successful result is:
 }
 ```
 
+Dimensions are admitted before any generation, under the device lease. A
+request above the adapter's supported maximum is refused with
+`dimensions_exceed_limit`, whose detail also carries `max_pixels`. A request
+whose pixels exceed the budget derived from free GPU memory
+(`torch.cuda.mem_get_info`) and the adapter's per-pixel memory estimate is
+refused with `out_of_memory`.
+
 The PNG must match the requested dimensions and is limited to 8 MiB.
 `steps`, `guidance`, and `memory_policy` are adapter-reported values the
 gateway relays into public metadata unchanged. These six canonical fields are
@@ -91,15 +122,19 @@ required. Unknown additive private result fields are accepted within the
 
 ## Provider error outcomes
 
-The provider reports failures with stable codes the gateway maps to public
-errors; tracebacks and filesystem paths are never forwarded:
+The provider reports failures as `detail: {"code": ..., "message": ...}`,
+with additive typed facts where noted, on the image route and on the `/api`
+control and `/v1` text routes alike. The codes are stable and the gateway maps
+them to public errors; tracebacks, library error text and filesystem paths are
+never forwarded:
 
 | Provider outcome | Meaning |
 | --- | --- |
 | `model_unavailable` | No ready slot for `model_id`; load it in Pumas first |
 | `unsupported_model` | Slot exists but does not support image generation |
 | `runtime_busy` | One image operation per device; excess work rejected |
-| `out_of_memory` | Insufficient GPU memory |
+| `dimensions_exceed_limit` | Above the adapter's maximum, refused at admission; `max_pixels` names the limit (public 400 with the same code) |
+| `out_of_memory` | Insufficient GPU memory, at admission (budget from free memory) or during generation |
 | `cancelled` | Gateway disconnect; work stopped at a checkpoint |
 | `backend_failure` | Adapter or pipeline failure |
 | `invalid_backend_response` | Adapter returned an unusable image |
@@ -122,6 +157,9 @@ errors; tracebacks and filesystem paths are never forwarded:
 - `protocol` requires an exact match between sidecar and qualified recipe;
   mismatch fails validation before any model loads.
 - Capability entries are additive and optional.
+- Protocol stays `3` across additive changes: the authentication header, the
+  typed `{code, message}` detail and the `dimensions_exceed_limit` code. An
+  older client decodes an unknown code as `backend_failure`.
 - Requests are closed and reject unknown fields. Results require the canonical
   fields but permit bounded additive fields; changing required semantics still
   requires a protocol bump.
@@ -131,9 +169,16 @@ errors; tracebacks and filesystem paths are never forwarded:
 The sidecar's `/health` reports protocol `3` and the `image_generation`
 capability. `TorchClient` in `pumas-app-manager` admits only that protocol and
 requires the capability before it routes image requests. No runtime recipe
-pins a dependency set: each install records its resolved packages, and
-`torch-server/runtime/verified-runtimes.json` records verified combinations as
-evidence only.
+pins a dependency set by default: each install resolves current package
+versions and records them, and `torch-server/runtime/verified-runtimes.json`
+records verified combinations as evidence. An installed runtime is *verified*
+when every package its combination recorded is installed at exactly the
+recorded version; a recorded package that is absent fails the match. This is a
+version comparison only, not a hash or provenance claim (the per-install hash
+lock separately binds the downloaded wheels). `preview_torch_runtime` accepts
+an optional `verified_versions: true` for a selection that exactly matches a
+verified combination; that install is then constrained to the record's
+versions, and the desktop offers it as "Install the verified package versions".
 
 ## Verification locations
 

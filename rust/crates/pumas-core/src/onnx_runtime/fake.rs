@@ -37,6 +37,8 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
                 .embedding_dimensions
                 .unwrap_or(DEFAULT_FAKE_EMBEDDING_DIMENSIONS),
             state: OnnxSessionState::Loaded,
+            // The fake reads no model config, so it declares no token limit.
+            max_input_tokens: None,
         };
         let mut sessions = self
             .sessions

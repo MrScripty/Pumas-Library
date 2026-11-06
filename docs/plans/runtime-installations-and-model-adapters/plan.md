@@ -27,7 +27,7 @@ loaded dynamically from an explicit path) is independent of this plan and is own
 
 ## 1. Objective
 
-Reuse the generic artifact-acquisition direction in `docs/breif/s3-model-fetch.md` for obtaining verified bytes. Make app-manager the coherent application-facing manager of installed external runtimes/executables, with native llama.cpp and Python/Torch as concrete implementations. Allow an open population of model adapters to be registered independently of a Pumas build. A model may use a standard loader, that loader plus supplemental requirements, or approved custom loading/execution code.
+Reuse the generic artifact-acquisition direction in `docs/brief/s3-model-fetch.md` for obtaining verified bytes. Make app-manager the coherent application-facing manager of installed external runtimes/executables, with native llama.cpp and Python/Torch as concrete implementations. Allow an open population of model adapters to be registered independently of a Pumas build. A model may use a standard loader, that loader plus supplemental requirements, or approved custom loading/execution code.
 
 The externally meaningful chain is:
 

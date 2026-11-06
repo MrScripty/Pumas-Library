@@ -237,6 +237,38 @@ impl From<pumas_library::models::DiskSpaceResponse> for FfiDiskSpaceResponse {
     }
 }
 
+/// A recorded runtime process a stop left running, and why.
+#[derive(uniffi::Record)]
+pub struct FfiRuntimeStopSkip {
+    pub pid: Option<u32>,
+    pub pid_file: String,
+    pub reason: String,
+}
+
+/// The outcome of a runtime stop: what stopped and what was skipped.
+#[derive(uniffi::Record)]
+pub struct FfiRuntimeStopReport {
+    pub stopped: Vec<u32>,
+    pub skipped: Vec<FfiRuntimeStopSkip>,
+}
+
+impl From<pumas_library::process::RuntimeStopReport> for FfiRuntimeStopReport {
+    fn from(r: pumas_library::process::RuntimeStopReport) -> Self {
+        Self {
+            stopped: r.stopped,
+            skipped: r
+                .skipped
+                .into_iter()
+                .map(|skip| FfiRuntimeStopSkip {
+                    pid: skip.pid,
+                    pid_file: skip.pid_file.to_string_lossy().into_owned(),
+                    reason: skip.reason,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(uniffi::Record)]
 pub struct FfiAppResourceUsage {
     pub gpu_memory: Option<u64>,

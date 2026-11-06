@@ -35,7 +35,18 @@ impl PumasApi {
     }
 
     /// Stop Ollama processes.
+    ///
+    /// Returns whether any process stopped. Use [`Self::stop_ollama_report`]
+    /// to learn which recorded processes were left running and why.
     pub async fn stop_ollama(&self) -> Result<bool> {
+        self.stop_ollama_report()
+            .await
+            .map(|report| report.stopped_any())
+    }
+
+    /// Stop Ollama processes and report every recorded process that was stopped
+    /// or skipped, with the reason for each skip.
+    pub async fn stop_ollama_report(&self) -> Result<crate::process::RuntimeStopReport> {
         self.try_primary()?;
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
@@ -43,11 +54,11 @@ impl PumasApi {
         };
 
         if let Some(mgr) = process_manager {
-            tokio::task::spawn_blocking(move || mgr.stop_ollama())
+            tokio::task::spawn_blocking(move || mgr.stop_ollama_report())
                 .await
                 .map_err(|e| PumasError::Other(format!("Failed to join stop_ollama task: {}", e)))?
         } else {
-            Ok(false)
+            Ok(crate::process::RuntimeStopReport::default())
         }
     }
 
@@ -123,7 +134,18 @@ impl PumasApi {
     }
 
     /// Stop the Torch inference server.
+    ///
+    /// Returns whether any process stopped. Use [`Self::stop_torch_report`]
+    /// to learn which recorded processes were left running and why.
     pub async fn stop_torch(&self) -> Result<bool> {
+        self.stop_torch_report()
+            .await
+            .map(|report| report.stopped_any())
+    }
+
+    /// Stop the Torch inference server and report every recorded process that was stopped
+    /// or skipped, with the reason for each skip.
+    pub async fn stop_torch_report(&self) -> Result<crate::process::RuntimeStopReport> {
         self.try_primary()?;
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
@@ -131,11 +153,11 @@ impl PumasApi {
         };
 
         if let Some(mgr) = process_manager {
-            tokio::task::spawn_blocking(move || mgr.stop_torch())
+            tokio::task::spawn_blocking(move || mgr.stop_torch_report())
                 .await
                 .map_err(|e| PumasError::Other(format!("Failed to join stop_torch task: {}", e)))?
         } else {
-            Ok(false)
+            Ok(crate::process::RuntimeStopReport::default())
         }
     }
 

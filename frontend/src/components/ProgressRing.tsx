@@ -24,7 +24,8 @@ export function ProgressRing({
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
+      {/* Decorative: callers render the progress as visible text. */}
+      <svg width={size} height={size} className="-rotate-90" aria-hidden="true" focusable="false">
         <circle
           cx={size / 2}
           cy={size / 2}

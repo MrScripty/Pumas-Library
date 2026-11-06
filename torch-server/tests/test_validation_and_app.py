@@ -358,11 +358,6 @@ class TorchValidationTests(unittest.TestCase):
             {
                 "model": "local-chat",
                 "messages": [{"role": "user", "content": "Hello"}],
-                "max_tokens": 4097,
-            },
-            {
-                "model": "local-chat",
-                "messages": [{"role": "user", "content": "Hello"}],
                 "max_tokens": "12",
             },
             {

@@ -27,7 +27,8 @@ interface VersionSelectorProps {
   installNetworkStatus?: 'idle' | 'downloading' | 'stalled' | 'failed';
   defaultVersion?: string | null;
   onMakeDefault?: (tag: string | null) => Promise<boolean>;
-  diskSpacePercent?: number;
+  /** Disk usage of the library volume; null while unknown or when it could not be read. */
+  diskSpacePercent?: number | null;
   hasNewVersion?: boolean;
   latestVersion?: string | null;
 }
@@ -45,7 +46,7 @@ export function VersionSelector({
   installNetworkStatus = 'idle',
   defaultVersion,
   onMakeDefault,
-  diskSpacePercent = 0,
+  diskSpacePercent = null,
   hasNewVersion = false,
   latestVersion = null,
 }: VersionSelectorProps) {
@@ -107,6 +108,7 @@ export function VersionSelector({
     displayVersion,
     emphasizeInstall,
     folderIconColor,
+    diskUsageLabel,
     hasInstallActivity,
     hasInstalledVersions,
     hasVersionsToShow,
@@ -211,6 +213,7 @@ export function VersionSelector({
           showOpenedIndicator={showOpenedIndicator}
           isOpeningPath={isOpeningPath}
           folderIconColor={folderIconColor}
+          diskUsageLabel={diskUsageLabel}
           emphasizeInstall={emphasizeInstall}
           hasNewVersion={hasNewVersion}
           latestVersion={latestVersion}

@@ -1,10 +1,15 @@
 """Resolve or stage-install an official Torch wheel and optional image adapter.
 
-Run this with the interpreter that will own the environment. The report and
-hash-locked requirements retain provenance for review before staged code is used.
+Run this with the interpreter that will own the environment. Installation has
+two phases. Without `--install`, pip resolves once (a dry run) and the resolver
+writes `requirements.txt`, a per-install hash lock, with `resolution.json` and
+pip's report. The caller validates that lock, then runs `--install`, which
+installs exactly the lock with `--require-hashes --no-deps` and records every
+staged file, checked against its wheel RECORD, in `installed-files.json`.
 """
 
 import argparse
+import base64
 import csv
 from email.parser import Parser
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -245,6 +250,7 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
             if canonicalize_name(metadata["Name"]) != name or not matches:
                 raise ValueError("Staged distribution identity differs from the pip report")
     claimed = set()
+    recorded = {}
     for record in records:
         if record.is_symlink() or record.parent.is_symlink():
             raise ValueError("Staged wheel RECORD is linked")
@@ -293,10 +299,17 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 claimed.add(relative)
                 if len(claimed) > 200_000:
                     raise ValueError("Staged package manifest is too large")
-                # pip verified supplied wheel download hashes. Installed RECORD
-                # checksums are retained metadata, not another content gate.
                 if file == record and (recorded_hash or recorded_size):
                     raise ValueError("Staged wheel RECORD must not self-hash")
+                # The RECORD came from a wheel pip verified against the lock, so
+                # each recorded digest is a content gate for the file it names.
+                if recorded_hash:
+                    algorithm, _, value = recorded_hash.partition("=")
+                    if algorithm != "sha256" or not value:
+                        raise ValueError(
+                            f"Staged wheel RECORD uses an unsupported digest for {relative[:256]!r}"
+                        )
+                    recorded[relative] = value
     files = []
     for root, dirs, names in os.walk(target, followlinks=False):
         for name in (*dirs, *names):
@@ -309,6 +322,12 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
             if relative not in claimed:
                 raise ValueError("Staged packages contain an unreported file")
             digest, size = staged_file_digest(file)
+            expected = recorded.get(relative)
+            if (
+                expected is not None
+                and base64.urlsafe_b64encode(digest).rstrip(b"=").decode() != expected
+            ):
+                raise ValueError(f"Staged file differs from its wheel RECORD: {relative[:256]!r}")
             files.append({"path": relative, "sha256": digest.hex(), "size": size})
             if len(files) > 200_000:
                 raise ValueError("Staged package manifest is too large")
@@ -318,9 +337,11 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
 
 
 # Image adapters name their packages without versions: pip resolves current
-# releases at install time, the exact versions and hashes are recorded with
-# the runtime, and the install probe checks the adapter imports. Verified
-# combinations are evidence, not install pins (runtime/verified-runtimes.json).
+# releases at install time into the per-install hash lock, which is then
+# installed with --require-hashes, and the install probe checks the adapter
+# imports. Verified combinations (runtime/verified-runtimes.json) are evidence,
+# not install pins, unless the user opts into a record's versions; the
+# installer then passes them here as --constraints.
 IMAGE = (
     "torchvision",
     "diffusers",
@@ -1102,10 +1123,14 @@ def requirements_from_report(
                 raise ValueError("Torchvision build differs from the selected Torch build")
         if name == "nunchaku" and (adapter != "nunchaku" or digest.lower() != NUNCHAKU_SHA256):
             raise ValueError("Nunchaku artifact differs from the qualified wheel")
-        lines.append(f"{name} @ {url} --hash=sha256:{digest}")
-        artifacts.append(
-            {"name": name, "version": item["metadata"]["version"], "url": url, "sha256": digest}
-        )
+        artifact = {
+            "name": name,
+            "version": item["metadata"]["version"],
+            "url": url,
+            "sha256": digest,
+        }
+        lines.append(lock_line(artifact))
+        artifacts.append(artifact)
     required = {"torch", *CORE}
     if adapter in ("flux2", "nunchaku"):
         required.update(
@@ -1138,6 +1163,90 @@ def requirements_from_report(
         "machine": platform.machine(),
         "artifacts": artifacts,
     }
+
+
+def lock_line(artifact: dict) -> str:
+    """One hash-locked requirement for an exact resolved wheel."""
+    return f"{artifact['name']} @ {artifact['url']} --hash=sha256:{artifact['sha256']}"
+
+
+def select_official_torch_wheel(
+    version: str, build: str, index_loader=torch_index_links, ordered_tags=None
+) -> dict:
+    """This interpreter's exact official Torch wheel on one channel, with the
+    SHA-256 the official index publishes for it.
+
+    Matching is `wheel_match`, as in `discover_release_options`. Among several
+    compatible wheels the one with this interpreter's most preferred tag wins,
+    as pip would choose. Raises LookupError when none matches and ValueError
+    when the matching wheel carries no index SHA-256.
+    """
+    if ordered_tags is None:
+        ordered_tags = [str(tag) for tag in packaging_tags.sys_tags()]
+    rank = {tag: position for position, tag in enumerate(ordered_tags)}
+    candidates = []
+    for href in index_loader(build):
+        wheel = wheel_match(href, version, build, set(rank))
+        if wheel is None:
+            continue
+        filename = unquote(urlparse(wheel["wheelUrl"]).path.rsplit("/", 1)[-1])
+        try:
+            wheel_tags = {str(tag) for tag in parse_wheel_filename(filename)[3]}
+        except (InvalidWheelFilename, InvalidVersion):
+            continue
+        candidates.append((min(rank[tag] for tag in wheel_tags if tag in rank), wheel))
+    if not candidates:
+        raise LookupError(f"No official Torch {version}+{build} wheel matches this interpreter")
+    _, wheel = min(candidates, key=lambda candidate: candidate[0])
+    if wheel["sha256"] is None:
+        raise ValueError(f"The official {build} index publishes no SHA-256 for {wheel['wheelUrl']}")
+    return wheel
+
+
+def read_install_lock(output: Path, version: str, build: str, adapter: str) -> dict:
+    """Read the phase-1 resolution and check that its hash lock is exactly the
+    resolution's artifacts for this selection, one hash-bearing line each."""
+    resolution = json.loads((output / "resolution.json").read_text(encoding="utf-8"))
+    if (
+        resolution["release"] != version
+        or resolution["build"] != build
+        or resolution["adapter"] != adapter
+    ):
+        raise ValueError("The hash lock was resolved for another selection")
+    artifacts = resolution["artifacts"]
+    if not isinstance(artifacts, list) or not artifacts:
+        raise ValueError("The hash lock names no artifacts")
+    lines = (output / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    if lines != [lock_line(artifact) for artifact in artifacts]:
+        raise ValueError("The hash lock differs from its resolution")
+    return resolution
+
+
+def installed_artifacts_match_lock(report: dict, artifacts: list[dict]) -> None:
+    """The phase-2 pip report must install exactly the locked wheels."""
+    entries = report.get("install")
+    if not isinstance(entries, list):
+        raise ValueError("The pip installation report contains no artifact list")
+    installed = sorted(
+        (
+            canonicalize_name(item["metadata"]["name"]),
+            item["metadata"]["version"],
+            item["download_info"]["url"],
+            item["download_info"]["archive_info"]["hashes"]["sha256"].lower(),
+        )
+        for item in entries
+    )
+    locked = sorted(
+        (
+            canonicalize_name(artifact["name"]),
+            artifact["version"],
+            artifact["url"],
+            artifact["sha256"].lower(),
+        )
+        for artifact in artifacts
+    )
+    if installed != locked:
+        raise ValueError("Installed artifacts differ from the hash lock")
 
 
 def resolution_failure(
@@ -1249,8 +1358,15 @@ def main() -> None:
         parser.error("--python-candidate is only valid with --release-options")
     if args.install and args.target is None:
         parser.error("--install requires an explicit staged --target")
-    if args.progress_file is not None and not args.install:
-        parser.error("--progress-file is only valid with --install")
+    if args.install and (
+        args.constraints is not None
+        or args.torch_wheel is not None
+        or args.torch_sha256 is not None
+    ):
+        parser.error(
+            "--install installs only the validated hash lock; constraints and the Torch "
+            "wheel belong to the resolution that wrote it"
+        )
     if not args.install and args.target is not None:
         parser.error("--target is only valid with --install")
     if args.torch_sha256 is not None and args.torch_wheel is None:
@@ -1281,8 +1397,6 @@ def main() -> None:
         or args.progress_file.resolve().parent != args.output.resolve()
     ):
         parser.error("--progress-file must be download-progress.json inside --output")
-    if args.torch_wheel is None and not args.install:
-        parser.error("Resolution requires --torch-wheel from official discovery")
     try:
         target = native_target(
             sys.platform,
@@ -1305,46 +1419,16 @@ def main() -> None:
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     args.output.mkdir(parents=True, exist_ok=True)
-    if args.install:
-        if any((args.output / name).exists() for name in ("requirements.txt", "resolution.json")):
-            parser.error("Install output must not contain a previous lock or resolution")
-        if args.target.is_symlink() or (
-            args.target.exists() and (not args.target.is_dir() or any(args.target.iterdir()))
-        ):
-            parser.error("Staged --target must be an empty directory and not a symlink")
-        args.target.mkdir(parents=True, exist_ok=True)
     cache_dir = args.cache_dir or args.output / "pip-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    report_path = args.output / "pip-resolution.json"
-    torch_requirement = (
-        args.version
-        if target == "macos" and args.build == "cpu"
-        else f"{args.version}+{args.build}"
-    )
-    pip_arguments = [
-        "--isolated",
-        "install",
-        "--cache-dir",
-        str(cache_dir),
-        *(["--target", str(args.target)] if args.install else ["--dry-run"]),
-        "--report",
-        str(report_path),
-        "--ignore-installed",
-        *(["--constraint", str(args.constraints)] if args.constraints is not None else []),
-        "--only-binary=:all:",
-        "--index-url",
-        f"https://download.pytorch.org/whl/{args.build}",
-        "--extra-index-url",
-        "https://pypi.org/simple",
-        (
-            f"torch @ {args.torch_wheel}"
-            + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else "")
-        )
-        if args.torch_wheel is not None
-        else f"torch=={torch_requirement}",
-        *CORE,
-        *extras,
-    ]
+    if args.install:
+        install_from_lock(parser, args, cache_dir)
+    else:
+        resolve_lock(parser, args, target, extras, cache_dir)
+
+
+def run_pip(args: argparse.Namespace, pip_arguments: list[str]) -> subprocess.CompletedProcess:
+    """Run pip isolated, through the download-progress worker when requested."""
     child_command = [sys.executable, "-I", "-B", "-m", "pip", *pip_arguments]
     if args.progress_file is not None:
         args.progress_file.unlink(missing_ok=True)
@@ -1360,6 +1444,70 @@ def main() -> None:
     completed = subprocess.run(child_command, check=False, capture_output=True, text=True)
     print(completed.stdout, end="", flush=True)
     print(completed.stderr, end="", file=sys.stderr, flush=True)
+    return completed
+
+
+def resolve_lock(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    target: str,
+    extras: tuple[str, ...],
+    cache_dir: Path,
+) -> None:
+    """Phase 1: resolve once (pip dry run) and write the per-install hash lock.
+
+    The Torch wheel is pinned by URL and SHA-256: either the one the caller
+    passes from discovery, or the one this interpreter's official index
+    publishes, chosen with the same matching `discover_release_options` uses.
+    """
+    if any((args.output / name).exists() for name in ("requirements.txt", "resolution.json")):
+        parser.error("Resolution output must not contain a previous lock or resolution")
+    torch_requirement = (
+        args.version
+        if target == "macos" and args.build == "cpu"
+        else f"{args.version}+{args.build}"
+    )
+    if args.torch_wheel is None:
+        try:
+            selected = select_official_torch_wheel(args.version, args.build)
+        except (OSError, TimeoutError):
+            parser.exit(
+                75,
+                "Wheel index access failed; availability is inconclusive. Retry with network access.\n",
+            )
+        except LookupError:
+            parser.exit(
+                4,
+                f"No official Torch {args.version}+{args.build} wheel matches this interpreter "
+                "and platform. Choose another build or installed Python.\n",
+            )
+        except ValueError as error:
+            parser.exit(3, f"Invalid wheel resolution: {error}\n")
+        args.torch_wheel, args.torch_sha256 = selected["wheelUrl"], selected["sha256"]
+    report_path = args.output / "pip-resolution.json"
+    completed = run_pip(
+        args,
+        [
+            "--isolated",
+            "install",
+            "--cache-dir",
+            str(cache_dir),
+            "--dry-run",
+            "--report",
+            str(report_path),
+            "--ignore-installed",
+            *(["--constraint", str(args.constraints)] if args.constraints is not None else []),
+            "--only-binary=:all:",
+            "--index-url",
+            f"https://download.pytorch.org/whl/{args.build}",
+            "--extra-index-url",
+            "https://pypi.org/simple",
+            f"torch @ {args.torch_wheel}"
+            + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else ""),
+            *CORE,
+            *extras,
+        ],
+    )
     if completed.returncode:
         code, message = resolution_failure(
             completed.stderr, args.version, args.build, args.adapter, torch_requirement
@@ -1371,14 +1519,11 @@ def main() -> None:
             report, args.version, args.build, args.adapter
         )
         torch_artifact = next(item for item in resolution["artifacts"] if item["name"] == "torch")
-        if (args.torch_wheel is not None and torch_artifact["url"] != args.torch_wheel) or (
+        if torch_artifact["url"] != args.torch_wheel or (
             args.torch_sha256 is not None
             and torch_artifact["sha256"].lower() != args.torch_sha256.lower()
         ):
             raise ValueError("Resolved Torch artifact differs from the selected wheel")
-        manifest = (
-            installed_file_manifest(args.target, resolution["artifacts"]) if args.install else None
-        )
     except (KeyError, TypeError, ValueError, OSError) as error:
         parser.exit(3, f"Invalid wheel resolution: {error}\n")
     (args.output / "requirements.txt").write_text(
@@ -1387,10 +1532,67 @@ def main() -> None:
     (args.output / "resolution.json").write_text(
         json.dumps(resolution, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
-    if manifest is not None:
-        (args.output / "installed-files.json").write_text(
-            json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n"
-        )
+
+
+def install_from_lock(
+    parser: argparse.ArgumentParser, args: argparse.Namespace, cache_dir: Path
+) -> None:
+    """Phase 2: install exactly the validated hash lock into the staged target.
+
+    pip runs with `--require-hashes --no-deps --no-index`, so it installs only
+    the locked wheels and refuses any byte that differs from a locked SHA-256.
+    """
+    if any((args.output / name).exists() for name in ("installed-files.json", "pip-install.json")):
+        parser.error("Install output must not contain a previous installation")
+    if args.target.is_symlink() or (
+        args.target.exists() and (not args.target.is_dir() or any(args.target.iterdir()))
+    ):
+        parser.error("Staged --target must be an empty directory and not a symlink")
+    try:
+        resolution = read_install_lock(args.output, args.version, args.build, args.adapter)
+    except (KeyError, TypeError, ValueError, OSError) as error:
+        parser.exit(3, f"Invalid install lock: {error}\n")
+    args.target.mkdir(parents=True, exist_ok=True)
+    report_path = args.output / "pip-install.json"
+    completed = run_pip(
+        args,
+        [
+            "--isolated",
+            "install",
+            "--cache-dir",
+            str(cache_dir),
+            "--target",
+            str(args.target),
+            "--report",
+            str(report_path),
+            "--ignore-installed",
+            "--no-deps",
+            "--require-hashes",
+            "--only-binary=:all:",
+            "--no-index",
+            "--requirement",
+            str(args.output / "requirements.txt"),
+        ],
+    )
+    if completed.returncode:
+        if "do not match the hashes" in completed.stderr.lower():
+            parser.exit(
+                3,
+                "Locked installation failed: a downloaded wheel does not match its SHA-256 "
+                "in the hash lock, so nothing was installed\n",
+            )
+        code, message = resolution_failure(completed.stderr, args.version, args.build, args.adapter)
+        # The lock is already resolved: only access can be inconclusive here.
+        parser.exit(code if code == 75 else 3, f"Locked installation failed: {message}\n")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        installed_artifacts_match_lock(report, resolution["artifacts"])
+        manifest = installed_file_manifest(args.target, resolution["artifacts"])
+    except (KeyError, TypeError, ValueError, OSError) as error:
+        parser.exit(3, f"Invalid locked installation: {error}\n")
+    (args.output / "installed-files.json").write_text(
+        json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 if __name__ == "__main__":

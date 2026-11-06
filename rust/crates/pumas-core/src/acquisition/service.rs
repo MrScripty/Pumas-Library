@@ -2499,21 +2499,26 @@ struct AcquisitionSink<'a> {
 
 #[async_trait::async_trait]
 impl HttpArtifactSink for AcquisitionSink<'_> {
-    async fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
+    async fn write_all(&mut self, chunks: Vec<bytes::Bytes>) -> Result<()> {
         let mut file = self
             .file
             .take()
             .ok_or_else(|| invalid("Partial file effect is unfinished"))?;
-        let written = bytes.to_owned();
-        let bytes = written.clone();
+        // `Bytes` clones share the received buffers; no payload is copied.
+        let written = chunks.clone();
         self.file = Some(
             owned(self.context, "write acquisition partial file", move || {
-                write_chunk(&mut file, &bytes)?;
+                for chunk in &chunks {
+                    write_chunk(&mut file, chunk)?;
+                }
                 Ok(file)
             })
             .await?,
         );
-        self.hash.update(&written);
+        // Hash only bytes the file accepted, in write order.
+        for chunk in &written {
+            self.hash.update(chunk);
+        }
         Ok(())
     }
     async fn flush(&mut self) -> Result<()> {

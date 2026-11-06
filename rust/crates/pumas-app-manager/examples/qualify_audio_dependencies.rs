@@ -74,7 +74,7 @@ async fn install_and_qualify(
     let source = prepared?;
     settled?;
     let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(
-        manager.version_path("v2.10.0").join("runtime.json"),
+        manager.version_path("v2.10.0")?.join("runtime.json"),
     )?)?;
     std::fs::write(
         root.join(format!("audio-{phase}-runtime.json")),

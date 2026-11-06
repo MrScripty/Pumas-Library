@@ -8,7 +8,8 @@ export default defineConfig({
   },
   plugins: [react()],
   test: {
-    exclude: [...configDefaults.exclude, 'conformance/**'],
+    // Library-only tests need the compiled-out feature flag; see vitest.library-only.config.ts.
+    exclude: [...configDefaults.exclude, 'conformance/**', 'src/**/*.library-only.test.{ts,tsx}'],
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',

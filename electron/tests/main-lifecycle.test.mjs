@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
@@ -14,7 +15,7 @@ const requireMain = createRequire(mainUrl);
 const { LibraryUpgradeCoordinator } = requireMain('./library-upgrade.js');
 const { BackendStartupError } = requireMain('./backend-startup.js');
 
-function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
+function createMainHarness({ root, bridgeRuntime, upgradeRuntime, packaged = false, argv = [] } = {}) {
   const app = new EventEmitter();
   const ipcMain = new EventEmitter();
   const handlers = new Map();
@@ -26,7 +27,7 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
   let ready;
   const readiness = new Promise((resolve) => { ready = resolve; });
   Object.assign(app, {
-    isPackaged: false,
+    isPackaged: packaged,
     commandLine: { appendSwitch() {} },
     requestSingleInstanceLock: () => true,
     whenReady: () => readiness,
@@ -37,13 +38,41 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
       for (const window of windows) if (!window.destroyed) window.destroy();
     },
   });
+  const distDir = root ? join(root, 'electron', 'dist') : fileURLToPath(new URL('../dist', import.meta.url));
+  const resourcesPath = root ? join(root, 'resources') : '/opt/pumas/resources';
+  const appEntryUrl = pathToFileURL(packaged
+    ? join(resourcesPath, 'frontend', 'index.html')
+    : join(distDir, '..', '..', 'frontend', 'dist', 'index.html')).href;
+  const createContents = () => {
+    const contents = new EventEmitter();
+    const session = {
+      permissionRequestHandler: null,
+      permissionCheckHandler: null,
+      devicePermissionHandler: null,
+      setPermissionRequestHandler(handler) { this.permissionRequestHandler = handler; },
+      setPermissionCheckHandler(handler) { this.permissionCheckHandler = handler; },
+      setDevicePermissionHandler(handler) { this.devicePermissionHandler = handler; },
+    };
+    Object.assign(contents, {
+      session,
+      windowOpenHandler: null,
+      mainFrame: { url: appEntryUrl },
+      setWindowOpenHandler(handler) { contents.windowOpenHandler = handler; },
+      sent: [],
+      send(channel, payload) { contents.sent.push([channel, payload]); },
+      devToolsOpened: 0,
+      openDevTools() { contents.devToolsOpened += 1; },
+    });
+    return contents;
+  };
   class BrowserWindow extends EventEmitter {
     destroyed = false;
-    contents = new EventEmitter();
-    constructor() {
+    contents = createContents();
+    loads = [];
+    constructor(options) {
       super();
+      this.options = options;
       this.contents.isDestroyed = () => this.destroyed;
-      this.contents.mainFrame = {};
       windows.push(this);
     }
     static getAllWindows() { return windows.filter((window) => !window.destroyed); }
@@ -52,31 +81,40 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
       return this.contents;
     }
     isDestroyed() { return this.destroyed; }
-    async loadFile() {}
+    async loadFile(file) { this.loads.push({ file }); }
+    async loadURL(url) { this.loads.push({ url }); }
     destroy() {
       this.destroyed = true;
       this.emit('closed');
     }
   }
+  const externalOpens = [];
+  const shell = { async openExternal(url) { externalOpens.push(url); } };
   const logger = {
     transports: { file: {}, console: {} },
-    info() {}, warn() {}, error(...args) { errors.push(args); },
+    debug() {}, info() {}, warn() {}, error(...args) { errors.push(args); },
+  };
+  const menus = [];
+  const Menu = {
+    buildFromTemplate: (template) => ({ template }),
+    setApplicationMenu: (menu) => { menus.push(menu); },
   };
   const runtimeProcess = {
-    argv: [],
+    argv,
+    resourcesPath,
     env: root ? { PUMAS_RPC_BINARY: process.execPath } : {},
     platform: 'linux',
     on() {},
   };
   runInNewContext(readFileSync(mainUrl, 'utf8'), {
     exports: {},
-    __dirname: root ? join(root, 'electron', 'dist') : fileURLToPath(new URL('../dist', import.meta.url)),
+    __dirname: distDir,
     process: runtimeProcess,
     setTimeout(callback) { timers.add(callback); return callback; },
     clearTimeout(callback) { timers.delete(callback); },
     require(specifier) {
       if (specifier === 'electron') return {
-        app, BrowserWindow, ipcMain,
+        app, BrowserWindow, ipcMain, shell, Menu,
       };
       if (specifier === 'electron-log') return logger;
       if (specifier === './python-bridge' && bridgeRuntime) return bridgeRuntime.module;
@@ -91,7 +129,14 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
       return requireMain(specifier);
     },
   });
-  return { app, ipcMain, handlers, timers, windows, ready, exits, errors };
+  const appSender = () => {
+    const contents = windows[0].webContents;
+    return { sender: contents, senderFrame: contents.mainFrame };
+  };
+  return {
+    app, ipcMain, handlers, timers, windows, ready, exits, errors,
+    appEntryUrl, createContents, externalOpens, appSender, menus,
+  };
 }
 
 test('closing the native window settles presentation without accessing its destroyed getter', async () => {
@@ -121,12 +166,6 @@ function createFailedProcessRuntime() {
   const children = [];
   let now = 0;
   const module = {};
-  const server = new EventEmitter();
-  Object.assign(server, {
-    listen(_port, _host, callback) { queueMicrotask(callback); },
-    address: () => ({ port: 49152 }),
-    close(callback) { callback(); },
-  });
   runInNewContext(readFileSync(new URL('../dist/python-bridge.js', import.meta.url), 'utf8'), {
     exports: module,
     Buffer,
@@ -139,13 +178,16 @@ function createFailedProcessRuntime() {
     },
     clearTimeout(timer) { timers.delete(timer); },
     require(specifier) {
-      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
-      if (specifier === 'net') return { createServer: () => server };
+      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
       if (specifier === 'child_process') return {
-        spawn() {
+        spawn(_cmd, _args, options) {
           const child = new EventEmitter();
           child.stdout = new EventEmitter();
           child.stderr = new EventEmitter();
+          // The backend announces its bound port and this launch's nonce.
+          const nonce = options.env.PUMAS_RPC_LAUNCH_NONCE;
+          queueMicrotask(() => child.stdout.emit('data', Buffer.from(
+            `PUMAS_RPC_READY=${JSON.stringify({ version: 1, port: 49152, nonce })}\n`)));
           children.push(child);
           return child;
         },
@@ -198,7 +240,7 @@ test('failed backend startup preserves the recovery window and never publishes r
     runtime.requests[0].emit('error', new Error('connection refused'));
     await setImmediate();
     assert.equal(harness.exits.length, 0, 'failed startup must keep the recovery window open');
-    const state = harness.handlers.get('launcher:getRootState')();
+    const state = harness.handlers.get('launcher:getRootState')(harness.appSender());
     assert.equal(state.status, 'recovery-required');
     assert.equal(state.reason, 'backend-unavailable');
     assert.equal(state.action, 'select-library');
@@ -233,7 +275,7 @@ test('a migration refusal drained after exit reaches recovery instead of crashin
       child.emit('close', 1, null);
       await setImmediate();
       assert.equal(harness.exits.length, 0);
-      const state = harness.handlers.get('launcher:getRootState')();
+      const state = harness.handlers.get('launcher:getRootState')(harness.appSender());
       assert.equal(state.status, 'recovery-required');
       assert.equal(state.reason, 'migration-required');
       assert.equal(state.action, 'select-library');
@@ -287,7 +329,7 @@ for (const closeDuringUpgrade of [false, true]) {
     });
     try {
       harness.ready(); await setImmediate();
-      assert.equal(harness.handlers.get('launcher:getRootState')().reason, 'migration-required');
+      assert.equal(harness.handlers.get('launcher:getRootState')(harness.appSender()).reason, 'migration-required');
       const contents = harness.windows[0].webContents;
       const invoke = harness.handlers.get('launcher:upgradeLibrary');
       const confirmation = { oldWritersStopped: true, noDowngradeAccepted: true };
@@ -300,7 +342,7 @@ for (const closeDuringUpgrade of [false, true]) {
       const attempt = invoke(sender, confirmation);
       assert.equal(invoke(sender, confirmation), attempt);
       assert.deepEqual(JSON.parse(JSON.stringify(targets)), [{ launcherRoot: root, rustBinaryPath: process.execPath }]);
-      assert.equal((await harness.handlers.get('launcher:chooseLibraryRoot')()).reason, 'chooser-unavailable');
+      assert.equal((await harness.handlers.get('launcher:chooseLibraryRoot')(sender)).reason, 'chooser-unavailable');
       assert.equal(starts, 1, 'backend must not open before metadata work settles');
       if (closeDuringUpgrade) {
         harness.app.quit(); await setImmediate();
@@ -311,7 +353,7 @@ for (const closeDuringUpgrade of [false, true]) {
       const result = await attempt;
       assert.equal(result.status, closeDuringUpgrade ? 'upgraded' : 'ready');
       if (!closeDuringUpgrade) {
-        assert.equal(harness.handlers.get('launcher:getRootState')().status, 'ready');
+        assert.equal(harness.handlers.get('launcher:getRootState')(sender).status, 'ready');
         assert.equal(starts, 2);
         assert.equal((await invoke(sender, confirmation)).status, 'ready');
         assert.equal(targets.length, 1);
@@ -358,8 +400,9 @@ test('actual main liveness IPC validates requests and scalar results without ret
   try {
     harness.ready();
     await setImmediate();
-    const invoke = harness.handlers.get('api:call');
-    assert.equal(typeof invoke, 'function');
+    const invokeApi = harness.handlers.get('api:call');
+    assert.equal(typeof invokeApi, 'function');
+    const invoke = (_event, method, params) => invokeApi(harness.appSender(), method, params);
     for (const method of ['is_ollama_running', 'is_torch_running']) {
       for (const params of [undefined, {}]) {
         for (const value of [true, false]) {
@@ -399,6 +442,255 @@ test('actual main liveness IPC validates requests and scalar results without ret
     assert.deepEqual(harness.errors, []);
   } finally {
     for (const window of harness.windows) window.destroy();
+    harness.timers.clear();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('main installs window, navigation and permission guards that deny remote documents', async () => {
+  const harness = createMainHarness();
+  const activation = harness.app.listeners('activate')[0]();
+  await setImmediate();
+  const [window] = harness.windows;
+  const contents = window.webContents;
+  try {
+    assert.equal(typeof contents.windowOpenHandler, 'function', 'window-open handler must be installed');
+    for (const event of ['will-navigate', 'will-redirect', 'will-attach-webview']) {
+      assert.ok(contents.listenerCount(event) > 0, `${event} guard must be installed`);
+    }
+
+    // Child windows never open; validated http(s) URLs go to the system browser.
+    assert.deepEqual(contents.windowOpenHandler({ url: 'https://example.test/model' }), { action: 'deny' });
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/html,x', harness.appEntryUrl]) {
+      assert.deepEqual(contents.windowOpenHandler({ url }), { action: 'deny' });
+    }
+    await setImmediate();
+    assert.deepEqual(harness.externalOpens, ['https://example.test/model']);
+
+    for (const event of ['will-navigate', 'will-redirect']) {
+      for (const url of ['https://example.test/', 'http://127.0.0.1:3000/', 'file:///etc/passwd']) {
+        let prevented = false;
+        contents.emit(event, { preventDefault() { prevented = true; } }, url);
+        assert.equal(prevented, true, `${event} to ${url} must be denied`);
+      }
+      let prevented = false;
+      contents.emit(event, { preventDefault() { prevented = true; } }, `${harness.appEntryUrl}#models`);
+      assert.equal(prevented, false, `${event} within the application stays allowed`);
+    }
+    let webviewPrevented = false;
+    contents.emit('will-attach-webview', { preventDefault() { webviewPrevented = true; } });
+    assert.equal(webviewPrevented, true);
+
+    const { session } = contents;
+    const request = (permission, requestingUrl, isMainFrame = true) => {
+      let granted;
+      session.permissionRequestHandler(contents, permission, (value) => { granted = value; }, { requestingUrl, isMainFrame });
+      return granted;
+    };
+    for (const permission of ['media', 'geolocation', 'notifications', 'openExternal', 'fullscreen', 'clipboard-read']) {
+      assert.equal(request(permission, harness.appEntryUrl), false, `${permission} must be denied`);
+      assert.equal(session.permissionCheckHandler(contents, permission, 'file://', { requestingUrl: harness.appEntryUrl, isMainFrame: true }), false);
+    }
+    assert.equal(request('clipboard-sanitized-write', harness.appEntryUrl), true, 'copy buttons keep clipboard writes');
+    assert.equal(request('clipboard-sanitized-write', 'https://example.test/'), false);
+    assert.equal(request('clipboard-sanitized-write', harness.appEntryUrl, false), false);
+    assert.equal(session.devicePermissionHandler(), false);
+
+    // Any later renderer gets the same guards.
+    const later = harness.createContents();
+    harness.app.emit('web-contents-created', {}, later);
+    assert.deepEqual(later.windowOpenHandler({ url: 'https://example.test/other' }), { action: 'deny' });
+    assert.ok(later.listenerCount('will-navigate') > 0);
+  } finally {
+    window.destroy();
+    await activation;
+    harness.timers.clear();
+  }
+});
+
+test('main IPC refuses senders other than the application document in the main frame', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pumas-main-sender-'));
+  mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+  const calls = [];
+  class FixtureBridge {
+    isRunning() { return true; }
+    async start() {}
+    async stop() {}
+    startModelLibraryUpdateStream() {}
+    startModelDownloadUpdateStream() {}
+    startRuntimeProfileUpdateStream() {}
+    startServingStatusUpdateStream() {}
+    startStatusTelemetryUpdateStream() {}
+    stopModelLibraryUpdateStream() {}
+    stopModelDownloadUpdateStream() {}
+    stopRuntimeProfileUpdateStream() {}
+    stopServingStatusUpdateStream() {}
+    stopStatusTelemetryUpdateStream() {}
+    async call(method) { calls.push(method); return { success: true }; }
+  }
+  const harness = createMainHarness({ root, bridgeRuntime: { module: { PythonBridge: FixtureBridge } } });
+  try {
+    harness.ready();
+    await setImmediate();
+    const contents = harness.windows[0].webContents;
+    const refused = [
+      {},
+      { sender: harness.createContents(), senderFrame: contents.mainFrame },
+      { sender: contents, senderFrame: { url: harness.appEntryUrl } },
+      { sender: contents, senderFrame: null },
+    ];
+    for (const [channel, handler] of harness.handlers) {
+      // These two report refusal in their own result contracts (covered above).
+      if (channel === 'launcher:upgradeLibrary' || channel === 'launcher-root:presentation-committed') continue;
+      for (const event of refused) {
+        await assert.rejects(async () => handler(event, 'get_app_status', { app_id: 'ollama' }),
+          /sender is not the application window/, `${channel} must refuse a foreign sender`);
+      }
+    }
+    // The main frame itself, once it shows a remote document, is refused too.
+    contents.mainFrame.url = 'https://example.test/';
+    await assert.rejects(async () => harness.handlers.get('api:call')(harness.appSender(), 'get_app_status', { app_id: 'ollama' }),
+      /sender is not the application window/);
+    contents.mainFrame.url = harness.appEntryUrl;
+    assert.deepEqual(calls, [], 'refused IPC never reaches the backend');
+    assert.deepEqual(await harness.handlers.get('api:call')(harness.appSender(), 'get_app_status', { app_id: 'ollama' }), { success: true });
+    assert.deepEqual(calls, ['get_app_status']);
+  } finally {
+    for (const window of harness.windows) if (!window.destroyed) window.destroy();
+    harness.timers.clear();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('packaged builds ignore --dev and --debug and install a menu without DevTools', async () => {
+  for (const packaged of [true, false]) {
+    const harness = createMainHarness({ packaged, argv: ['electron', '.', '--dev', '--debug'] });
+    const activation = harness.app.listeners('activate')[0]();
+    await setImmediate();
+    const [window] = harness.windows;
+    try {
+      if (packaged) {
+        assert.deepEqual(window.loads, [{ file: '/opt/pumas/resources/frontend/index.html' }],
+          'a packaged build never loads the dev server');
+        assert.equal(window.options.webPreferences.devTools, false);
+        assert.equal(window.webContents.devToolsOpened, 0);
+        let prevented = false;
+        window.webContents.emit('will-navigate', { preventDefault() { prevented = true; } }, 'http://127.0.0.1:3000/');
+        assert.equal(prevented, true, 'the dev-server origin is not an application document when packaged');
+      } else {
+        assert.deepEqual(window.loads, [{ url: 'http://127.0.0.1:3000' }]);
+        assert.equal(window.options.webPreferences.devTools, true);
+        assert.equal(window.webContents.devToolsOpened, 1);
+      }
+    } finally {
+      window.destroy();
+      await activation;
+      harness.timers.clear();
+    }
+    // The menu is installed at app ready; activation alone does not set it.
+    assert.deepEqual(harness.menus, []);
+  }
+});
+
+test('the packaged application menu has no DevTools or reload entries', async () => {
+  const harness = createMainHarness({ packaged: true, argv: ['--debug'] });
+  harness.ready();
+  await setImmediate();
+  try {
+    assert.equal(harness.menus.length, 1);
+    const roles = harness.menus[0].template.map((item) => item.role);
+    assert.ok(roles.includes('editMenu'), 'copy/paste accelerators stay available');
+    for (const role of ['viewMenu', 'toggleDevTools', 'reload', 'forceReload']) {
+      assert.ok(!roles.includes(role), `${role} must not be in the packaged menu`);
+    }
+  } finally {
+    for (const window of harness.windows) if (!window.destroyed) window.destroy();
+    harness.timers.clear();
+  }
+});
+
+test('closing the window releases every renderer stream subscription, including downloads', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pumas-main-subscriptions-'));
+  mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+  const events = [];
+  class FixtureBridge {
+    isRunning() { return true; }
+    async start() {}
+    async stop() {}
+    async call() { return {}; }
+  }
+  for (const stream of ['ModelLibrary', 'ModelDownload', 'RuntimeProfile', 'ServingStatus', 'StatusTelemetry']) {
+    FixtureBridge.prototype[`start${stream}UpdateStream`] = function () { events.push(`start ${stream}`); };
+    FixtureBridge.prototype[`stop${stream}UpdateStream`] = function () { events.push(`stop ${stream}`); };
+  }
+  const harness = createMainHarness({ root, bridgeRuntime: { module: { PythonBridge: FixtureBridge } } });
+  try {
+    harness.ready();
+    await setImmediate();
+    const subscribe = (channel) => harness.handlers.get(channel)(harness.appSender());
+    subscribe('model-download:subscribe');
+    subscribe('status-telemetry:subscribe');
+    assert.deepEqual(events.filter((event) => event === 'start ModelDownload'), ['start ModelDownload']);
+
+    harness.windows[0].destroy();
+    assert.ok(events.includes('stop ModelDownload'), 'window close stops the download stream');
+    assert.ok(events.includes('stop StatusTelemetry'));
+
+    // A replacement window (macOS dock activation) must restart the stream.
+    const activation = harness.app.listeners('activate')[0]();
+    await setImmediate();
+    const replacement = harness.windows[1];
+    const sender = { sender: replacement.webContents, senderFrame: replacement.webContents.mainFrame };
+    harness.handlers.get('model-download:subscribe')(sender);
+    assert.deepEqual(events.filter((event) => event === 'start ModelDownload'),
+      ['start ModelDownload', 'start ModelDownload'], 'a leaked counter would skip this restart');
+    replacement.destroy();
+    await activation;
+  } finally {
+    for (const window of harness.windows) if (!window.destroyed) window.destroy();
+    harness.timers.clear();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('main forwards transport loss of every update stream to its renderer error channel', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pumas-main-stream-errors-'));
+  mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+  const errorListeners = new Map();
+  class FixtureBridge {
+    isRunning() { return true; }
+    async start() {}
+    async stop() {}
+    async call() { return {}; }
+  }
+  const streams = {
+    ModelLibrary: 'model-library', ModelDownload: 'model-download', RuntimeProfile: 'runtime-profile',
+    ServingStatus: 'serving-status', StatusTelemetry: 'status-telemetry',
+  };
+  for (const stream of Object.keys(streams)) {
+    FixtureBridge.prototype[`start${stream}UpdateStream`] = function (_listener, onError) {
+      errorListeners.set(stream, onError);
+    };
+    FixtureBridge.prototype[`stop${stream}UpdateStream`] = function () {};
+  }
+  const harness = createMainHarness({ root, bridgeRuntime: { module: { PythonBridge: FixtureBridge } } });
+  try {
+    harness.ready();
+    await setImmediate();
+    for (const channel of ['model-download', 'runtime-profile', 'serving-status', 'status-telemetry']) {
+      harness.handlers.get(`${channel}:subscribe`)(harness.appSender());
+    }
+    const contents = harness.windows[0].webContents;
+    for (const [stream, channel] of Object.entries(streams)) {
+      const onError = errorListeners.get(stream);
+      assert.equal(typeof onError, 'function', `${stream} must be started with an error listener`);
+      onError(`${stream} stream ended`);
+      assert.deepEqual(JSON.parse(JSON.stringify(contents.sent.at(-1))), [`${channel}:error`, { message: `${stream} stream ended` }]);
+    }
+    errorListeners.get('ModelLibrary')('x'.repeat(5000));
+    assert.equal(contents.sent.at(-1)[1].message.length, 1024, 'messages stay within the renderer contract');
+  } finally {
+    for (const window of harness.windows) if (!window.destroyed) window.destroy();
     harness.timers.clear();
     rmSync(root, { recursive: true, force: true });
   }

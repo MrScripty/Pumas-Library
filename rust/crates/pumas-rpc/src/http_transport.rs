@@ -4,8 +4,9 @@
 //! connections ourselves because a shutdown deadline must close sockets without
 //! silently cancelling an admitted handler that may own a core operation.
 
+use crate::http_rejection::HttpRejection;
 use crate::server::ShutdownRequest;
-use axum::{body::Body, http::StatusCode, response::IntoResponse, Router};
+use axum::{body::Body, response::IntoResponse, Router};
 use hyper::{body::Incoming, Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::BTreeSet;
@@ -18,12 +19,35 @@ use std::sync::{
 };
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tower::ServiceExt;
 
 const REQUEST_QUEUE_CAPACITY: usize = 64;
+/// Open-connection bound. It covers the desktop's event streams, up to 64
+/// owner-retention bodies and 64 in-flight requests with room to spare; a
+/// connection beyond it is refused with a reason instead of being queued.
+const MAX_OPEN_CONNECTIONS: usize = 256;
+/// Time a connection may take to send a request head, including while it is
+/// idle between keep-alive requests. Response streaming is not limited.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Transport resource bounds for accepted connections.
+#[derive(Clone, Copy)]
+struct ConnectionPolicy {
+    max_connections: usize,
+    header_read_timeout: Duration,
+}
+
+impl Default for ConnectionPolicy {
+    fn default() -> Self {
+        Self {
+            max_connections: MAX_OPEN_CONNECTIONS,
+            header_read_timeout: HEADER_READ_TIMEOUT,
+        }
+    }
+}
 /// Producer-only classification for a response that owns observations, never
 /// an unfinished operation. Content type and caller headers cannot issue it.
 #[derive(Clone)]
@@ -127,11 +151,24 @@ fn spawn_request(tasks: &mut JoinSet<()>, app: Router, owned: OwnedRequest) {
     });
 }
 
+/// The permit is released when the connection ends, whatever its outcome.
+async fn serve_admitted_connection(
+    _permit: OwnedSemaphorePermit,
+    socket: TcpStream,
+    requests: mpsc::Sender<OwnedRequest>,
+    stopping: watch::Receiver<Option<Instant>>,
+    shutdown: ShutdownRequest,
+    header_read_timeout: Duration,
+) -> Result<(), &'static str> {
+    serve_connection(socket, requests, stopping, shutdown, header_read_timeout).await
+}
+
 async fn serve_connection(
     socket: TcpStream,
     requests: mpsc::Sender<OwnedRequest>,
     mut stopping: watch::Receiver<Option<Instant>>,
     shutdown: ShutdownRequest,
+    header_read_timeout: Duration,
 ) -> Result<(), &'static str> {
     let responses = Arc::new(ConnectionResponses::default());
     let service_responses = responses.clone();
@@ -148,9 +185,9 @@ async fn serve_connection(
             {
                 received
                     .await
-                    .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+                    .unwrap_or_else(|_| HttpRejection::HandlerLost.into_response())
             } else {
-                StatusCode::SERVICE_UNAVAILABLE.into_response()
+                HttpRejection::ShuttingDown.into_response()
             };
             if response.extensions().get::<ObservationStream>().is_some() {
                 responses.observations.fetch_add(1, Ordering::SeqCst);
@@ -158,7 +195,11 @@ async fn serve_connection(
             Ok::<_, Infallible>(response)
         }
     });
-    let builder = hyper::server::conn::http1::Builder::new();
+    let mut builder = hyper::server::conn::http1::Builder::new();
+    // Hyper drops its header-read deadline unless it has a timer.
+    builder
+        .timer(hyper_util::rt::TokioTimer::new())
+        .header_read_timeout(header_read_timeout);
     let connection = builder.serve_connection(TokioIo::new(socket), service);
     tokio::pin!(connection);
     let deadline = loop {
@@ -254,7 +295,32 @@ pub(crate) async fn serve(
     shutdown: ShutdownRequest,
     policy: HttpShutdownPolicy,
 ) -> anyhow::Result<()> {
-    serve_owned_listener(listener, app, shutdown, policy).await
+    serve_owned_listener(listener, app, shutdown, policy, ConnectionPolicy::default()).await
+}
+
+/// Refuse a connection beyond the bound without spawning work for it: the
+/// reasoned 503 is written into the fresh socket's send buffer and the socket
+/// is closed. Delivery is best effort; a client that already sent a large
+/// request may observe a reset instead.
+fn refuse_connection(socket: TcpStream, limit: usize) {
+    let rejection = HttpRejection::ConnectionCapacity { limit };
+    let body = rejection.body();
+    let response = format!(
+        "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncache-control: no-store\r\nconnection: close\r\ncontent-length: {}\r\n\r\n{body}",
+        rejection.status().as_u16(),
+        rejection.status().canonical_reason().unwrap_or_default(),
+        body.len()
+    );
+    // Tokio's try_* calls need reactor readiness a fresh socket does not have
+    // yet; the plain non-blocking socket writes into the empty send buffer now.
+    let Ok(mut socket) = socket.into_std() else {
+        return;
+    };
+    use std::io::{Read, Write};
+    // Consume what has already arrived so closing is less likely to reset.
+    let mut discard = [0u8; 4096];
+    let _ = socket.read(&mut discard);
+    let _ = socket.write(response.as_bytes());
 }
 
 async fn serve_owned_listener(
@@ -262,7 +328,11 @@ async fn serve_owned_listener(
     app: Router,
     shutdown: ShutdownRequest,
     policy: HttpShutdownPolicy,
+    connection_policy: ConnectionPolicy,
 ) -> anyhow::Result<()> {
+    let max_connections = connection_policy.max_connections;
+    let open_connections = Arc::new(Semaphore::new(max_connections));
+    let mut capacity_reported = false;
     let (send_request, mut receive_request) = mpsc::channel(REQUEST_QUEUE_CAPACITY);
     let (stop_connections, stopping) = watch::channel(None);
     let mut connections = JoinSet::new();
@@ -290,9 +360,25 @@ async fn serve_owned_listener(
                 tokio::time::sleep_until(accept_not_before).await;
                 listener.accept().await
             } => match accepted {
-                Ok(socket) => {
-                    connections.spawn(serve_connection(socket, send_request.clone(), stopping.clone(), shutdown.clone()));
-                }
+                Ok(socket) => match open_connections.clone().try_acquire_owned() {
+                    Ok(permit) => {
+                        capacity_reported = false;
+                        connections.spawn(serve_admitted_connection(
+                            permit,
+                            socket,
+                            send_request.clone(),
+                            stopping.clone(),
+                            shutdown.clone(),
+                            connection_policy.header_read_timeout,
+                        ));
+                    }
+                    Err(_) => {
+                        if !std::mem::replace(&mut capacity_reported, true) {
+                            tracing::warn!(max_connections, "HTTP connection bound reached; refusing new connections until one closes");
+                        }
+                        refuse_connection(socket, max_connections);
+                    }
+                },
                 Err(error) => {
                     match accept_backoff(&error, &listener) {
                         Ok(delay) => {
@@ -536,6 +622,7 @@ mod tests {
             Router::new().route("/ok", get(|| async { "complete" })),
             shutdown.clone(),
             HttpShutdownPolicy::default(),
+            ConnectionPolicy::default(),
         ));
         while attempts.load(Ordering::SeqCst) < 5 {
             attempted.notified().await;
@@ -609,6 +696,7 @@ mod tests {
             app,
             shutdown.clone(),
             HttpShutdownPolicy::default(),
+            ConnectionPolicy::default(),
         ));
         tokio::time::timeout(Duration::from_secs(5), entered.notified())
             .await
@@ -647,6 +735,7 @@ mod tests {
             Router::new(),
             shutdown.clone(),
             HttpShutdownPolicy::default(),
+            ConnectionPolicy::default(),
         ));
         attempted.notified().await;
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
@@ -680,6 +769,7 @@ mod tests {
             Router::new(),
             shutdown.clone(),
             HttpShutdownPolicy::default(),
+            ConnectionPolicy::default(),
         )
         .await
         .unwrap_err();
@@ -697,6 +787,7 @@ mod tests {
             Router::new(),
             shutdown.clone(),
             HttpShutdownPolicy::default(),
+            ConnectionPolicy::default(),
         )
         .await
         .unwrap_err();
@@ -720,6 +811,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connections_beyond_the_bound_are_refused_with_a_reason_and_slow_heads_close() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = ShutdownRequest::default();
+        let owner = tokio::spawn(serve_owned_listener(
+            listener,
+            Router::new().route("/ok", get(|| async { "complete" })),
+            shutdown.clone(),
+            HttpShutdownPolicy::from_millis(100).unwrap(),
+            ConnectionPolicy {
+                max_connections: 1,
+                header_read_timeout: Duration::from_millis(300),
+            },
+        ));
+        // The first connection holds the only slot by sending a partial head.
+        let mut held = TcpStream::connect(address).await.unwrap();
+        held.write_all(b"GET /ok HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut refused = TcpStream::connect(address).await.unwrap();
+        let mut reply = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), refused.read_to_end(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        let reply = String::from_utf8(reply).unwrap();
+        assert!(reply.starts_with("HTTP/1.1 503 "), "{reply}");
+        assert!(reply.contains("cache-control: no-store"), "{reply}");
+        let body: serde_json::Value =
+            serde_json::from_str(reply.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["error"]["code"], "connection_capacity");
+        assert!(body["error"]["message"].as_str().unwrap().contains('1'));
+        // The silent head is closed at its deadline, which frees the slot.
+        let mut rest = Vec::new();
+        let closed =
+            tokio::time::timeout(Duration::from_secs(5), held.read_to_end(&mut rest)).await;
+        assert!(closed.is_ok(), "a stalled request head must be closed");
+        let ok = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(response) = reqwest::Client::builder()
+                    .no_proxy()
+                    .build()
+                    .unwrap()
+                    .get(format!("http://{address}/ok"))
+                    .send()
+                    .await
+                {
+                    if response.status() == reqwest::StatusCode::OK {
+                        return response.text().await.unwrap();
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(ok, "complete");
+        shutdown.request();
+        owner.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn isolated_handler_panic_keeps_service_and_failed_final_receipt() {
         let app = Router::new()
             .route(
@@ -738,7 +893,12 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "handler_lost");
         assert!(!shutdown.is_requested());
         assert_eq!(
             client
@@ -961,7 +1121,7 @@ mod tests {
         let (requests, _received) = mpsc::channel(1);
         let error = tokio::time::timeout(
             Duration::from_secs(5),
-            serve_connection(socket, requests, stopping, shutdown),
+            serve_connection(socket, requests, stopping, shutdown, HEADER_READ_TIMEOUT),
         )
         .await
         .unwrap()

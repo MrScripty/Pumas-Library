@@ -26,7 +26,6 @@ describe('useInstallDialogLinks', () => {
     isApiAvailableMock.mockReturnValue(true);
     openPathMock.mockResolvedValue(undefined);
     openUrlMock.mockResolvedValue({ success: true });
-    vi.spyOn(window, 'open').mockImplementation(() => null);
   });
 
   afterEach(() => {
@@ -63,24 +62,37 @@ describe('useInstallDialogLinks', () => {
     });
 
     expect(openUrlMock).toHaveBeenCalledWith('https://example.test/release');
-    expect(window.open).not.toHaveBeenCalled();
   });
 
-  it('falls back to window.open when the bridge is unavailable or rejects a URL', async () => {
+  it('never opens an in-app window when the bridge is unavailable, refuses, or the URL is not http(s)', async () => {
+    const openWindow = vi.fn();
+    vi.stubGlobal('open', openWindow);
     const { result } = renderHook(() => useInstallDialogLinks());
 
     isApiAvailableMock.mockReturnValue(false);
     await act(async () => {
       await result.current.openReleaseLink('https://example.test/no-bridge');
     });
+    expect(openUrlMock).not.toHaveBeenCalled();
 
     isApiAvailableMock.mockReturnValue(true);
     openUrlMock.mockResolvedValue({ success: false });
     await act(async () => {
       await result.current.openReleaseLink('https://example.test/rejected');
     });
+    expect(openUrlMock).toHaveBeenCalledWith('https://example.test/rejected');
 
-    expect(window.open).toHaveBeenCalledWith('https://example.test/no-bridge', '_blank');
-    expect(window.open).toHaveBeenCalledWith('https://example.test/rejected', '_blank');
+    openUrlMock.mockClear();
+    await act(async () => {
+      await result.current.openReleaseLink('javascript:alert(1)');
+    });
+    expect(openUrlMock).not.toHaveBeenCalled();
+
+    openUrlMock.mockRejectedValue(new Error('bridge failed'));
+    await act(async () => {
+      await result.current.openReleaseLink('https://example.test/throws');
+    });
+    expect(openWindow).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

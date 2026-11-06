@@ -178,10 +178,17 @@ accept optional positive `dimensions`; when the provider ignores it (llama.cpp,
 Ollama), Pumas keeps the leading values and renormalizes (Matryoshka
 truncation), and a request for more dimensions than the model produces fails.
 The in-process ONNX adapter has fixed batch, length and dimension limits,
-which its descriptor reports. Proxied providers enforce their own context and
+which its descriptor reports, plus the loaded model's own per-input token
+limit (`input_tokens`, including special tokens) when the model config declares
+`max_position_embeddings` or `n_positions`; an input over it is refused with
+the limit named. Proxied providers enforce their own context and
 batch limits and their reported reason reaches the caller. Image inputs share
-decode-safety bounds (8 MiB per image, 4 images, 4096 px, 4 megapixels per
-request). The Torch image adapter bounds prompts at 4,000 characters and
+decode-safety bounds (8 MiB per image and 16 MiB per request, 4 images, 4096 px
+per side, 4 megapixels per image; `image_messages` also 128 messages and 128
+content parts). Image-bearing descriptors advertise them in `option_bounds`
+(`image_bytes`, `total_image_bytes`, `image_count`, `image_pixels`, `width`,
+`height`, `message_count`, `content_parts`), and a `request_limit` refusal
+names the bound and the request's value. The Torch image adapter bounds prompts at 4,000 characters and
 validates its supported dimensions and the returned PNG.
 
 `content_batch` is `{"kind":"content_batch","items":[{"parts":[...]}]}`: each
@@ -238,7 +245,10 @@ and `data_base64`. Supported conversion is 8–192 kHz, one or two channels, and
 at most 30 seconds; float32 samples must be finite and in [-1, 1]. The adapter
 converts supported input to mono 16 kHz PCM16LE; it must not relabel samples.
 Audio options reserve the existing closed language vocabulary and optional
-positive `max_output_tokens`. These declarations do not admit audio.
+`max_output_tokens`. The qualified transcription adapter generates up to a
+fixed native 512 tokens, so the descriptor advertises `max_output_tokens` 512–512
+and any other value is refused with that reason. These declarations do not
+admit audio.
 
 Production audio requires trusted selected-byte custody before loading: a
 separate SHA-256 manifest, an owner-controlled copied read source, verified

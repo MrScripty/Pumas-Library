@@ -4,14 +4,20 @@
 
 No host-language binding is supported. `bindings/support-matrix.json` is the
 authority: its contract status is `no_supported_host_bindings` with no accepted
-host tuple, and it lists every current surface (UniFFI Python, Kotlin, Swift,
-Ruby and C#, the Rustler/Elixir crate, and the Go claim) under
-`removed_surfaces`, because none has a real host consumer or host-runtime
-evidence. That removal is decided but not yet carried out: the `pumas-uniffi`
-and `pumas_rustler` crates, generators and local smoke still exist.
+host tuple. It lists each surface under `unsupported_surfaces` with a status,
+because none has a real host consumer or host-runtime evidence:
+
+- `present_pending_removal`: UniFFI Python, Kotlin, Swift, Ruby and C#, and the
+  Rustler/Elixir crate. Their removal is decided but not carried out: the
+  `pumas-uniffi` and `pumas_rustler` crates, the `uniffi` feature and derives in
+  `pumas-core`, the generators and the local smoke still exist. Nothing may
+  depend on them.
+- `claim_removed`: Go. It was only ever a documentation claim, now removed.
 
 CI does not generate or package bindings, and binding archives are not release
 assets. `pumas_rustler` does not expose the core Pumas library API.
+`scripts/release/bindings-support-matrix.test.mjs` keeps the matrix, the
+adapter documentation and the generator pins consistent.
 
 ## Boundary
 
@@ -37,9 +43,11 @@ single compatibility cohort and must come from the same build.
 ```
 
 Generated outputs belong under ignored build/output directories and must not be
-hand-edited. Some generation paths install bindgen tools when absent; pin and
-provision those tools explicitly before treating output as reproducible release
-evidence.
+hand-edited. Python, Kotlin, Swift and Ruby output comes from the in-tree
+`pumas-uniffi-bindgen`, run with `cargo run --locked`, so the generator always
+matches the workspace's locked `uniffi` version. When `uniffi-bindgen-cs` is
+absent, the script installs it with `--locked` at the commit of tag
+`v0.9.0+v0.28.3`, which matches `uniffi` 0.28.3.
 
 The C# smoke compiles generated sources, loads the matching native library, and
 calls the synchronous version function. It does not prove async APIs or domain

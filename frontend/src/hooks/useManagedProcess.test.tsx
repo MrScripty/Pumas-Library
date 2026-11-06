@@ -75,4 +75,31 @@ describe('useManagedProcess', () => {
     expect(result.current.isStopping).toBe(false);
     expect(result.current.launchError).toBe('Failed to stop Ollama');
   });
+
+  it('names why a stop left recorded processes running', async () => {
+    const launch = vi.fn<() => Promise<LaunchResponse>>().mockResolvedValue({ success: true });
+    const stop = vi.fn<() => Promise<BaseResponse & { skipped: { pid?: number; reason: string }[] }>>()
+      .mockResolvedValue({
+        success: false,
+        skipped: [
+          { pid: 4242, reason: 'skipped: not owned by Pumas' },
+          { reason: 'the PID record is unreadable' },
+        ],
+      });
+
+    const { result } = renderHook(() => useManagedProcess({
+      appName: 'Torch',
+      isRunning: true,
+      launch,
+      stop,
+    }));
+
+    await act(async () => {
+      await result.current.stopProcess();
+    });
+
+    expect(result.current.launchError).toBe(
+      'Failed to stop Torch: skipped: not owned by Pumas; the PID record is unreadable'
+    );
+  });
 });

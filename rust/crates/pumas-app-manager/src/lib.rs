@@ -11,7 +11,7 @@
 
 pub mod api_proxy;
 pub mod ollama_client;
-pub mod process;
+mod provider_http;
 pub mod torch_client;
 pub mod version_manager;
 
@@ -20,7 +20,6 @@ pub use api_proxy::PluginApiProxy;
 pub use ollama_client::{
     derive_ollama_name, OllamaClient, OllamaHttpClients, OllamaModel, RunningModel,
 };
-pub use process::{AppProcessManager, ProcessHandle, ProcessManagerFactory, ProcessStatus};
 pub use torch_client::{
     ComputeDevice, DeviceInfo, ModelSlot, SlotState, TorchClient, TorchCompatibilityError,
     TorchHandshake, TorchHandshakeFailure, TorchImageError, TorchImageResult, TorchServerConfig,

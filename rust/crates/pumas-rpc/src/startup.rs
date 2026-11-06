@@ -141,15 +141,11 @@ pub(crate) async fn start(
         Err(error) if args.attach_or_start_local_http => {
             return Err(failed_initialization(&api, &managers, custody, error.into()).await);
         }
-        Err(_) => {
-            warn!("Plugin loader initialization failed; using empty loader");
-            match PluginLoader::new_async(std::env::temp_dir().join("pumas-plugins-fallback")).await
-            {
-                Ok(loader) => loader,
-                Err(error) => {
-                    return Err(failed_initialization(&api, &managers, custody, error.into()).await)
-                }
-            }
+        Err(error) => {
+            // Never substitute another directory (a shared temp path would let
+            // any local user supply plugin configs). Serve with no plugins.
+            warn!(error = %error, "Plugin loader initialization failed; serving with no plugins");
+            PluginLoader::empty(root.join("launcher-data/plugins"))
         }
     };
     // Keep observation shares for failures before the HTTP supervisor takes custody.

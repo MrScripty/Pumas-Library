@@ -94,6 +94,30 @@ fn closed_requests_reject_unknown_fields_and_incoherent_formats() {
     }
 }
 #[test]
+fn onnx_embedding_bounds_advertise_the_model_input_token_limit() {
+    let options = |bounds: Vec<OptionBound>| {
+        bounds
+            .into_iter()
+            .map(|bound| serde_json::to_value(bound).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let with_limit = options(embedding_bounds(RuntimeProviderId::OnnxRuntime, Some(510)));
+    assert!(with_limit.contains(&serde_json::json!(
+        {"option":"input_tokens","minimum":1.0,"maximum":510.0}
+    )));
+    // A config without a positional limit advertises none, and proxied
+    // providers enforce (and report) their own context.
+    for bounds in [
+        embedding_bounds(RuntimeProviderId::OnnxRuntime, None),
+        embedding_bounds(RuntimeProviderId::LlamaCpp, Some(510)),
+    ] {
+        assert!(options(bounds)
+            .iter()
+            .all(|bound| bound["option"] != "input_tokens"));
+    }
+}
+
+#[test]
 fn request_ids_are_correlation_and_embedding_bounds_belong_to_the_provider() {
     let mut r = request();
     r.request_id = " ".into();
@@ -641,14 +665,17 @@ async fn owned_audio_route_refuses_unsupported_requests_and_stale_selection_with
         let (_root, state, worker) = controlled_audio_state(false, false).await;
         for limit in [42, 511, 513] {
             let mut value = audio_request();
-            // Each refusal reaches either the typed boundary or confirmed
-            // native non-start, and the clean following request is call one.
+            // The typed boundary refuses what the adapter's fixed bound would
+            // refuse natively, with that bound as the reason; the clean
+            // following request is call one.
             value["options"]["max_output_tokens"] = json!(limit);
             let response = operation(state.clone(), value).await;
-            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-            assert_eq!(
-                json_body(response).await["error"]["outcome"],
-                "not_admitted"
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = json_body(response).await;
+            assert_eq!(body["error"]["outcome"], "not_admitted");
+            assert!(
+                body["error"]["message"].as_str().unwrap().contains("512"),
+                "{body}"
             );
         }
         let mut classify = audio_request();

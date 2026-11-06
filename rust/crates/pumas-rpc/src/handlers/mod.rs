@@ -88,6 +88,9 @@ pub use model_operations::{handle_capabilities, handle_model_operations, handle_
 #[cfg(feature = "inference-plugins")]
 pub use openai_gateway::{handle_openai_models, handle_openai_proxy};
 
+/// Request declarations the desktop contract export projects.
+#[cfg(feature = "export-contract")]
+pub(crate) use models::ImportModelParams;
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
     get_str_param, parse_params, path_exists, require_str_param,
@@ -478,7 +481,12 @@ pub async fn handle_rpc(State(state): State<Arc<AppState>>, body: Bytes) -> impl
     if state.shutdown_request.is_requested() && !matches!(request.command, RpcCommand::Shutdown) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(JsonRpcResponse::error(id, PublicError::unavailable())),
+            Json(JsonRpcResponse::error(
+                id,
+                PublicError::unavailable_because(
+                    "Pumas is shutting down; only `shutdown` is still accepted.",
+                ),
+            )),
         );
     }
     let method = request.command.method().to_string();
@@ -1144,10 +1152,17 @@ async fn dispatch_admitted_command(
             build,
             python,
             adapter,
+            verified_versions,
         } => {
             let vm = require_version_manager(state, "torch").await?;
             let preview = vm
-                .preview_torch_runtime(&tag, &build, &python, &adapter)
+                .preview_torch_runtime_with_verified_versions(
+                    &tag,
+                    &build,
+                    &python,
+                    &adapter,
+                    verified_versions,
+                )
                 .await?;
             Ok(RpcOutcome::TorchRuntimePreview(preview.try_into()?))
         }
@@ -1878,6 +1893,24 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Typed admission explains each invalid-parameter rejection. Fixtures
+    /// shared across many methods compare the stable code and class; the
+    /// explanation is checked to be present and then set to the base sentence.
+    fn invalid_params_without_reason(mut wire: Value) -> Value {
+        if let Some(error) = wire
+            .get_mut("error")
+            .filter(|error| error["code"] == json!(-32602))
+        {
+            let message = error["message"].as_str().unwrap_or_default();
+            assert!(
+                message.starts_with("Request parameters are invalid: "),
+                "the rejection must carry a reason: {message}"
+            );
+            error["message"] = json!(crate::contract::PublicError::invalid_params().message);
+        }
+        wire
+    }
+
     #[tokio::test]
     async fn selected_version_rpc_preserves_no_manager_and_feature_gate() {
         let temp = TempDir::new().unwrap();
@@ -1992,7 +2025,7 @@ mod tests {
             let body = axum::body::to_bytes(response.into_body(), 65_536)
                 .await
                 .unwrap();
-            let wire: Value = serde_json::from_slice(&body).unwrap();
+            let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
@@ -2038,7 +2071,7 @@ mod tests {
             let body = axum::body::to_bytes(response.into_body(), 65_536)
                 .await
                 .unwrap();
-            let wire: Value = serde_json::from_slice(&body).unwrap();
+            let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
@@ -2084,7 +2117,7 @@ mod tests {
             let body = axum::body::to_bytes(response.into_body(), 65_536)
                 .await
                 .unwrap();
-            let wire: Value = serde_json::from_slice(&body).unwrap();
+            let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
@@ -2130,7 +2163,7 @@ mod tests {
             let body = axum::body::to_bytes(response.into_body(), 65_536)
                 .await
                 .unwrap();
-            let wire: Value = serde_json::from_slice(&body).unwrap();
+            let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
@@ -2176,7 +2209,7 @@ mod tests {
             let body = axum::body::to_bytes(response.into_body(), 65_536)
                 .await
                 .unwrap();
-            let wire: Value = serde_json::from_slice(&body).unwrap();
+            let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
@@ -2253,7 +2286,7 @@ mod tests {
                 let body = axum::body::to_bytes(response.into_body(), 65_536)
                     .await
                     .unwrap();
-                let wire: Value = serde_json::from_slice(&body).unwrap();
+                let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
                 #[cfg(feature = "inference-plugins")]
                 if accepted {
                     let app = if method == "launch_ollama" {
@@ -2302,7 +2335,7 @@ mod tests {
                 let body = axum::body::to_bytes(response.into_body(), 65_536)
                     .await
                     .unwrap();
-                let wire: Value = serde_json::from_slice(&body).unwrap();
+                let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
                 #[cfg(feature = "inference-plugins")]
                 if accepted {
                     assert_eq!(
@@ -2360,7 +2393,7 @@ mod tests {
                 let body = axum::body::to_bytes(response.into_body(), 65_536)
                     .await
                     .unwrap();
-                let wire: Value = serde_json::from_slice(&body).unwrap();
+                let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
                 #[cfg(feature = "inference-plugins")]
                 if accepted {
                     assert_eq!(
@@ -2416,7 +2449,7 @@ mod tests {
             let body = axum::body::to_bytes(response.into_body(), 65_536)
                 .await
                 .unwrap();
-            let wire: Value = serde_json::from_slice(&body).unwrap();
+            let wire = invalid_params_without_reason(serde_json::from_slice(&body).unwrap());
             #[cfg(feature = "inference-plugins")]
             if accepted {
                 let app_id = params
@@ -2765,7 +2798,7 @@ mod tests {
             json!({"model_id":model_id,"notes":"new","extra":true}),
         ] {
             assert_eq!(
-                update(&state, params).await,
+                invalid_params_without_reason(update(&state, params).await),
                 json!({"jsonrpc":"2.0","id":"notes-write","error":{
                     "code":-32602,"message":"Request parameters are invalid.","data":{"class":"invalid_request"},
                 }})
@@ -2861,7 +2894,7 @@ mod tests {
             json!({"model_id":model_id,"settings":[{"key":"x","label":"X","param_type":"Integer","default":null,"constraints":{"unknown":true}}]}),
         ] {
             assert_eq!(
-                update(&state, params).await,
+                invalid_params_without_reason(update(&state, params).await),
                 json!({"jsonrpc":"2.0","id":"settings-write","error":{
                     "code":-32602,"message":"Request parameters are invalid.","data":{"class":"invalid_request"},
                 }})
@@ -3095,7 +3128,7 @@ mod tests {
             let bytes = axum::body::to_bytes(response.into_body(), 65_536)
                 .await
                 .unwrap();
-            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            let value = invalid_params_without_reason(serde_json::from_slice(&bytes).unwrap());
             assert_eq!(
                 value,
                 json!({

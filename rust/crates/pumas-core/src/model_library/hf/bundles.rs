@@ -51,6 +51,7 @@ impl HuggingFaceClient {
         path: &str,
         revision: &DownloadRevision,
     ) -> Result<String> {
+        super::metadata::validate_hf_repo_id(repo_id)?;
         let url = format!(
             "{}/{}/resolve/{}/{}",
             self.hub_base_url(),

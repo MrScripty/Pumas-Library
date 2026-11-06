@@ -220,6 +220,9 @@ fn torch_directory_identity(path: &Path) -> std::io::Result<TorchDirectoryIdenti
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
             .open(path)?;
+        // SAFETY: FileInformation is a #[repr(C)] struct of u32 fields and u32
+        // arrays only, for which the all-zero bit pattern is a valid value; it
+        // is plain output storage that the call below overwrites.
         let mut info: FileInformation = unsafe { zeroed() };
         // SAFETY: the directory handle remains live and info has the Win32 layout.
         if unsafe { get_file_information_by_handle(directory.as_raw_handle(), &mut info) } == 0 {
@@ -1624,6 +1627,54 @@ fn validate_direct_torch_report(
     Ok(())
 }
 
+/// The phase-2 pip report must install exactly the accepted lock: the same
+/// distributions, versions, URLs and SHA-256 digests, no more and no fewer.
+fn validate_locked_install_report(
+    resolution: &DirectTorchResolution,
+    report: &serde_json::Value,
+) -> Result<()> {
+    let entries = report["install"]
+        .as_array()
+        .ok_or_else(|| failed("Torch pip installation report has no artifact list"))?;
+    let mut installed = entries
+        .iter()
+        .map(|item| {
+            Some((
+                item["metadata"]["name"]
+                    .as_str()?
+                    .to_ascii_lowercase()
+                    .replace('_', "-"),
+                item["metadata"]["version"].as_str()?.to_owned(),
+                item["download_info"]["url"].as_str()?.to_owned(),
+                item["download_info"]["archive_info"]["hashes"]["sha256"]
+                    .as_str()?
+                    .to_ascii_lowercase(),
+            ))
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| failed("Torch pip installation report has an incomplete artifact"))?;
+    let mut locked = resolution
+        .artifacts
+        .iter()
+        .map(|artifact| {
+            (
+                artifact.name.clone(),
+                artifact.version.clone(),
+                artifact.url.clone(),
+                artifact.sha256.to_ascii_lowercase(),
+            )
+        })
+        .collect::<Vec<_>>();
+    installed.sort();
+    locked.sort();
+    if installed != locked {
+        return Err(failed(
+            "Torch installed artifacts differ from the accepted hash lock",
+        ));
+    }
+    Ok(())
+}
+
 enum DirectTorchAttempt {
     Installed(PathBuf),
     Retry,
@@ -1685,13 +1736,18 @@ pub(crate) fn validate_staged_files(target: &Path, manifest: &StagedFilesManifes
         let item = expected
             .get(name.as_str())
             .ok_or_else(|| failed("Torch staged packages contain an unreported file"))?;
-        if entry
-            .metadata()
-            .map_err(|_| failed("Cannot inspect Torch staged package size"))?
-            .len()
-            != item.size
+        // Content, not size: a same-size substitution must be refused too.
+        let mut file = std::fs::File::open(entry.path())
+            .map_err(|_| failed("Cannot read Torch staged package file"))?;
+        let mut digest = Sha256::new();
+        let size = std::io::copy(&mut file, &mut digest)
+            .map_err(|_| failed("Cannot read Torch staged package file"))?;
+        if size != item.size
+            || !format!("{:x}", digest.finalize()).eq_ignore_ascii_case(&item.sha256)
         {
-            return Err(failed("Torch staged file size differs from its manifest"));
+            return Err(failed(format!(
+                "Torch staged file differs from its manifest: {name}"
+            )));
         }
         seen += 1;
     }
@@ -2068,40 +2124,51 @@ impl VersionInstaller {
         let resolver_output = runtime.join("resolver-result");
         let download_progress_path = resolver_output.join("download-progress.json");
         let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
-        let mut install = Command::new(&python);
-        install
-            .args(["-I", "-B"])
-            .arg(runtime.join("resolve_runtime.py"))
-            .args(["--install", "--version", version, "--build", build])
-            .args(["--adapter", &selection.adapter])
-            .arg("--progress-file")
-            .arg(&download_progress_path)
-            .arg("--target")
-            .arg(&packages)
-            .arg("--output")
-            .arg(&resolver_output)
-            .arg("--cache-dir")
-            .arg(pip_cache);
-        if let Some(constraints) = super::super::audio_runtime_recipe::install_constraints(
-            version,
-            build,
-            minor,
-            &selection.adapter,
-        )
-        .map_err(|error| failed(error.to_string()))?
-        {
+        let resolver_command = |phase: &[&str]| {
+            let mut command = Command::new(&python);
+            command
+                .args(["-I", "-B"])
+                .arg(runtime.join("resolve_runtime.py"))
+                .args(phase)
+                .args(["--version", version, "--build", build])
+                .args(["--adapter", &selection.adapter])
+                .arg("--progress-file")
+                .arg(&download_progress_path)
+                .arg("--output")
+                .arg(&resolver_output)
+                .arg("--cache-dir")
+                .arg(&pip_cache);
+            command
+        };
+
+        // Phase 1: resolve once (a pip dry run) into a per-install hash lock.
+        // The resolver pins the Torch wheel by the URL and SHA-256 that the
+        // official index publishes for this interpreter.
+        let mut resolve = resolver_command(&[]);
+        let constraints = [
+            super::super::audio_runtime_recipe::install_constraints(
+                version,
+                build,
+                minor,
+                &selection.adapter,
+            )
+            .map_err(|error| failed(error.to_string()))?,
+            selection.verified_constraints.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if !constraints.is_empty() {
             std::fs::create_dir_all(&resolver_output).map_err(PumasError::from)?;
-            let path = resolver_output.join("audio-candidate-constraints.txt");
-            std::fs::write(&path, constraints).map_err(PumasError::from)?;
-            install.arg("--constraints").arg(path);
+            let path = resolver_output.join("install-constraints.txt");
+            std::fs::write(&path, constraints.concat()).map_err(PumasError::from)?;
+            resolve.arg("--constraints").arg(path);
         }
         let status = self
             .run_runtime_command_status_with_download_progress(
-                install,
+                resolve,
                 log_path,
-                &format!(
-                    "Resolving and installing official Torch {build} wheels for Python {minor}"
-                ),
+                &format!("Resolving official Torch {build} wheels for Python {minor}"),
                 progress_tx,
                 Some(staging.clone()),
                 Some(&download_progress_path),
@@ -2116,11 +2183,9 @@ impl VersionInstaller {
                 return Ok(DirectTorchAttempt::Retry);
             }
             return Err(failed(format!(
-                "Torch package installation failed ({status}); see installation log"
+                "Torch package resolution failed ({status}); see installation log"
             )));
         }
-        // No staged package code runs until the resolver has validated the
-        // installation report and published its lock and resolution manifest.
         let resolution: DirectTorchResolution = serde_json::from_slice(
             &std::fs::read(resolver_output.join("resolution.json")).map_err(PumasError::from)?,
         )
@@ -2132,6 +2197,52 @@ impl VersionInstaller {
         .map_err(|error| failed(format!("Invalid Torch pip report: {error}")))?;
         let requirements = std::fs::read_to_string(resolver_output.join("requirements.txt"))
             .map_err(PumasError::from)?;
+        // Nothing is installed until this lock is accepted.
+        validate_direct_torch_report(
+            &resolution,
+            &report,
+            &requirements,
+            &DirectTorchSelection {
+                version,
+                build,
+                minor,
+                adapter: &selection.adapter,
+                python: &python,
+            },
+        )?;
+
+        // Phase 2: install exactly the accepted lock with
+        // `--require-hashes --no-deps --no-index`.
+        let mut install = resolver_command(&["--install"]);
+        install.arg("--target").arg(&packages);
+        let status = self
+            .run_runtime_command_status_with_download_progress(
+                install,
+                log_path,
+                &format!("Installing locked Torch {build} wheels for Python {minor}"),
+                progress_tx,
+                Some(staging.clone()),
+                Some(&download_progress_path),
+            )
+            .await?;
+        if !status.success() {
+            return Err(failed(format!(
+                "Torch locked package installation failed ({status}); see installation log"
+            )));
+        }
+        if std::fs::read_to_string(resolver_output.join("requirements.txt"))
+            .map_err(PumasError::from)?
+            != requirements
+        {
+            return Err(failed("Torch hash lock changed during installation"));
+        }
+        let installed: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(resolver_output.join("pip-install.json")).map_err(PumasError::from)?,
+        )
+        .map_err(|error| failed(format!("Invalid Torch pip installation report: {error}")))?;
+        validate_locked_install_report(&resolution, &installed)?;
+        // No staged package code runs until the staged files match the
+        // manifest checked against each wheel's RECORD.
         let manifest: StagedFilesManifest = serde_json::from_slice(
             &std::fs::read(resolver_output.join("installed-files.json"))
                 .map_err(PumasError::from)?,
@@ -2156,6 +2267,7 @@ impl VersionInstaller {
             "requirements.txt",
             "resolution.json",
             "pip-resolution.json",
+            "pip-install.json",
             "installed-files.json",
         ] {
             std::fs::copy(resolver_output.join(name), runtime.join(name))
@@ -3217,6 +3329,76 @@ mod managed_python_provenance_tests {
             }
             assert!(bootstrap.remove().is_err());
             assert!(packages.join("pip/__init__.py").exists());
+        }
+    }
+
+    #[test]
+    fn staged_files_are_compared_by_content_not_size() {
+        let target = tempfile::tempdir().unwrap();
+        let contents = b"VALUE = 'genuine wheel member'\n";
+        std::fs::write(target.path().join("member.py"), contents).unwrap();
+        let manifest = StagedFilesManifest {
+            files: vec![StagedFile {
+                path: "member.py".into(),
+                sha256: format!("{:x}", Sha256::digest(contents)),
+                size: contents.len() as u64,
+            }],
+        };
+        validate_staged_files(target.path(), &manifest).unwrap();
+
+        // Same length, different bytes: a size comparison would accept it.
+        let tampered = b"VALUE = 'altered wheel member'\n";
+        assert_eq!(tampered.len(), contents.len());
+        std::fs::write(target.path().join("member.py"), tampered).unwrap();
+        let error = validate_staged_files(target.path(), &manifest)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("differs from its manifest: member.py"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn locked_install_report_must_install_exactly_the_accepted_lock() {
+        let artifact = |name: &str, sha: char| crate::version_manager::TorchArtifact {
+            name: name.into(),
+            version: "1.0".into(),
+            url: format!("https://files.pythonhosted.org/packages/{name}-1.0.whl"),
+            sha256: sha.to_string().repeat(64),
+        };
+        let resolution = DirectTorchResolution {
+            release: "2.14.0".into(),
+            torch: "2.14.0+cpu".into(),
+            build: "cpu".into(),
+            python: "3.12".into(),
+            interpreter: "/staged/venv/python".into(),
+            implementation: "cpython".into(),
+            platform: "Linux-fixture".into(),
+            machine: "x86_64".into(),
+            adapter: "none".into(),
+            artifacts: vec![artifact("torch", 'a'), artifact("fastapi", 'b')],
+        };
+        let report_of = |artifacts: &[crate::version_manager::TorchArtifact]| {
+            serde_json::json!({
+                "install": artifacts.iter().rev().map(|artifact| serde_json::json!({
+                    "metadata": {"name": artifact.name, "version": artifact.version},
+                    "download_info": {"url": artifact.url, "archive_info": {"hashes": {"sha256": artifact.sha256}}}
+                })).collect::<Vec<_>>()
+            })
+        };
+        // Order does not matter; content does.
+        validate_locked_install_report(&resolution, &report_of(&resolution.artifacts)).unwrap();
+        for changed in [
+            vec![artifact("torch", 'a'), artifact("fastapi", 'c')],
+            vec![artifact("torch", 'a')],
+            vec![
+                artifact("torch", 'a'),
+                artifact("fastapi", 'b'),
+                artifact("extra", 'd'),
+            ],
+        ] {
+            assert!(validate_locked_install_report(&resolution, &report_of(&changed)).is_err());
         }
     }
 }

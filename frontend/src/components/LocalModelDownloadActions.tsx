@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Download, Pause } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
 import { LocalModelDownloadProgressRing } from './LocalModelDownloadProgressRing';
@@ -10,6 +11,15 @@ interface LocalModelDownloadActionsProps {
   onCancelDownload?: (downloadKey: string) => void;
   onPauseDownload?: (downloadKey: string) => void;
   onResumeDownload?: (downloadKey: string) => void;
+}
+
+/** Text equivalent of the progress ring for assistive technology. */
+function getDownloadProgressDescription(model: ModelInfo, rowState: LocalModelRowState): string {
+  const percent = Math.round(rowState.ringDegrees / 3.6);
+  if (rowState.isQueued) return 'Download queued';
+  if (model.downloadStatus === 'error') return `Download failed at ${percent}%`;
+  if (rowState.isPaused) return `Download paused at ${percent}%`;
+  return `Download ${percent}% complete`;
 }
 
 function getDownloadActionTitle(model: ModelInfo, rowState: LocalModelRowState): string | undefined {
@@ -65,10 +75,12 @@ export function LocalModelDownloadActions({
   onResumeDownload,
 }: LocalModelDownloadActionsProps) {
   const showProgressRing = rowState.isActiveDownload || rowState.isPaused || model.downloadStatus === 'error';
+  const progressDescriptionId = useId();
 
   return (
     <>
       <button
+        aria-describedby={showProgressRing ? progressDescriptionId : undefined}
         className={`relative flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent ${
           rowState.canResume || rowState.canPause ? 'cursor-pointer' : 'cursor-default'
         } ${rowState.canResume ? 'download-resume-btn' : ''} text-[hsl(var(--text-muted))]`}
@@ -84,6 +96,11 @@ export function LocalModelDownloadActions({
         )}
         <DownloadActionIcon canPause={rowState.canPause} />
       </button>
+      {showProgressRing && (
+        <span id={progressDescriptionId} className="sr-only">
+          {getDownloadProgressDescription(model, rowState)}
+        </span>
+      )}
       {onCancelDownload && (model.downloadKey ?? model.downloadRepoId) && (
         <HoldToDeleteButton
           onDelete={() => onCancelDownload((model.downloadKey ?? model.downloadRepoId) as string)}

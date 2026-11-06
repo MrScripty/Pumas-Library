@@ -166,11 +166,16 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
                 || *sample_count > u64::from(*sample_rate_hz) * 30
                 || data_base64.is_empty()
                 || declared_bytes.is_none_or(|n| n > MAX_BYTES as u64)
-                || *max_output_tokens == Some(0)
             {
                 return Err(Rejection::invalid(
-                    "audio input requires 8000-192000 Hz, 1 or 2 channels, 1 to 30 seconds of samples, nonempty data and max_output_tokens above 0",
+                    "audio input requires 8000-192000 Hz, 1 or 2 channels, 1 to 30 seconds of samples and nonempty data",
                 ));
+            }
+            if max_output_tokens.is_some_and(|tokens| tokens != super::AUDIO_MAX_OUTPUT_TOKENS) {
+                return Err(Rejection::invalid(format!(
+                    "options.max_output_tokens must be omitted or {}: the transcription adapter generates up to that fixed bound",
+                    super::AUDIO_MAX_OUTPUT_TOKENS
+                )));
             }
             // Byte decoding and normalization belong to the owned native bridge.
             // Returning this closed shape grants no runtime or model authority.

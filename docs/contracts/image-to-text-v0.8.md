@@ -172,10 +172,18 @@ data-URL envelopes. Codec validation preserves the compressed input bytes.
 | Width and height | 4096 each |
 | Pixels per image | 4,194,304 |
 | Messages and total image-bearing message parts | 128 messages, 128 total parts |
-| Generated tokens | default 512, allowed 1–2048 |
+| Generated tokens | default 512; at least 1, at most the served context window (no fixed Pumas cap) |
 | Temperature and top-p | finite, 0–2 and 0–1 respectively |
 | PNG codec allocation budget | best effort 64 MiB |
 | JPEG decoded output budget | 64 MiB, plus codec-managed scratch |
+
+These are decode-safety bounds, not a model's own image budget. Capabilities
+advertise them in `option_bounds` (`image_bytes`, `total_image_bytes`,
+`image_pixels`, `image_count`, `width`, `height`, `message_count`,
+`content_parts`, and `max_tokens` up to the served context). A request over a
+bound is refused with `request_limit` (HTTP 413), and the message names the
+bound and the request's value, for example
+`the request has more than 4 images; the limit is 4`.
 
 PNG uses `image`'s PNG codec. JPEG uses the safe `turbojpeg` 1.5.1 wrapper
 with `turbojpeg-sys` 1.2.0's checksum-pinned bundled libjpeg-turbo 3.1.0.

@@ -40,7 +40,7 @@ impl S3Imports {
                 Some(c) => S3Reader::new_authenticated(config, c.into_native()?),
                 None => S3Reader::new(config),
             }
-            .map_err(|_| PublicError::invalid_params())
+            .map_err(|error| PublicError::invalid_params_because(error.to_string()))
         };
         let reader = match prepare() {
             Ok(r) => r,

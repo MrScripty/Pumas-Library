@@ -122,6 +122,21 @@ describe('LauncherRootRecoveryProvider', () => {
     expect(screen.getByRole('button', { name: 'Select Library' })).toBeVisible();
   });
 
+  it.each([
+    ['invalid', 'select-library', /saved Pumas library is not valid/],
+    ['unavailable', 'select-library', /saved Pumas library is unavailable/],
+    ['invalid', 'correct-launch-input', /launcher input controls this library/],
+  ] as const)('names the resolver reason for an %s library (%s)', async (reason, action, guidance) => {
+    installElectronBridge(async () => ({
+      status: 'recovery-required', reason, action,
+      authoritySource: action === 'select-library' ? 'persisted' : 'environment',
+      detail: 'launcher root /missing/library does not exist',
+    }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    const text = await screen.findByText(guidance);
+    expect(text).toHaveTextContent('Reason: launcher root /missing/library does not exist');
+  });
+
   it('offers an in-app metadata upgrade for a legacy library', async () => {
     installElectronBridge(async () => ({
       status: 'recovery-required', reason: 'migration-required', authoritySource: 'persisted', action: 'select-library',

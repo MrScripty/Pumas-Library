@@ -221,23 +221,90 @@ fn model_config_rejects_conflicting_dimension_metadata() {
     assert!(err.message.contains("hidden_size"));
 }
 
+fn write_config(fixture: &tempfile::TempDir, config: &str) -> OnnxModelPath {
+    std::fs::write(fixture.path().join("config.json"), config).unwrap();
+    OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap()
+}
+
 #[test]
-fn tokenizer_rejects_inputs_over_token_limit() {
+fn tokenizer_rejects_inputs_over_the_model_position_limit_with_a_reason() {
     let fixture = model_fixture_with_tokenizer();
-    let model_path = OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap();
+    let model_path = write_config(
+        &fixture,
+        r#"{"hidden_size": 768, "max_position_embeddings": 4, "model_type": "bert"}"#,
+    );
     let tokenizer = OnnxTokenizer::from_model_path(&model_path).unwrap();
-    let oversized = std::iter::repeat_n("hello", 8_193)
-        .collect::<Vec<_>>()
-        .join(" ");
+    let config = OnnxModelConfig::from_model_path(&model_path).unwrap();
+    let limit = config.input_token_limit().unwrap();
+    assert_eq!(limit.max_tokens, 4);
+    let request = OnnxEmbeddingRequest::parse(
+        "nomic-embed-text-v1.5",
+        vec!["hello world".into(), "hello hello hello hello hello".into()],
+        None,
+    )
+    .unwrap();
 
     let err = tokenizer
-        .tokenize_request(
-            &OnnxEmbeddingRequest::parse("nomic-embed-text-v1.5", vec![oversized], None).unwrap(),
-        )
+        .tokenize_request_within(&request, Some(limit))
         .unwrap_err();
 
     assert_eq!(err.field.as_deref(), Some("input"));
-    assert!(err.message.contains("tokens"));
+    assert!(
+        err.message.contains("input 1 has 5 tokens")
+            && err.message.contains("at most 4 tokens")
+            && err.message.contains("max_position_embeddings"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
+fn tokenizer_applies_no_flat_token_limit_of_its_own() {
+    let fixture = model_fixture_with_tokenizer();
+    let model_path = OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap();
+    let tokenizer = OnnxTokenizer::from_model_path(&model_path).unwrap();
+    let long = std::iter::repeat_n("hello", 8_193)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let batch = tokenizer
+        .tokenize_request(
+            &OnnxEmbeddingRequest::parse("nomic-embed-text-v1.5", vec![long], None).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(batch.total_tokens, 8_193);
+}
+
+#[test]
+fn model_config_derives_the_input_token_limit_from_positions() {
+    let fixture = model_fixture_with_tokenizer();
+    let limit = |config: &str| {
+        OnnxModelConfig::from_model_path(&write_config(&fixture, config))
+            .map(|config| config.input_token_limit().cloned())
+    };
+    assert_eq!(limit(r#"{"hidden_size": 8}"#).unwrap(), None);
+    let bert = limit(r#"{"hidden_size": 8, "max_position_embeddings": 512}"#)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (bert.max_tokens, bert.source),
+        (512, "max_position_embeddings")
+    );
+    let gpt = limit(r#"{"n_embd": 8, "n_positions": 2048}"#)
+        .unwrap()
+        .unwrap();
+    assert_eq!((gpt.max_tokens, gpt.source), (2048, "n_positions"));
+    // RoBERTa-style position tables start after the padding index.
+    let roberta = limit(
+        r#"{"hidden_size": 8, "max_position_embeddings": 514, "model_type": "xlm-roberta", "pad_token_id": 1}"#,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(roberta.max_tokens, 512);
+    assert!(
+        limit(r#"{"hidden_size": 8, "max_position_embeddings": 512, "n_positions": 1024}"#)
+            .is_err()
+    );
+    assert!(limit(r#"{"hidden_size": 8, "max_position_embeddings": "512"}"#).is_err());
 }
 
 #[test]

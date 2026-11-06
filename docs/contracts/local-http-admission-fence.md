@@ -34,6 +34,35 @@ advertisement or advertisement that no longer matches this listener returns
 HTTP **503**. Fence refusals have not entered the route handler. Responses are
 visible to the existing permitted browser origins through CORS.
 
+### Refusal body
+
+Every refusal issued before a route handler runs (this fence, shutdown, router
+fallbacks, owner retention and transport capacity) keeps its status and carries
+a JSON body with `Cache-Control: no-store`:
+
+```json
+{"error": {"code": "generation_mismatch", "message": "The requested generations do not match this listener; ..."}}
+```
+
+Branch on `code`; `message` explains the refusal to a person and may change.
+Codes can be added. Current codes:
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| 400 | `fence_malformed` | Partial, repeated or malformed fence headers (the message says which) |
+| 404 | `route_not_found` | No route at this path |
+| 405 | `method_not_allowed` | The route does not accept this method |
+| 412 | `generation_mismatch` | The fence does not match this live listener |
+| 503 | `shutting_down` | The owner is closing |
+| 503 | `service_not_advertised` | The registry does not advertise this service (unavailable or corrupt row) |
+| 503 | `listener_superseded` | The registry advertises a different service than this listener |
+| 503 | `connection_capacity` | The listener's open-connection bound is reached |
+| 500 | `handler_lost` | The handler ended without a response; the outcome is unknown |
+
+Owner retention adds its own codes; see
+[local owner retention](local-owner-retention.md). JSON-RPC errors and `/v1`
+operation errors keep their own envelopes.
+
 On 412/503, observe and authenticate again before deciding what to do. This
 contract does not authorize replay of a previous request with an unknown
 outcome. A fence does not provide authentication, model availability, startup

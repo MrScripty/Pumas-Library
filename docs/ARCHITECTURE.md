@@ -36,7 +36,13 @@ claims the root and refuses an existing owner row, including unresolved
 ownership after failed startup/shutdown or process loss. Orderly replacement
 requires successful composed `shutdown_instance()`; PID liveness and subsystem
 drains do not authorize reclaim.
-`PumasLocalClient` explicitly connects to an existing ready owner.
+`PumasLocalClient` explicitly connects to an existing ready owner. The owner's
+loopback IPC server admits a bounded number of connections; a connection over
+the limit receives an error frame naming the limit before it is closed, and a
+client that starts a frame without finishing it within 30 s is closed with a
+reason. Idle connections between frames stay open, because local clients hold
+one connection for their lifetime. The registry database that carries the IPC
+connection tokens is owner-only (0600, directory 0700) on Unix.
 `PumasReadOnlyLibrary` reads indexed state without taking lifecycle ownership.
 An explicit `InstanceProfile::CatalogQuery` owner opens an existing index read-only
 through the same builder/API and restricted local IPC dispatcher. It supports
@@ -158,14 +164,41 @@ one shared generation lifetime: connection-bounded but duration-unbounded
 transport with no total, read, idle, or elapsed deadline, as defined in
 [generation lifetime](contracts/generation-lifetime.md).
 
-The legacy Linux `ProcessManager` retains each launched runtime's actual `Child`
-in one shared observation/stop slot. Its observer uses non-reaping exit checks;
-normal and pattern-based stops of known children lock the same slot. An owned
-group leader is reaped only after a complete observation confirms no live group
-members remain. A successful WNOWAIT check or a PID file alone does not establish
-exclusive reaper custody. PID-only legacy stops retain best-effort behavior;
-they cannot select the borrowed-Child group stop. Non-Linux legacy observation
-and the runtime-profile `ManagedChild` ownership paths are unchanged.
+The legacy `ProcessManager` (`stop_ollama`/`stop_torch`) stops only processes
+whose custody it can prove; it never searches the process table by command
+line, so a user's own `ollama serve` or another project's `serve.py` is never
+signalled. Custody is either the actual `Child` this manager still holds or a
+PID record whose identity matches the live process. Each launch writes its PID
+file plus a `<pid file>.identity` sidecar with the boot id, start time and
+executable (Linux reads `/proc`; macOS and Windows use seconds-resolution start
+time and executable path, a documented weaker check). Every signal is preceded
+by an identity check, and a process group is signalled only while the verified
+process still leads it. A PID file without an identity (for example one written
+by an older Pumas), a reused PID, or a record from before the current boot is
+never signalled: the stop reports it as skipped with a reason
+(`stop_ollama_report`/`stop_torch_report`) and discards the stale file. The
+`stop_ollama`/`stop_torch` RPC outcomes carry the same skips as an optional
+`skipped: [{pid?, reason}]` list (the PID file path stays server-side), and the
+desktop shows the reasons when a stop fails. The app-manager
+`VersionLauncher::stop_version`/`is_version_running` and the Torch removal guard
+read the same identity records.
+Runtime-profile processes belong to the runtime-profile owner and are never
+touched by the legacy stop.
+
+Both the legacy launcher and the runtime-profile owner start their children
+from an empty environment plus an allowlist (`platform::child_environment`):
+process basics, locale and temporary directories, GPU selection and driver
+discovery, proxy/TLS trust, and `OLLAMA_*` settings. Loader and interpreter
+injection (`LD_PRELOAD`, `DYLD_*`, the inherited `LD_LIBRARY_PATH`,
+`PYTHON*`) and credentials such as `HF_TOKEN` are not inherited; a launch that
+needs one of them sets it explicitly in its launch configuration.
+
+On Linux the manager retains each launched runtime's `Child` in one shared
+observation/stop slot. Its observer uses non-reaping exit checks, and both the
+observer and the stop lock the same slot. An owned group leader is reaped only
+after a complete observation confirms no live group members remain. The
+observer backs off on repeated observation failures and gives up after a
+bounded number, leaving the child in custody for an explicit stop.
 
 The durable provider decision is recorded in
 [ADR 0001](adr/0001-onnx-runtime-provider-model.md); the Torch image

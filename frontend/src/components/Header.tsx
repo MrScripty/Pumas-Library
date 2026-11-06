@@ -23,6 +23,7 @@ interface HeaderProps {
   installingTag?: string | null;
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount?: number;
+  activeModelDownloadError?: string | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -42,11 +43,13 @@ export const Header: React.FC<HeaderProps> = ({
   installingTag,
   activeModelDownload,
   activeModelDownloadCount = 0,
+  activeModelDownloadError = null,
 }) => {
   const status = getHeaderStatusInfo({
     appId,
     activeModelDownload,
     activeModelDownloadCount,
+    activeModelDownloadError,
     installationProgress,
     installingTag,
     modelLibraryLoaded,

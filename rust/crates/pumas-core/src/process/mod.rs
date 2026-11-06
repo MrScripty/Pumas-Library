@@ -22,4 +22,4 @@ mod launcher;
 mod manager;
 
 pub use launcher::{BinaryLaunchConfig, LaunchResult, ProcessLauncher};
-pub use manager::ProcessManager;
+pub use manager::{ProcessManager, RuntimeStopReport, RuntimeStopSkip};

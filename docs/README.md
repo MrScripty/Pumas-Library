@@ -34,6 +34,9 @@ Internal boundaries:
 - Audio: [custody foundation](contracts/audio-custody-foundation.md), [owned transport](contracts/owned-audio-transport.md), [owned lifecycle](contracts/owned-audio-lifecycle.md), [installed constructor](contracts/installed-audio-constructor.md), [installed session](contracts/installed-audio-session.md), [Cohere qualification](contracts/cohere-native-qualification.md) and [Cohere cohort](contracts/cohere-native-cohort.md)
 - [Image-to-text native qualification](contracts/image-to-text-native-qualification.md)
 
+Each native qualification contract links its machine-readable cohort or
+acquisition plan (`contracts/*.json`).
+
 ## Durable Decisions
 
 - [ADR 0001: ONNX Runtime provider model](adr/0001-onnx-runtime-provider-model.md)
@@ -45,33 +48,49 @@ Internal boundaries:
 
 - [Recover a failed download whose files moved](runbooks/download-location-reconciliation.md)
 
-## Point-in-Time Audits
+## Point-in-Time Audits and Investigations
 
 - [2026-09-03 current-standards audit](audits/current-standards-2026-09-03/README.md)
+- [2026-11-02 comprehensive audit](audits/comprehensive-audit-2026-11-02.md), re-verified against `b091ac45`
+- [Download destination and model catalog investigation (2026-10-10)](investigations/download-path-discrepancy-2026-10-10.md)
 
-Audits describe the named repository and standards commits. They are evidence
-and remediation inputs, not current operating instructions.
+Audits and investigations describe the named repository and standards commits.
+They are evidence and remediation inputs, not current operating instructions.
+
+## Release Evidence
+
+- [0.8.0 attribution](release-attribution/0.8.0/README.md) and its
+  [S3 profile](release-attribution/0.8.0-s3/README.md): the third-party notices
+  and inventories that packages embed, checked by
+  `scripts/release/check-attribution.cjs`
+- [0.7.0 ONNX archive verification](release-evidence/0.7.0/onnx-archive-verification.json):
+  point-in-time evidence for the 0.7.0 ONNX Runtime archive
+
+Vulnerability results are not kept in the tree: each CI run produces the
+`current-vulnerability-results` artifact (see [Security](SECURITY.md#dependency-scans)).
 
 ## Product Briefs
 
 Direction, not commitments. Each brief states what of it exists today.
 
-- [Hugging Face discovery cache](breif/hf-cache.md)
-- [Generic model fetching (S3)](breif/s3-model-fetch.md)
-- [Unified inference gateway](breif/unified-inference-gateway.md)
-- [Intent, discovery and distributed model management](breif/intent-discovery-distribution.md)
-- [Capability discovery and resolution fabric](breif/capability-discovery-fabric.md)
-- [Agent interaction and MCP layer](breif/agent-interaction-mcp.md)
+- [Hugging Face discovery cache](brief/hf-cache.md)
+- [Generic model fetching (S3)](brief/s3-model-fetch.md)
+- [Unified inference gateway](brief/unified-inference-gateway.md)
+- [Intent, discovery and distributed model management](brief/intent-discovery-distribution.md)
+- [Capability discovery and resolution fabric](brief/capability-discovery-fabric.md)
+- [Agent interaction and MCP layer](brief/agent-interaction-mcp.md)
 
 ## Active and Planned Work
 
-No plan is being executed right now. These hold open acceptance gates:
+The [2026-11 audit remediation](plans/audit-remediation-2026-11/plan.md) plan
+fixes the findings of the 2026-11-02 audit; owner decisions D1-D6 are recorded
+there. These hold open acceptance gates:
 
 - [Artifact acquisition](plans/artifact-acquisition/plan.md) — Q1 (HTTP) and Q3 (S3) ship in 0.8.0; AQ-HTTP and AQ-S3 acceptance pending; Q2 not started
 - [Runtime installations and model adapters](plans/runtime-installations-and-model-adapters/plan.md) — planned; R1 waits on AQ-HTTP acceptance
 - [Download-location reconciliation](plans/download-location-reconciliation/plan.md) — implemented (ADR 0003); composed and artifact evidence pending
 - [Torch cross-platform runtime management](plans/torch-cross-platform-runtime-management/plan.md) — packaged and Windows/macOS install gates open; the managed-Python license blocker is open
-- [2026-09-03 current-standards remediation program](plans/current-standards-remediation-2026-09-03/plan.md) — open issues not yet re-verified against 0.8.0
+- [2026-09-03 current-standards remediation program](plans/current-standards-remediation-2026-09-03/plan.md) — open issues not yet re-verified against 0.8.0. Its focused plans: [Rust library and RPC](plans/current-standards-remediation-2026-09-03/rust-library-and-rpc/plan.md), [frontend and UI](plans/current-standards-remediation-2026-09-03/frontend-and-ui/plan.md), [desktop, release, bindings and Torch](plans/current-standards-remediation-2026-09-03/desktop-release-bindings-and-torch/plan.md) and [governance and verification](plans/current-standards-remediation-2026-09-03/governance-and-verification/plan.md) (accepted)
 - [Hugging Face discovery cache readiness](plans/hf-discovery-cache/readiness.md) — deferred checklist for the shared cache
 - Design records still linked as current: [operating owner custody](plans/operating-owner-custody-design.md) and [local discovery bootstrap](plans/local-discovery-bootstrap.md)
 

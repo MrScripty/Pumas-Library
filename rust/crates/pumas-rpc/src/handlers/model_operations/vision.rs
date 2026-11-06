@@ -48,15 +48,17 @@ pub(in crate::handlers) async fn ready(state: &AppState, served: &ServedModelSta
     if base.query().is_some() || base.fragment().is_some() {
         return false;
     }
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    let client = CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(2))
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .build()
+    static CLIENT: OnceLock<crate::provider_clients::ProviderHttp> = OnceLock::new();
+    let client = CLIENT
+        .get_or_init(|| {
+            crate::provider_clients::ProviderHttp::build(|builder| {
+                builder
+                    .connect_timeout(Duration::from_secs(2))
+                    .retry(reqwest::retry::never())
+            })
             .expect("vision declaration client")
-    });
+        })
+        .for_url(endpoint.as_str());
     // Initial scope is dedicated sessions. The explicit flag also prevents a
     // compatible backend from loading a model during this read-only query.
     let read = async {

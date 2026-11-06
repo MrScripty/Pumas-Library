@@ -4,12 +4,16 @@ mod catalog_snapshot;
 mod dependency_profiles;
 mod publication_projection;
 pub(crate) use publication_projection::ProjectionCommit;
+#[cfg(test)]
+mod atomicity_tests;
 mod governance;
 mod intent_declarations;
 mod metadata_overlays;
 mod model_library_updates;
 mod model_selector_snapshot;
 mod package_facts_cache;
+mod schema_identity;
+use schema_identity::IndexSchemaIdentity;
 
 pub(crate) use intent_declarations::{
     BoundTarget, IntentDeclarationRecord, IntentDeclarationRelease, IntentDeletionClaimResult,
@@ -29,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::broadcast;
-use tracing::{debug, error, warn};
+use tracing::debug;
 
 use super::fts5::{FTS5Config, FTS5Manager};
 use super::query::build_fts5_query;
@@ -285,30 +289,28 @@ impl ModelIndex {
 
         let mut conn = Connection::open(&db_path)?;
         let (update_tx, _) = broadcast::channel(256);
+        let fts5_config = FTS5Config::default();
 
-        // Refuse incompatible authoritative intent state before any unrelated
-        // write-oriented initialization can change this database.
+        // Refuse incompatible authoritative intent state, and an index schema
+        // this build does not know, before any write-oriented initialization
+        // can change this database.
         Self::inspect_intent_schema(&conn)?;
+        Self::inspect_index_schema_identity(&conn)?;
 
         // Configure connection
         Self::configure_connection(&conn)?;
 
-        // Ensure schema
-        Self::ensure_schema(&conn)?;
+        // Ensure schema, including the FTS5 search projection, as one unit.
+        Self::ensure_index_schema(&mut conn, &fts5_config)?;
         Self::ensure_intent_schema(&mut conn)?;
 
-        let index = Self {
+        Ok(Self {
             _store_lifetime: store_lifetime,
             db_path,
             conn: Arc::new(Mutex::new(conn)),
-            fts5_config: FTS5Config::default(),
+            fts5_config,
             update_tx,
-        };
-
-        // Ensure FTS5 is set up
-        index.ensure_fts5()?;
-
-        Ok(index)
+        })
     }
 
     /// Open an existing model index with a read-only SQLite connection.
@@ -317,6 +319,7 @@ impl ModelIndex {
         let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         Self::configure_read_only_connection(&conn)?;
         Self::inspect_intent_schema(&conn)?;
+        Self::inspect_index_schema_identity(&conn)?;
         let (update_tx, _) = broadcast::channel(1);
 
         Ok(Self {
@@ -354,7 +357,10 @@ impl ModelIndex {
     }
 
     /// Ensure the base schema exists.
-    fn ensure_schema(conn: &Connection) -> Result<()> {
+    ///
+    /// Shape checks for releases before the schema identity run only for an
+    /// unstamped database.
+    fn ensure_schema(conn: &Connection, identity: IndexSchemaIdentity) -> Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS models (
                 id TEXT PRIMARY KEY,
@@ -391,23 +397,11 @@ impl ModelIndex {
             [],
         )?;
 
-        Self::ensure_metadata_v2_schema(conn)?;
+        Self::ensure_metadata_v2_schema(conn, identity)?;
         Self::ensure_package_facts_cache_schema(conn)?;
         Self::ensure_model_library_updates_schema(conn)?;
+        Self::ensure_metadata_projection_schema(conn)?;
         Self::seed_metadata_v2_rows(conn)?;
-
-        Ok(())
-    }
-
-    /// Ensure FTS5 virtual table and triggers exist.
-    fn ensure_fts5(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
-            message: "Failed to acquire connection lock".to_string(),
-            source: None,
-        })?;
-
-        let fts5_manager = FTS5Manager::new(&self.fts5_config);
-        fts5_manager.ensure_setup(&conn)?;
 
         Ok(())
     }
@@ -673,6 +667,10 @@ impl ModelIndex {
             "DELETE FROM model_link_exclusions WHERE model_id = ?1",
             params![old_id],
         )?;
+        tx.execute(
+            "UPDATE model_metadata_projection_pending SET model_id = ?1 WHERE model_id = ?2",
+            params![record.id, old_id],
+        )?;
 
         tx.execute("DELETE FROM models WHERE id = ?1", params![old_id])?;
 
@@ -810,25 +808,34 @@ impl ModelIndex {
     }
 
     /// Delete a model by ID.
+    ///
+    /// The row removal and its durable update-feed event commit together, so a
+    /// cursor-following consumer can never miss a removal that took effect.
     pub fn delete(&self, id: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
 
-        let rows_affected = conn.execute("DELETE FROM models WHERE id = ?1", params![id])?;
-
-        if rows_affected > 0 {
-            debug!("Deleted model: {}", id);
-            let event_id = Self::append_model_library_update_event_with_conn(
-                &conn,
+        let tx = conn.transaction()?;
+        let rows_affected = tx.execute("DELETE FROM models WHERE id = ?1", params![id])?;
+        let event_id = if rows_affected > 0 {
+            Some(Self::append_model_library_update_event_with_conn(
+                &tx,
                 id,
                 ModelLibraryChangeKind::ModelRemoved,
                 ModelFactFamily::ModelRecord,
                 ModelLibraryRefreshScope::SummaryAndDetail,
                 None,
                 None,
-            )?;
+            )?)
+        } else {
+            None
+        };
+        tx.commit()?;
+
+        if let Some(event_id) = event_id {
+            debug!("Deleted model: {}", id);
             self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
 
@@ -924,30 +931,29 @@ impl ModelIndex {
 
         let mut models = Vec::new();
         for row in rows {
-            match row {
-                Ok(record) => {
-                    // Apply tag filter in post-processing
-                    if let Some(required_tags) = tags {
-                        if required_tags
-                            .iter()
-                            .all(|t| record.tags.iter().any(|rt| rt.eq_ignore_ascii_case(t)))
-                        {
-                            models.push(record);
-                        }
-                    } else {
-                        models.push(record);
-                    }
-                }
-                Err(e) => {
-                    warn!("Error reading model row: {}", e);
-                }
-            }
+            Self::push_if_tagged(&mut models, row?, tags);
         }
 
         Ok((models, total_count))
     }
 
+    /// Apply the tag filter in post-processing.
+    fn push_if_tagged(models: &mut Vec<ModelRecord>, record: ModelRecord, tags: Option<&[String]>) {
+        if let Some(required_tags) = tags {
+            if !required_tags
+                .iter()
+                .all(|t| record.tags.iter().any(|rt| rt.eq_ignore_ascii_case(t)))
+            {
+                return;
+            }
+        }
+        models.push(record);
+    }
+
     /// Search using FTS5.
+    ///
+    /// Storage and decode failures propagate. Only a query FTS5 cannot parse
+    /// becomes a typed refusal naming the reason.
     fn search_fts5(
         &self,
         conn: &Connection,
@@ -986,14 +992,8 @@ impl ModelIndex {
             let mut stmt = conn.prepare(&count_sql)?;
             let params_refs: Vec<&dyn rusqlite::ToSql> =
                 params_vec.iter().map(|p| p.as_ref()).collect();
-            match stmt.query_row(params_refs.as_slice(), |row| row.get(0)) {
-                Ok(count) => count,
-                Err(e) => {
-                    // FTS5 query may fail - return 0
-                    error!("FTS5 count query failed: {}", e);
-                    0
-                }
-            }
+            stmt.query_row(params_refs.as_slice(), |row| row.get(0))
+                .map_err(search_error)?
         };
 
         // Build full query with pagination
@@ -1009,53 +1009,30 @@ impl ModelIndex {
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
-        let rows = match stmt.query_map(params_refs.as_slice(), Self::row_to_record) {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!("FTS5 search failed: {}", e);
-                return Ok((vec![], 0));
-            }
-        };
+        let rows = stmt
+            .query_map(params_refs.as_slice(), Self::row_to_record)
+            .map_err(search_error)?;
 
         let mut models = Vec::new();
         for row in rows {
-            match row {
-                Ok(record) => {
-                    // Apply tag filter in post-processing
-                    if let Some(required_tags) = tags {
-                        if required_tags
-                            .iter()
-                            .all(|t| record.tags.iter().any(|rt| rt.eq_ignore_ascii_case(t)))
-                        {
-                            models.push(record);
-                        }
-                    } else {
-                        models.push(record);
-                    }
-                }
-                Err(e) => {
-                    warn!("Error reading model row: {}", e);
-                }
-            }
+            Self::push_if_tagged(&mut models, row.map_err(search_error)?, tags);
         }
 
         Ok((models, total_count))
     }
 
     /// Convert a row to a ModelRecord.
+    ///
+    /// A JSON column that does not decode is a conversion error naming the
+    /// row and column; it never presents as an empty but valid model.
     fn row_to_record(row: &Row) -> rusqlite::Result<ModelRecord> {
-        let tags_json: String = row.get(5)?;
-        let hashes_json: String = row.get(6)?;
-        let metadata_json: String = row.get(7)?;
-
-        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-        let hashes: HashMap<String, String> =
-            serde_json::from_str(&hashes_json).unwrap_or_default();
-        let metadata: serde_json::Value =
-            serde_json::from_str(&metadata_json).unwrap_or(serde_json::Value::Null);
+        let id: String = row.get(0)?;
+        let tags: Vec<String> = Self::decode_json_column(row, &id, 5, "tags_json")?;
+        let hashes: HashMap<String, String> = Self::decode_json_column(row, &id, 6, "hashes_json")?;
+        let metadata: serde_json::Value = Self::decode_json_column(row, &id, 7, "metadata_json")?;
 
         Ok(ModelRecord {
-            id: row.get(0)?,
+            id,
             path: row.get(1)?,
             cleaned_name: row.get(2)?,
             official_name: row.get(3)?,
@@ -1064,6 +1041,25 @@ impl ModelIndex {
             hashes,
             metadata,
             updated_at: row.get(8)?,
+        })
+    }
+
+    fn decode_json_column<T: serde::de::DeserializeOwned>(
+        row: &Row,
+        model_id: &str,
+        index: usize,
+        column: &str,
+    ) -> rusqlite::Result<T> {
+        let text: String = row.get(index)?;
+        serde_json::from_str(&text).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("model index row {model_id:?} has corrupt {column}: {error}"),
+                )),
+            )
         })
     }
 
@@ -1190,14 +1186,17 @@ impl ModelIndex {
     }
 
     /// Clear all models from the index.
+    ///
+    /// The removals and their update-feed events commit as one transaction.
     pub fn clear(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         let removed_ids = {
-            let mut stmt = conn.prepare("SELECT id FROM models ORDER BY id ASC")?;
+            let mut stmt = tx.prepare("SELECT id FROM models ORDER BY id ASC")?;
             let rows = stmt
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1208,11 +1207,11 @@ impl ModelIndex {
         // This avoids "Execute returned results" error from FTS5 triggers since the
         // AFTER DELETE trigger will find nothing to delete from the FTS5 table.
         let fts_table = &self.fts5_config.table_name;
-        conn.execute_batch(&format!("DELETE FROM {}; DELETE FROM models;", fts_table))?;
+        tx.execute_batch(&format!("DELETE FROM {}; DELETE FROM models;", fts_table))?;
         let mut event_ids = Vec::with_capacity(removed_ids.len());
         for model_id in removed_ids {
             event_ids.push(Self::append_model_library_update_event_with_conn(
-                &conn,
+                &tx,
                 &model_id,
                 ModelLibraryChangeKind::ModelRemoved,
                 ModelFactFamily::ModelRecord,
@@ -1221,12 +1220,33 @@ impl ModelIndex {
                 None,
             )?);
         }
+        tx.commit()?;
         for event_id in event_ids {
             self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
         debug!("Cleared model index");
         Ok(())
     }
+}
+
+/// Map a full-text search failure. A MATCH expression FTS5 cannot parse is
+/// the caller's query, so it is refused with SQLite's reason; every other
+/// failure is a storage error.
+fn search_error(error: rusqlite::Error) -> PumasError {
+    if let rusqlite::Error::SqliteFailure(failure, Some(message)) = &error {
+        let is_query_syntax = failure.code == rusqlite::ErrorCode::Unknown
+            && (message.starts_with("fts5:")
+                || message.starts_with("unterminated string")
+                || message.starts_with("no such column")
+                || message.starts_with("unknown special query"));
+        if is_query_syntax {
+            return PumasError::Validation {
+                field: "query".to_string(),
+                message: format!("search query is not valid full-text syntax: {message}"),
+            };
+        }
+    }
+    error.into()
 }
 
 #[cfg(test)]

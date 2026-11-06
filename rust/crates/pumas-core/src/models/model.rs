@@ -613,6 +613,7 @@ pub struct ModelData {
 /// non-optional to match frontend TypeScript expectations. The frontend cannot
 /// handle null values for these fields. Use empty strings/arrays as defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HuggingFaceModel {
     pub repo_id: String,
@@ -656,6 +657,15 @@ pub struct HuggingFaceModel {
     /// Compatible inference engines based on model formats
     #[serde(default)]
     pub compatible_engines: Vec<String>,
+    /// When this metadata was observed from HuggingFace (RFC 3339): the
+    /// original search time for a cached search result, the fetch time for a
+    /// live one. `None` when the source did not record it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
+    /// Whether this result was served from the local search cache rather
+    /// than fetched from HuggingFace for this request.
+    #[serde(default)]
+    pub cached: bool,
 }
 
 /// Exact download details derived from a repository file tree.
@@ -913,6 +923,7 @@ pub enum ImportStage {
 /// Model import specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelImportSpec {
     pub path: String,

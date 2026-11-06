@@ -55,7 +55,7 @@ before any model loads.
 | Public image contract | `docs/contracts/image-generation.md`, enforced in `rust/crates/pumas-rpc/src/handlers/openai_gateway*.rs` |
 | Private provider protocol | `docs/contracts/torch-provider-protocol.md`, implemented in `torch-server/` |
 | Provider handshake and capabilities | `torch-server/serve.py` (`GET /health`), consumed by `pumas-rpc` gateway handlers |
-| Runtime recipe and protocol pin | `torch-server/runtime/runtime.json`, checked by `torch-server/validate_runtime.py` |
+| Protocol pin | `SUPPORTED_TORCH_PROTOCOL` in `rust/crates/pumas-app-manager/src/torch_client.rs`, checked by `TorchClient`'s handshake; each install records its own `runtime.json` and hash lock |
 | Provider execution, deadline, lease | `torch-server/image_api.py` (`owned_generation`) and `model_manager.py` |
 | Gateway transport allowance and mapping | `rust/crates/pumas-rpc/src/handlers/openai_gateway.rs` |
 

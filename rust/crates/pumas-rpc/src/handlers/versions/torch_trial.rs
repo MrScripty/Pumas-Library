@@ -109,12 +109,13 @@ pub async fn trial_torch_runtime(
             "Stop the existing owned profile before starting a trial",
         ));
     }
+    let version_dir = manager.version_path(tag)?;
     let receipt = match state
         .api
         .launch_runtime_profile_for_model_with_receipt(
             profile_id.clone(),
             tag,
-            &manager.version_path(tag),
+            &version_dir,
             None,
             None,
         )
@@ -190,7 +191,7 @@ pub async fn trial_torch_runtime(
         error: None,
         cleanup: TorchTrialCleanup::NotNeeded,
     };
-    let client = TorchClient::new(Some(owned.endpoint_url.as_str()));
+    let client = TorchClient::for_owned_sidecar(owned.endpoint_url.as_str());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let trial = async {
         loop {

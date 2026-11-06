@@ -3,7 +3,11 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use rand::RngExt;
+
+use crate::model_library::ModelLibrary;
 use crate::models::{
     RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeEndpointUrl, RuntimeManagementMode,
     RuntimePort, RuntimeProfileConfig, RuntimeProfileId,
@@ -17,6 +21,27 @@ use super::{
 };
 
 const IMPLICIT_RUNTIME_PORT_SPAN: u16 = 10_000;
+
+/// Environment variable carrying the Torch sidecar's API token.
+pub const TORCH_API_TOKEN_ENV: &str = "PUMAS_TORCH_API_TOKEN";
+/// Header every Torch sidecar request except `/health` must carry.
+pub const TORCH_API_TOKEN_HEADER: &str = "x-pumas-torch-token";
+/// Environment variable listing the roots Torch may load model files from.
+/// Set at launch from the model library (see [`torch_model_roots`]).
+pub const TORCH_MODEL_ROOTS_ENV: &str = "PUMAS_TORCH_MODEL_ROOTS";
+/// Environment variable naming the launcher process the sidecar watches.
+pub const TORCH_PARENT_PID_ENV: &str = "PUMAS_TORCH_PARENT_PID";
+
+/// Random API token for Torch sidecars launched by this backend process.
+///
+/// It is generated once per backend process, never persisted, and reaches the
+/// sidecar only through its environment (never argv). Every Torch sidecar this
+/// process launches requires it, so a sidecar left by an earlier backend, or
+/// any other local process, cannot drive the sidecar without it.
+pub fn torch_api_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| hex::encode(rand::rng().random::<[u8; 32]>()))
+}
 
 pub(super) fn derive_managed_profile_launch_specs(
     launcher_root: &Path,
@@ -182,6 +207,8 @@ fn profile_runtime_env_vars(
             env_vars.insert("HF_HUB_OFFLINE".into(), "1".into());
             env_vars.insert("TRANSFORMERS_OFFLINE".into(), "1".into());
             env_vars.insert("PYTHONNOUSERSITE".into(), "1".into());
+            env_vars.insert(TORCH_API_TOKEN_ENV.into(), torch_api_token().into());
+            env_vars.insert(TORCH_PARENT_PID_ENV.into(), std::process::id().to_string());
         }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe,
@@ -290,6 +317,74 @@ fn llama_cpp_router_models_dir(launcher_root: &Path) -> PathBuf {
     launcher_root.join("shared-resources").join("models")
 }
 
+/// The roots the Torch sidecar may load model files from, joined for
+/// `PUMAS_TORCH_MODEL_ROOTS`: the library's own root plus the directory of
+/// every external-reference model the library knows about at launch.
+///
+/// The set is read once per launch. A model imported by external reference
+/// while Torch runs is refused (with that reason) until the Torch profile is
+/// restarted, which reads the set again.
+pub(crate) async fn torch_model_roots(library: &ModelLibrary) -> Result<String> {
+    let external = serde_json::to_value(crate::models::StorageKind::ExternalReference)
+        .map_err(|err| PumasError::Other(format!("storage kind serialization failed: {err}")))?;
+    let mut roots = vec![library.library_root().to_path_buf()];
+    for record in library.list_models().await? {
+        if record.metadata.get("storage_kind") != Some(&external) {
+            continue;
+        }
+        let Some(entry) = record
+            .metadata
+            .get("entry_path")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let entry = PathBuf::from(entry);
+        let is_file = tokio::fs::metadata(&entry)
+            .await
+            .is_ok_and(|metadata| metadata.is_file());
+        roots.push(match (is_file, entry.parent()) {
+            (true, Some(parent)) => parent.to_path_buf(),
+            _ => entry,
+        });
+    }
+    join_model_roots(roots)
+}
+
+/// Join roots for the sidecar, dropping duplicates and roots nested in another.
+///
+/// A root the platform cannot place in a path list (it contains the list
+/// separator) or that is not Unicode is skipped with a warning; Torch then
+/// refuses models under it with a reason instead of the launch failing.
+fn join_model_roots(mut roots: Vec<PathBuf>) -> Result<String> {
+    roots.sort();
+    roots.dedup();
+    let covered = |root: &PathBuf, all: &[PathBuf]| {
+        all.iter()
+            .any(|other| other != root && root.starts_with(other))
+    };
+    let kept = roots
+        .iter()
+        .filter(|root| !covered(root, &roots))
+        .filter(|root| {
+            let usable = root.to_str().is_some() && std::env::join_paths([root]).is_ok();
+            if !usable {
+                tracing::warn!(
+                    root = %root.display(),
+                    "model root cannot be passed to Torch; models under it will be refused"
+                );
+            }
+            usable
+        })
+        .collect::<Vec<_>>();
+    let joined = std::env::join_paths(kept).map_err(|err| PumasError::InvalidParams {
+        message: format!("library model roots cannot be passed to Torch: {err}"),
+    })?;
+    joined.into_string().map_err(|_| PumasError::InvalidParams {
+        message: "library model roots are not valid Unicode".to_string(),
+    })
+}
+
 fn runtime_host(endpoint_url: &RuntimeEndpointUrl) -> Result<String> {
     let parsed =
         url::Url::parse(endpoint_url.as_str()).map_err(|err| PumasError::InvalidParams {
@@ -362,6 +457,21 @@ mod torch_tests {
         assert!(spec
             .pid_file
             .starts_with("/fixture/launcher-data/runtime-profiles/torch"));
+        // The sidecar's token, model confinement and parent watchdog arrive
+        // through the environment; the token never appears in argv.
+        let token = spec.env_vars.get(TORCH_API_TOKEN_ENV).expect("API token");
+        assert_eq!(token, torch_api_token());
+        assert_eq!(token.len(), 64);
+        assert!(!spec
+            .extra_args
+            .iter()
+            .any(|arg| arg.contains(token.as_str())));
+        // Model roots come from the library at launch, not from the spec.
+        assert!(!spec.env_vars.contains_key(TORCH_MODEL_ROOTS_ENV));
+        assert_eq!(
+            spec.env_vars.get(TORCH_PARENT_PID_ENV),
+            Some(&std::process::id().to_string())
+        );
 
         // Exercise both production argument builders against real Python imports.
         // The fixture substitutes package code, not the launch arguments.
@@ -400,6 +510,78 @@ mod torch_tests {
         assert!(
             changed_routes.is_empty(),
             "Torch launches mutated installed package bytes: {changed_routes:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn torch_model_roots_admit_library_and_external_models_only() {
+        use crate::models::{BundleFormat, ModelMetadata, StorageKind};
+
+        let temp = tempfile::tempdir().unwrap();
+        let library_root = temp.path().join("library");
+        let library = ModelLibrary::new(&library_root).await.unwrap();
+        let external = temp.path().join("external").join("bundle");
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(external.join("model_index.json"), "{}").unwrap();
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let model_dir = library.build_model_path("diffusion", "test", "external-bundle");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some("diffusion/test/external-bundle".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("external-bundle".to_string()),
+            cleaned_name: Some("external-bundle".to_string()),
+            source_path: Some(external.display().to_string()),
+            entry_path: Some(external.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(BundleFormat::DiffusersDirectory),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library
+            .upsert_index_from_metadata(&model_dir, &metadata)
+            .unwrap();
+
+        let roots = torch_model_roots(&library).await.unwrap();
+        let listed = std::env::split_paths(&roots).collect::<Vec<_>>();
+        assert!(listed.contains(&library.library_root().to_path_buf()));
+        assert!(listed.contains(&external));
+
+        // The sidecar's own validator accepts the library and external model
+        // and refuses a path outside both.
+        let torch_server = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../torch-server");
+        let check = "import sys, validation\n\
+for path in sys.argv[1:3]: validation.validate_model_path(path)\n\
+try:\n    validation.validate_model_path(sys.argv[3])\n\
+except ValueError as error:\n    assert 'approved model root' in str(error), error\n\
+else:\n    raise SystemExit('outside path was accepted')\n";
+        let status = std::process::Command::new(if cfg!(windows) { "python" } else { "python3" })
+            .args(["-B", "-c", check])
+            .arg(&model_dir)
+            .arg(external.join("model_index.json"))
+            .arg(&outside)
+            .env(TORCH_MODEL_ROOTS_ENV, &roots)
+            .current_dir(&torch_server)
+            .status()
+            .expect("model root regression requires Python");
+        assert!(status.success());
+    }
+
+    #[test]
+    fn joined_model_roots_drop_duplicates_and_nested_roots() {
+        let joined = join_model_roots(vec![
+            PathBuf::from("/library"),
+            PathBuf::from("/library/nested"),
+            PathBuf::from("/external/a"),
+            PathBuf::from("/external/a"),
+        ])
+        .unwrap();
+        assert_eq!(
+            std::env::split_paths(&joined).collect::<Vec<_>>(),
+            vec![PathBuf::from("/external/a"), PathBuf::from("/library")]
         );
     }
 }

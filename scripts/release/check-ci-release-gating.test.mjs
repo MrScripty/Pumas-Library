@@ -108,9 +108,13 @@ test('shared quality jobs remain available to pull requests and ordinary pushes'
   }
 });
 
+// Review jobs run for pull requests, the merged commit on main and ordinary
+// manual dispatches, never for candidate runs.
+const reviewGuard = "    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)\n";
+
 test('review inference candidate is bounded, source-pinned and never publishes a release', () => {
   const review = job('review-inference-linux');
-  assert.ok(review.includes("    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)\n"));
+  assert.ok(review.includes(reviewGuard));
   assert.match(review, /^    needs: lint-workflows$/m);
   assert.match(review, /^    runs-on: ubuntu-24\.04$/m);
   assert.match(review, /^    timeout-minutes: 60$/m);
@@ -142,13 +146,32 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
   assert.match(headless, new RegExp(`Verify inference-disabled release backend\\n        if: ${escapedVersionTagGuard}`));
 
   const frontend = job('build-frontend');
-  for (const step of ['Build library-only renderer', 'Build default renderer']) {
-    assert.match(frontend, new RegExp(`${step}\\n        if: ${escapedVersionTagGuard}`));
-  }
   assert.match(
     frontend,
     new RegExp(`uses: actions/upload-artifact@[0-9a-f]{40}(?: # \\S+)?\\n        if: ${escapedVersionTagGuard}`),
   );
+});
+
+test('both renderer variants build and are checked on every trigger, apart from the packaging input', () => {
+  const frontend = job('build-frontend');
+  const steps = [
+    // Vitest suites for the library-only replacements (frontend/vitest.library-only.config.ts).
+    ['Test library-only renderer behavior', 'pnpm --dir frontend test:library-only'],
+    ['Build library-only renderer', 'pnpm --dir frontend build:library-only --outDir "${{ runner.temp }}/frontend-library-only" --emptyOutDir'],
+    ['Verify library-only renderer excludes inference plugins', 'node scripts/release/check-frontend-variant.mjs "${{ runner.temp }}/frontend-library-only" library-only'],
+    ['Build default renderer', 'pnpm --dir frontend build'],
+    ['Verify default renderer includes inference plugins', 'node scripts/release/check-frontend-variant.mjs frontend/dist default'],
+  ];
+  let previous = -1;
+  for (const [name, run] of steps) {
+    const step = `      - name: ${name}\n        run: ${run}\n`;
+    assert.ok(frontend.includes(step), `${name} must run unguarded`);
+    assert.ok(frontend.indexOf(step) > previous, `${name} is out of order`);
+    previous = frontend.indexOf(step);
+  }
+  // The uploaded packaging input is the default renderer, never library-only.
+  assert.match(frontend, /name: frontend-dist\n          path: frontend\/dist\//);
+  assert.ok(previous < frontend.indexOf('uses: actions/upload-artifact@'));
 });
 
 
@@ -233,7 +256,7 @@ test('release build commands never enable test-support or all-features', () => {
 
 test('review audio dependency qualification requires bounded exact-source confinement', () => {
   const audio = job('review-audio-dependencies');
-  assert.ok(audio.includes("if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)"));
+  assert.ok(audio.includes(reviewGuard));
   assert.match(audio, /runs-on: ubuntu-24\.04/);
   assert.match(audio, /timeout-minutes: 60/);
   assert.match(audio, /persist-credentials: false/);
@@ -264,4 +287,81 @@ test('controlled session lifecycle reuses the installed managed interpreter with
   assert.match(step, /runtime_profiles::audio_session::protocol_tests/);
   assert.doesNotMatch(step, /pip install|curl |wget |continue-on-error/);
   assert.match(audio, /controlled-session-protocol.log/);
+});
+
+test('dependency audit is advisory on reviews, blocking on candidates and feeds the release candidate', () => {
+  const audit = job('dependency-audit');
+  assert.match(audit, /^    needs: lint-workflows$/m);
+  assert.doesNotMatch(audit, /^    if:/m, 'the scan runs for every trigger');
+  // D6: a failing scan never fails a review run, and always fails a candidate run.
+  // The scan step, not the job, is advisory, so a review run's check stays green
+  // and carries a warning instead of showing as failed.
+  assert.doesNotMatch(audit, /^    continue-on-error:/m, 'the job itself never ignores a failure');
+  const scan = audit.slice(audit.indexOf('Scan Rust, JavaScript and Python dependency inputs'));
+  assert.match(scan, /^        id: scan$/m);
+  assert.ok(scan.includes(`        continue-on-error: \${{ !(${versionTagGuard}) }}\n`));
+  const report = audit.slice(audit.indexOf('Report an advisory scan failure'));
+  assert.match(report, /^        if: steps\.scan\.outcome == 'failure'$/m);
+  assert.match(report, /::warning /);
+  assert.match(audit, /persist-credentials: false/);
+  assert.doesNotMatch(audit, /secrets\.|permissions:|cargo install|pip install (?!--require-hashes)/);
+  assert.match(audit, /pip install --require-hashes -r scripts\/dev\/pip-audit-python\.lock/);
+  assert.match(audit, /cargo-deny\/releases\/download\/(\d+\.\d+\.\d+)\/cargo-deny-\1-x86_64-unknown-linux-musl\.tar\.gz/);
+  assert.match(audit, /echo "[0-9a-f]{64} {2}\$tool_dir\/cargo-deny\.tar\.gz" \| sha256sum --check/);
+  assert.ok(audit.includes('node scripts/release/dependency-audit.mjs run --output "${{ runner.temp }}/current-vulnerability-results"'));
+  const upload = audit.slice(audit.indexOf('Upload current vulnerability results'));
+  assert.match(upload, /^        if: always\(\)$/m);
+  assert.match(upload, /^          name: current-vulnerability-results$/m);
+  assert.match(upload, /if-no-files-found: error/);
+
+  // The artifact name is the review the release plan requires.
+  const plan = JSON.parse(fs.readFileSync(path.join(root, 'scripts/release/artifact-plan.json'), 'utf8'));
+  assert.ok(plan.release_metadata.required_reviews.includes('current-vulnerability-results'));
+
+  const candidate = job('release-candidate');
+  assert.match(candidate, /^    needs: \[dependency-audit, /m);
+  assert.match(candidate, /name: current-vulnerability-results\n/);
+  const verify = 'check-artifacts.mjs "${{ runner.temp }}/current-vulnerability-results" current-vulnerability-results "${{ github.sha }}"';
+  assert.ok(candidate.includes(verify));
+  assert.ok(candidate.indexOf(verify) < candidate.indexOf('write-release-metadata.py'));
+});
+
+test('every checkout drops its credentials; no job pushes', () => {
+  for (const file of ['build.yml', 'scorecard.yml']) {
+    const text = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
+    assert.doesNotMatch(text, /git push|contents: write/, file);
+    const checkouts = [...text.matchAll(/uses: actions\/checkout@[0-9a-f]{40} # \S+\n((?: {8,}.*\n)*)/g)];
+    assert.ok(checkouts.length > 0, file);
+    for (const [, block] of checkouts) assert.match(block, /persist-credentials: false/, file);
+  }
+});
+
+test('Python versions come from a version file, never a floating literal', () => {
+  assert.doesNotMatch(workflow, /python-version: /);
+  const files = new Set([...workflow.matchAll(/python-version-file: (\S+)/g)].map(match => match[1]));
+  assert.deepEqual([...files].sort(), ['.python-version', 'scripts/release/acceptance.python-version']);
+  for (const file of files) {
+    assert.match(fs.readFileSync(path.join(root, file), 'utf8'), /^\d+\.\d+\.\d+\n$/, `${file} pins an exact version`);
+  }
+  // The acceptance tooling needs compression.zstd (CPython 3.14+).
+  assert.match(fs.readFileSync(path.join(root, 'scripts/release/acceptance.python-version'), 'utf8'), /^3\.1[4-9]\./);
+  assert.match(fs.readFileSync(path.join(root, 'scripts/release/torch-managed-python-acceptance.py'), 'utf8'), /sys\.version_info >= \(3, 14\)/);
+});
+
+test('pushes to main run every gate a pull request runs', () => {
+  const jobs = [...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n/gm)].map(match => match[1]);
+  for (const name of jobs) {
+    const guard = job(name).match(/^    if: (.*)$/m)?.[1];
+    if (!guard || !guard.includes("github.event_name == 'pull_request'")) continue;
+    assert.ok(guard.includes("(github.event_name == 'push' && github.ref == 'refs/heads/main')"), `${name} skips pushes to main`);
+  }
+});
+
+test('the two tracked desktop validator copies are byte-identical and checked against a fresh export', () => {
+  for (const name of ['desktop-contract.validators.js', 'desktop-contract.validators.d.ts']) {
+    const electron = fs.readFileSync(path.join(root, 'electron/src/generated', name));
+    const frontend = fs.readFileSync(path.join(root, 'frontend/src/generated', name));
+    assert.ok(electron.equals(frontend), `${name} copies differ`);
+  }
+  assert.match(job('build-frontend'), /^      - run: pnpm --dir electron check:desktop-contract$/m);
 });

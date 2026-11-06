@@ -133,6 +133,8 @@ async fn pre_worker_preparation_retains_root_after_caller_and_client_drop() {
     library.set_metadata_write_notifier(None);
 }
 
+// Starts the HuggingFace client, which only `hf-client` builds compile in.
+#[cfg(feature = "hf-client")]
 #[tokio::test]
 async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
     use crate::model_library::DownloadDestinationRoot;
@@ -217,6 +219,8 @@ async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
     assert_eq!(std::fs::read(&store_path).ok(), store_before);
 }
 
+// Starts the HuggingFace client, which only `hf-client` builds compile in.
+#[cfg(feature = "hf-client")]
 #[tokio::test]
 async fn ticket_recovery_refuses_busy_before_index_or_download_mutation() {
     use crate::model_library::DownloadDestinationRoot;
@@ -307,6 +311,8 @@ async fn ticket_recovery_refuses_busy_before_index_or_download_mutation() {
     api.shutdown_downloads().await.unwrap();
 }
 
+// Starts the HuggingFace client, which only `hf-client` builds compile in.
+#[cfg(feature = "hf-client")]
 #[tokio::test]
 async fn acquisition_integration_startup_retains_separate_pending_custody() {
     use crate::model_library::download_store::{
@@ -842,5 +848,8 @@ async fn test_execute_migration_notifies_model_library_refresh_even_when_no_move
     );
 }
 
+// These startup fixtures all start the HuggingFace client.
+#[cfg(feature = "hf-client")]
 mod acquisition_integration;
+#[cfg(feature = "hf-client")]
 use acquisition_integration::assert_startup_retained_evidence;

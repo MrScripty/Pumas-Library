@@ -78,7 +78,7 @@ async fn start_recovered_download(
         model_card_json: None,
         license_status: None,
     };
-    client.start_download(&request, dest, None).await
+    client.start_recovered_download(&request, dest).await
 }
 
 async fn load_hf_model_snapshot(
@@ -723,7 +723,9 @@ impl PumasApi {
     /// Given the correct `repo_id` and the `dest_dir` path where the partial
     /// download exists, starts a new download targeting that directory. The
     /// download system handles `.part` file resume via HTTP Range headers and
-    /// skips files that are already complete.
+    /// skips files that are already complete. The download resumes under the
+    /// commit recorded in the directory's provenance; a directory without
+    /// provenance resolves the current upstream commit first.
     pub async fn recover_download(&self, repo_id: &str, dest_dir: &str) -> Result<String> {
         self.try_primary()?;
         let primary = self.primary().clone();
@@ -4836,6 +4838,8 @@ pub(super) mod tests {
             total_size_bytes: None,
             quant_sizes: None,
             compatible_engines: Vec::new(),
+            observed_at: None,
+            cached: false,
         }
     }
 

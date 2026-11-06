@@ -354,6 +354,39 @@ describe('useActiveModelDownload', () => {
     expect(result.current.activeDownload).toBeNull();
   });
 
+  it('shows a failed startup list in the header instead of an idle status', async () => {
+    listModelDownloadsMock.mockRejectedValueOnce(new Error('Download registry unreadable'));
+    function DownloadHeader() {
+      const { activeDownload, activeDownloadCount, activeDownloadError } = useActiveModelDownload();
+      return createElement(Header, {
+        launcherUpdateAvailable: false, onMinimize: vi.fn(), onClose: vi.fn(),
+        networkAvailable: true, modelLibraryLoaded: true,
+        activeModelDownload: activeDownload, activeModelDownloadCount: activeDownloadCount,
+        activeModelDownloadError: activeDownloadError,
+      });
+    }
+    const { unmount } = render(createElement(DownloadHeader));
+    await flushMicrotasks();
+
+    expect(screen.getByRole('status')).toHaveTextContent('Download status unavailable: Download registry unreadable');
+
+    act(() => downloadUpdateCallback?.({
+      cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2, downloads: [] },
+      stale_cursor: false, snapshot_required: false,
+    }));
+    expect(screen.getByRole('status')).toHaveTextContent('Network online · model library ready');
+    unmount();
+  });
+
+  it('distinguishes an unavailable backend from an empty download list', async () => {
+    isApiAvailableMock.mockReturnValue(false);
+    const { result } = renderHook(() => useActiveModelDownload());
+    await flushMicrotasks();
+
+    expect(result.current.activeDownloadCount).toBe(0);
+    expect(result.current.activeDownloadError).toBe('The desktop backend is not available.');
+  });
+
   it('does not install a polling interval and unsubscribes on unmount', async () => {
     const setIntervalSpy = vi.spyOn(global, 'setInterval');
     const { unmount } = renderHook(() => useActiveModelDownload());

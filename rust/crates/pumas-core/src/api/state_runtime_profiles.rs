@@ -241,9 +241,15 @@ async fn prepare_runtime_profile_launch_spec(
                 apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
             }
         }
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
+            // Torch may load only from the library and its external references.
+            launch_spec.env_vars.insert(
+                crate::runtime_profiles::TORCH_MODEL_ROOTS_ENV.to_string(),
+                crate::runtime_profiles::torch_model_roots(&primary.model_library).await?,
+            );
+        }
         RuntimeProfileLaunchStrategy::BinaryProcess(
-            RuntimeProfileBinaryLaunchKind::OllamaServe
-            | RuntimeProfileBinaryLaunchKind::TorchServe,
+            RuntimeProfileBinaryLaunchKind::OllamaServe,
         )
         | RuntimeProfileLaunchStrategy::InProcessRuntime(_)
         | RuntimeProfileLaunchStrategy::ExternalOnly => {}

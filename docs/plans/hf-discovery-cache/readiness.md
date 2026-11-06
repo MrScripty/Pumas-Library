@@ -8,7 +8,7 @@ does not start search implementation or authorize external resources.
 
 ## Source and dependency decisions
 
-The [Hugging Face discovery cache brief](../../breif/hf-cache.md) specifies local
+The [Hugging Face discovery cache brief](../../brief/hf-cache.md) specifies local
 SQLite discovery first, then an optional shared/bulk online cache, with Hugging
 Face authoritative for current details. It does **not** select a hosting vendor
 or require every client to use an online service. Its concrete dependencies are:

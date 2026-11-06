@@ -203,7 +203,10 @@ fn start_primary_background_work(
                     model_card_json: None,
                     license_status: None,
                 };
-                match client.start_download(&request, &item.model_dir, None).await {
+                match client
+                    .start_recovered_download(&request, &item.model_dir)
+                    .await
+                {
                     Ok(id) => {
                         tracing::info!(
                             "Started interrupted download recovery {} for repo {}",
@@ -234,7 +237,7 @@ impl PumasApiBuilder {
             instance_profile: crate::InstanceProfile::Full,
             catalog_reservation: None,
             auto_create_dirs: false,
-            enable_hf_client: true,
+            enable_hf_client: cfg!(feature = "hf-client"),
             enable_process_manager: cfg!(feature = "process-manager"),
             registry: None,
             local_start_authority: None,
@@ -300,11 +303,14 @@ impl PumasApiBuilder {
 
     /// Enable or disable HuggingFace client initialization.
     ///
-    /// When disabled, HuggingFace search and download features will not be available.
+    /// When disabled, HuggingFace search and download features will not be
+    /// available; their operations fail with "HuggingFace client not
+    /// initialized". A build without the `hf-client` feature never starts the
+    /// client, so enabling it there has no effect.
     ///
-    /// Default: `true`
+    /// Default: `true` when the `hf-client` feature is compiled
     pub fn with_hf_client(mut self, enable: bool) -> Self {
-        self.enable_hf_client = enable;
+        self.enable_hf_client = enable && cfg!(feature = "hf-client");
         self
     }
 
@@ -800,6 +806,21 @@ impl PumasApiBuilder {
 #[cfg(test)]
 mod startup_claim_tests {
     use super::*;
+
+    #[test]
+    fn hf_client_follows_the_compiled_hf_client_feature() {
+        let builder = PumasApi::builder("unused-root");
+        assert_eq!(builder.enable_hf_client, cfg!(feature = "hf-client"));
+        assert_eq!(
+            builder.with_hf_client(true).enable_hf_client,
+            cfg!(feature = "hf-client")
+        );
+        assert!(
+            !PumasApi::builder("unused-root")
+                .with_hf_client(false)
+                .enable_hf_client
+        );
+    }
 
     #[tokio::test]
     async fn failed_construction_retains_claim_instead_of_asserting_initializer_cessation() {

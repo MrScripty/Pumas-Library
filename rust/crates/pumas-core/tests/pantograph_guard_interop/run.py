@@ -12,8 +12,8 @@ import shutil
 import subprocess
 import tempfile
 
-PANTOGRAPH_COMMIT = "038dacaaa98ebd007c32e13d4608726ca5ccf63a"
-GUARD_BLOB = "af4822d04f732a1db466f4f9df7143b67e88942b"
+PANTOGRAPH_COMMIT = "d17b87efdf46797992d060211ffb0e33f647973c"
+GUARD_BLOB = "672c98180101d7d3997af3b08e2e3b950cfededf"
 GUARD_PATH = "crates/inference/src/selected_audio_execution.rs"
 HOST_ADAPTER_PATH = "crates/pantograph-embedded-runtime/src/runtime_host_package_facts.rs"
 

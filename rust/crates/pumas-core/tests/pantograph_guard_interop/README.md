@@ -1,7 +1,7 @@
 # Pumas → Pantograph guard interoperability
 
 This standalone harness calls the unchanged `SelectedAudioLoad::validate` from
-Pantograph commit `038dacaaa98ebd007c32e13d4608726ca5ccf63a`. It compiles against
+Pantograph commit `d17b87efdf46797992d060211ffb0e33f647973c`. It compiles against
 that checkout's actual inference types and the current local Pumas library. It
 also compiles the pinned host's unchanged entry-path privacy-normalization functions.
 The runner checks the commit, guard blob, and tracked source cleanliness.

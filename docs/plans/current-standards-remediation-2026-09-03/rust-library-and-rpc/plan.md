@@ -485,7 +485,7 @@ checkpoint or imply a failed GitHub Actions result.
 **Reports:** Pending report slots are listed in the
 [execution ledger](execution-ledger.md#reports).
 
-**Audit source:** [Rust library and RPC](../../../audits/current-standards-2026-09-03/rust-library-and-rpc.md)
+**Audit source:** Rust library and RPC (`docs/audits/current-standards-2026-09-03/rust-library-and-rpc.md`, removed; see Git history at `0a4c0a8e`)
 
 ## Active PRG-I19 Slice C Boundary
 

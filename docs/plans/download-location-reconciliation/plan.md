@@ -32,7 +32,7 @@ owners and boundaries. A passing build alone cannot close this plan.
 
 ## Evidence and scope
 
-The [investigation](../../investigations/download-path-discrepancy-2026-10-10.md)
+The investigation (`docs/investigations/download-path-discrepancy-2026-10-10.md`, removed; see Git history at `0a4c0a8e`)
 establishes three historical moves during active downloads, followed by attempts
 to open the next file at the now-absent destination. All 38 expected files now
 exist at the three catalog locations. Their aggregate sizes agree with SQLite;

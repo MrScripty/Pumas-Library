@@ -2,7 +2,7 @@
 
 **Plan status:** `Active`
 
-**Input:** [comprehensive audit 2026-11-02](../../audits/comprehensive-audit-2026-11-02.md),
+**Input:** comprehensive audit 2026-11-02 (`docs/audits/comprehensive-audit-2026-11-02.md`, removed; see Git history at `0a4c0a8e`),
 written against `b1196838`. Every finding was re-verified against
 `7b40d50f` (2026-11-05) by reading current source; High findings were
 spot-checked a second time. The verified tree was then compared with

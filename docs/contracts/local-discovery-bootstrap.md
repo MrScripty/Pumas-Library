@@ -205,7 +205,7 @@ The same-registry support boundary and physical-store/namespace limitations rema
 
 ### Request admission follow-up to slice 2
 
-The additive [HTTP admission fence](../contracts/local-http-admission-fence.md)
+The additive [HTTP admission fence](local-http-admission-fence.md)
 binds opted-in requests to the already authenticated core and HTTP service
 generations. RPC advertises schema `pumas.http-admission-fence@1` through the
 existing shared build descriptor. Older peers remain observable, but the typed
@@ -234,7 +234,7 @@ checkpoint under the same physical lease and returns another restricted owner.
 Normal bootstrap never invokes recovery. Ordinary full/legacy/unknown owners
 remain unqualified. This does not certify model bytes, readiness, inference,
 downloads or arbitrary external writers. See
-[the current custody contract](operating-owner-custody-design.md) for the API,
+[the current custody contract](restricted-owner-custody.md) for the API,
 capabilities, durability bounds, native evidence and remaining full-owner gap.
 
 ### First recovery slice: qualified pending reservations (Linux)
@@ -285,7 +285,7 @@ No model/runtime download or inference is needed. Hardware power-loss durability
 and additional operating systems are not qualified by those tests.
 
 The distinct future operating-owner contract is described in
-[operating-owner-custody-design.md](operating-owner-custody-design.md). Current
+[restricted-owner-custody.md](restricted-owner-custody.md). Current
 operating rows remain unresolved after process loss.
 
 Define one on-disk library identity/migration and a physical-store primary lifetime
@@ -418,7 +418,7 @@ process-loss recovery remain pending.
 
 ### Passive consumer retention follow-up
 
-[`local-owner-retention.md`](../contracts/local-owner-retention.md) defines an
+[`local-owner-retention.md`](local-owner-retention.md) defines an
 opaque generation-bound passive guard using existing external-service tasks and
 physical lifetime shares. Mandatory-fenced HTTP streaming and a read-only CLI
 holder make it usable by external consumers. Exact row release waits for guards;
@@ -432,10 +432,10 @@ or a release qualification.
 ## Explicit startup and distribution projection
 
 The follow-on explicit selected-root reservation is documented in
-[`local-start-authority.md`](../contracts/local-start-authority.md). It transfers
+[`local-start-authority.md`](local-start-authority.md). It transfers
 the existing held native lease and exact pending claim into the current builder,
 and adds a Linux CLI acknowledgment for owned/borrowed HTTP access. The
-[inference-built control-plane bootstrap](../contracts/inference-enabled-bootstrap.md)
+[inference-built control-plane bootstrap](inference-enabled-bootstrap.md)
 uses the same authority and acknowledgment without loading a model or native SDK.
 This closes a bounded typed start-admission gap; automatic historical
 bootstrap and full operating dead-owner recovery remain pending. Explicit qualified

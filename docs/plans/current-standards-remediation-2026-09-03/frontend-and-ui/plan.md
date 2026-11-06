@@ -2665,7 +2665,7 @@ root serializes generation, Cargo and commits. Full M4/M5 remain unaccepted.
 
 **Reports:** Planned report artifacts are indexed in the [execution ledger](execution-ledger.md#reports).
 
-**Audit source:** [Frontend and UI audit](../../../audits/current-standards-2026-09-03/frontend-and-ui.md)
+**Audit source:** Frontend and UI audit (`docs/audits/current-standards-2026-09-03/frontend-and-ui.md`, removed; see Git history at `0a4c0a8e`)
 
 ## Objective
 

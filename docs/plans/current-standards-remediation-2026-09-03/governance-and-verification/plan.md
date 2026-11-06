@@ -16,7 +16,7 @@ are accepted.
 **Reports:** [Error-contract gate disposition](reports/error-contract-gate-disposition.md)
 and [final governance evidence](reports/final-governance-evidence.md).
 
-**Audit source:** [Standards governance and verification](../../../audits/current-standards-2026-09-03/governance-and-verification.md)
+**Audit source:** Standards governance and verification (`docs/audits/current-standards-2026-09-03/governance-and-verification.md`, removed; see Git history at `0a4c0a8e`)
 
 ## Objective
 

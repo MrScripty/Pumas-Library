@@ -221,7 +221,7 @@ diffusion serving plan (`git show 78c52fcf:docs/plans/torch-diffusion-serving/`)
 The managed runtime lock is the production dependency candidate; the root
 `requirements.txt` remains a direct-development input. Keep qualification,
 vulnerability and license evidence attached to the exact managed lock. See [Releasing](../RELEASING.md), [Security](../docs/SECURITY.md), and
-the [current standards audit](../docs/audits/current-standards-2026-09-03/README.md).
+the [open desktop, release and Torch issues](../docs/plans/current-standards-remediation-2026-09-03/desktop-release-bindings-and-torch/issues.md).
 
 Native compatibility checks (using a qualified managed Python environment):
 

@@ -25,11 +25,12 @@ Consumer-facing contracts:
 
 - [Model operations v1](contracts/model-operations-v1.md) and [model lookup v1](contracts/model-lookup-v1.md)
 - [Image-to-text](contracts/image-to-text-v0.8.md), [image generation](contracts/image-generation.md) and [generation lifetime](contracts/generation-lifetime.md)
-- [Local HTTP consumer](contracts/local-http-consumer.md), [admission fence](contracts/local-http-admission-fence.md), [owner retention](contracts/local-owner-retention.md), [start authority](contracts/local-start-authority.md) and [inference-enabled bootstrap](contracts/inference-enabled-bootstrap.md)
+- [Local HTTP consumer](contracts/local-http-consumer.md), [admission fence](contracts/local-http-admission-fence.md), [owner retention](contracts/local-owner-retention.md), [start authority](contracts/local-start-authority.md), [inference-enabled bootstrap](contracts/inference-enabled-bootstrap.md) and [local discovery and bootstrap](contracts/local-discovery-bootstrap.md)
 
 Internal boundaries:
 
 - [Artifact acquisition](contracts/artifact-acquisition.md), [Hugging Face model-detail cache](contracts/hf-model-detail-cache.md) and [retained download reconciliation](contracts/download-location-reconciliation.md)
+- [Restricted catalog/query owner custody](contracts/restricted-owner-custody.md)
 - [Torch provider protocol](contracts/torch-provider-protocol.md)
 - Audio: [custody foundation](contracts/audio-custody-foundation.md), [owned transport](contracts/owned-audio-transport.md), [owned lifecycle](contracts/owned-audio-lifecycle.md), [installed constructor](contracts/installed-audio-constructor.md), [installed session](contracts/installed-audio-session.md), [Cohere qualification](contracts/cohere-native-qualification.md) and [Cohere cohort](contracts/cohere-native-cohort.md)
 - [Image-to-text native qualification](contracts/image-to-text-native-qualification.md)
@@ -44,18 +45,12 @@ acquisition plan (`contracts/*.json`).
 - [ADR 0003: Explicit local acceptance of moved legacy download outputs](adr/0003-download-location-reconciliation.md)
 - [ADR 0004: A model's category is metadata chosen by use](adr/0004-model-category-as-metadata.md)
 
-## Runbooks
+## Past Audits
 
-- [Recover a failed download whose files moved](runbooks/download-location-reconciliation.md)
-
-## Point-in-Time Audits and Investigations
-
-- [2026-09-03 current-standards audit](audits/current-standards-2026-09-03/README.md)
-- [2026-11-02 comprehensive audit](audits/comprehensive-audit-2026-11-02.md), re-verified against `b091ac45`
-- [Download destination and model catalog investigation (2026-10-10)](investigations/download-path-discrepancy-2026-10-10.md)
-
-Audits and investigations describe the named repository and standards commits.
-They are evidence and remediation inputs, not current operating instructions.
+Past audits (2026-09-03 current standards, 2026-11-02 comprehensive) and
+investigations are dated evidence, not operating instructions; they are kept in
+Git history (`git log -- docs/audits docs/investigations`). Open findings live
+in the plans below.
 
 ## Release Evidence
 
@@ -63,8 +58,6 @@ They are evidence and remediation inputs, not current operating instructions.
   [S3 profile](release-attribution/0.8.0-s3/README.md): the third-party notices
   and inventories that packages embed, checked by
   `scripts/release/check-attribution.cjs`
-- [0.7.0 ONNX archive verification](release-evidence/0.7.0/onnx-archive-verification.json):
-  point-in-time evidence for the 0.7.0 ONNX Runtime archive
 
 Vulnerability results are not kept in the tree: each CI run produces the
 `current-vulnerability-results` artifact (see [Security](SECURITY.md#dependency-scans)).
@@ -92,7 +85,6 @@ there. These hold open acceptance gates:
 - [Torch cross-platform runtime management](plans/torch-cross-platform-runtime-management/plan.md) — packaged and Windows/macOS install gates open; the managed-Python license blocker is open
 - [2026-09-03 current-standards remediation program](plans/current-standards-remediation-2026-09-03/plan.md) — open issues not yet re-verified against 0.8.0. Its focused plans: [Rust library and RPC](plans/current-standards-remediation-2026-09-03/rust-library-and-rpc/plan.md), [frontend and UI](plans/current-standards-remediation-2026-09-03/frontend-and-ui/plan.md), [desktop, release, bindings and Torch](plans/current-standards-remediation-2026-09-03/desktop-release-bindings-and-torch/plan.md) and [governance and verification](plans/current-standards-remediation-2026-09-03/governance-and-verification/plan.md) (accepted)
 - [Hugging Face discovery cache readiness](plans/hf-discovery-cache/readiness.md) — deferred checklist for the shared cache
-- Design records still linked as current: [operating owner custody](plans/operating-owner-custody-design.md) and [local discovery bootstrap](plans/local-discovery-bootstrap.md)
 
 An implementation invocation must name the exact focused `plan.md` and an
 explicit `start`, `continue`, or `verify` operation. Plans remain temporary

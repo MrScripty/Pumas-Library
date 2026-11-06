@@ -725,7 +725,10 @@ failed outcomes instead of collapsing them into defaults.
 The default `full` feature enables `hf-client`, `process-manager`, `gpu-monitor`
 and `onnx-runtime`. `onnx-runtime` gates the ONNX execution module and its
 native dependencies; `s3`, `contract-schema` and `uniffi` gate their optional
-dependencies. The other three remove no dependency or module; the
+dependencies. The other three gate behavior without removing a dependency or
+module: without `hf-client` the HuggingFace client never starts, without
+`gpu-monitor` `nvidia-smi` is never run, and without `process-manager` the
+legacy process manager cannot be enabled. The
 [Rust guide](../../README.md#features-and-variants) owns the exact facts.
 
 ## Verification

@@ -18,7 +18,17 @@ maintainer explicitly announces otherwise.
   to the Rust sidecar. Coverage is incomplete; renderer TypeScript types are not
   a security boundary.
 - `pumas-rpc` refuses to bind any non-loopback address and limits body size
-  and concurrent requests.
+  and concurrent requests. It also bounds open connections: each connection
+  must send its request head within 30 seconds (which also bounds idle
+  keep-alive), and beyond 256 open connections a new one receives a reasoned
+  `503` (`connection_capacity`) and is closed. Every pre-handler refusal
+  (fence, shutdown, retention, route and method) carries
+  `{"error":{"code","message"}}`.
+- The desktop launches `pumas-rpc` on `--port 0` with a fresh launch nonce in
+  the child environment and accepts readiness only from a
+  `PUMAS_RPC_READY` line and `health_check` that echo it, so another process
+  on the port is never taken for its backend; `--exit-on-stdin-eof` stops the
+  backend when the desktop dies.
 - `pumas-rpc` has no LAN mode. Its receiving HTTP boundary rejects
   non-loopback Host values, non-loopback or malformed Origin values, duplicate
   authority/origin headers, and originless cross-site browser requests before
@@ -50,7 +60,10 @@ producer's public error projection (`pumas-rpc/src/public_text.rs`). Callers
 branch on its stable code and class. Its message carries the failure reason so
 the local user and consuming applications can act on it (owner decision,
 2026-11-02). Messages are bounded to 1,024 characters and single-line;
-credential-shaped words, secret `key=value` pairs, URL user info and URL query
+control characters become spaces before redaction, so a credential split by a
+newline or tab is still found. Credential-shaped words, `Bearer` and `Basic`
+values, secret `key=value` pairs, labelled values (`token: X`,
+`Authorization: X`), JSON pairs (`"token":"X"`), URL user info and URL query
 strings (which can hold signatures) are redacted; and the home directory is
 shown as `~`. Messages may include other local paths and query-free URLs, which
 the receiving boundary already restricts to loopback clients of the same user.
@@ -87,7 +100,35 @@ its recorded versions as resolution constraints.
 
 Provider clients that may reach a remote runtime profile keep the user's
 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` for remote hosts but never proxy a
-loopback host, so local prompts and models do not leave the machine.
+loopback host (`127.0.0.0/8`, `::1`, `localhost`), so local prompts and models
+do not leave the machine; clients that only ever talk to loopback (the Torch
+sidecar, the llama.cpp router observer, plugin health probes) use no proxy at
+all, and provider clients follow no redirects. External runtime profiles may
+name a provider on another host over `http` or `https`; that is supported, and
+a plain-`http` remote profile is logged as a warning (without its URL) because
+prompts, images and outputs then cross the network unencrypted.
+
+## Owned Runtime Processes
+
+Runtime children Pumas starts (Ollama, Torch and llama.cpp, from the legacy
+launcher and the runtime-profile owner) start from an empty environment plus an
+allowlist (`platform::child_environment`): process basics, locale, temporary
+and XDG directories, GPU selection and driver discovery, the proxy/TLS
+transport set and `OLLAMA_*` settings. Loader and interpreter injection
+(`LD_PRELOAD`, `LD_AUDIT`, `DYLD_*`, `PYTHONPATH`, `PYTHONHOME`, other
+`PYTHON*`), credentials such as `HF_TOKEN`, and the inherited
+`LD_LIBRARY_PATH` are no longer passed; a launch that needs a library path sets
+it explicitly. The backend removes `PUMAS_RPC_LAUNCH_NONCE` from its own
+environment before any child starts.
+
+Every launch writes its PID file plus a `<pid file>.identity` record (boot id,
+start time and executable on Linux; seconds-resolution start time and
+executable on macOS and Windows, a documented weaker check). Pumas signals or
+reports a process as running only while its record matches the live process,
+and re-checks before every signal. A bare PID file (no identity, for example
+from an older Pumas), a reused PID or a record from before the current boot is
+never signalled: the stop reports it as skipped with a reason
+(`stop_ollama`/`stop_torch` return the skips) and discards the stale file.
 
 ## Dependency and Release Evidence
 
@@ -101,8 +142,9 @@ whose distributions are exactly those in its hash lock, `requirements.txt`; its
 `resolution.json`, `pip-resolution.json`, `pip-install.json` and
 `installed-files.json` record what was resolved and staged.
 `torch-server/runtime/verified-runtimes.json` records verified combinations as
-evidence: a runtime is verified when its packages match a record's versions,
-which is not a hash or provenance claim. It installs nothing unless the user
+evidence: a runtime is verified when every package a record lists is installed
+at exactly the recorded version (a recorded package that is absent fails the
+match), which is a version comparison, not a hash or provenance claim. It installs nothing unless the user
 opts into a record's versions. The one exact pin is the Cohere audio candidate
 recipe (`rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json`):
 the confined audio read boundary admits only the files that recipe describes.

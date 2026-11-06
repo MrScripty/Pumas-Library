@@ -51,6 +51,7 @@ acquisition plan (`contracts/*.json`).
 ## Point-in-Time Audits and Investigations
 
 - [2026-09-03 current-standards audit](audits/current-standards-2026-09-03/README.md)
+- [2026-11-02 comprehensive audit](audits/comprehensive-audit-2026-11-02.md), re-verified against `b091ac45`
 - [Download destination and model catalog investigation (2026-10-10)](investigations/download-path-discrepancy-2026-10-10.md)
 
 Audits and investigations describe the named repository and standards commits.
@@ -81,7 +82,9 @@ Direction, not commitments. Each brief states what of it exists today.
 
 ## Active and Planned Work
 
-No plan is being executed right now. These hold open acceptance gates:
+The [2026-11 audit remediation](plans/audit-remediation-2026-11/plan.md) plan
+fixes the findings of the 2026-11-02 audit; owner decisions D1-D6 are recorded
+there. These hold open acceptance gates:
 
 - [Artifact acquisition](plans/artifact-acquisition/plan.md) — Q1 (HTTP) and Q3 (S3) ship in 0.8.0; AQ-HTTP and AQ-S3 acceptance pending; Q2 not started
 - [Runtime installations and model adapters](plans/runtime-installations-and-model-adapters/plan.md) — planned; R1 waits on AQ-HTTP acceptance

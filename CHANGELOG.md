@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Fixes from the [2026-11-02 audit](docs/audits/comprehensive-audit-2026-11-02.md)
+([remediation plan](docs/plans/audit-remediation-2026-11/plan.md)).
+
+### Security
+
+- The desktop keeps every renderer on the bundled app: child windows,
+  off-app navigation, webviews and browser permissions are denied, links open
+  in the system browser, and every IPC handler checks its sender. Packaged
+  builds ignore `--dev`, `--debug` and `PUMAS_RPC_BINARY`, ship no DevTools,
+  source maps or declarations, and the shipped CSP drops loopback
+  `connect-src`.
+- The desktop launches the backend on port 0 with a fresh launch nonce and
+  accepts only its own nonce-bound readiness; the backend exits when the
+  desktop dies (`--exit-on-stdin-eof`).
+- Owned runtime children start from an environment allowlist; `LD_PRELOAD`,
+  `PYTHONPATH`, credentials and the inherited `LD_LIBRARY_PATH` are no longer
+  passed.
+- Legacy runtime stops and running checks act only on processes whose PID
+  identity record matches the live process; a command-line sweep and bare or
+  reused PIDs are never signalled.
+- Ollama installs only from publisher-SHA-256-verified archives; Torch
+  installs only from a validated per-install hash lock
+  (`--require-hashes --no-deps`); dependency installs never use the `python3`
+  on PATH; version tags that escape their directory are refused.
+- Managed Torch sidecars require a per-backend token and confine model loads
+  to the library's roots. Loopback provider traffic never uses a proxy and
+  provider clients follow no redirects.
+- Public error redaction handles control characters, labelled values, JSON
+  pairs and `Basic` credentials. The HF token is written atomically with mode
+  0600 and `registry.db` is owner-only on Unix.
+- `pumas-rpc` bounds open connections (30 s request head, 256 connections)
+  and serves with no plugins instead of loading them from a shared temp
+  directory.
+- Release builds scan dependencies (`cargo-deny`, `pnpm audit`, `pip-audit`):
+  advisory on pull requests, blocking for tags and candidates.
+
+### Changed
+
+- Rejections carry reasons: typed RPC refusals name the offending field,
+  pre-handler HTTP refusals return `{"error":{"code","message"}}`,
+  `request_limit` refusals name the bound, gateway and IPC capacity refusals
+  say what failed.
+- Additive wire fields: `stop_ollama`/`stop_torch` report `skipped` processes
+  with reasons; `health_check` echoes `launch_nonce`; Hugging Face search rows
+  carry `observedAt` and `cached`; ONNX embedding descriptors advertise the
+  model's `input_tokens` limit and image capabilities their decode bounds;
+  `preview_torch_runtime` accepts `verified_versions` to install a verified
+  combination's recorded versions.
+- The desktop decodes credential, import, delete, runtime-profile, serving,
+  HF search and status pull traffic with Rust-exported contracts, restarts a
+  backend that fails three health checks, and reports update-stream loss.
+- The renderer shows load failures, cache age and recovery reasons instead of
+  silent defaults, and backs off installation polling on transport failures.
+- The `hf-client` and `gpu-monitor` features gate behavior; ONNX work runs off
+  the async executor and derives its token limit from the model config.
+- Model index records its schema version and refuses unknown ones;
+  versions metadata changes under one write lock; review edits whose
+  `metadata.json` write was interrupted are replayed.
+- `OllamaClient::new` and `VersionManager::version_path` return `Result`.
+
+### Removed
+
+- `network::DownloadManager` and `DownloadProgress`, `NetworkManager::execute`
+  and `CacheStrategy`'s `allow_stale_on_offline`/`max_stale_age`.
+- `OllamaVersionManager`, `ProcessManagerFactory` and the app-manager
+  `process` module.
+- Dead renderer modules, the superseded 0.7.0 and 0.8.0-rc.1 attribution
+  sets, and the flake8 configuration.
+
+### Fixed
+
+- Orphaned Hugging Face downloads resume under their recorded commit; repo
+  IDs are validated on every metadata read; a corrupt tree cache is refetched;
+  unbounded retry settings are refused.
+- Model and package-facts removals commit with their update events; search
+  setup is atomic; corrupt rows and search failures surface as errors.
+- The legacy JSON writer syncs its directory and backup.
+- The Torch sidecar stays responsive during generation and refuses unsafe work
+  with reasons; externally referenced models stay loadable by Torch.
+- The local HTTP consumer ships the capability-descriptor schema it pins.
+
 ## [0.8.0] - 2026-11-04
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
@@ -79,8 +160,10 @@ downloads and known limitations.
   fixed v2.9.1 preset and its embedded lock are replaced by verified
   combinations (`torch-server/runtime/verified-runtimes.json`), which the
   install dialog offers as shortcuts that resolve current package versions; a
-  runtime is reported as verified only when its packages match the recorded
-  versions. The FLUX.2 and Nunchaku image adapters name their packages without
+  runtime is reported as verified only when every package the combination
+  records is installed at exactly the recorded version (an absent recorded
+  package fails the match). Verified is a version comparison, not a hash or
+  provenance claim. The FLUX.2 and Nunchaku image adapters name their packages without
   version pins, and Nunchaku is a regular adapter choice, offered and accepted
   only for the selection its wheel supports (Torch v2.9.1, cu130, Python
   3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed

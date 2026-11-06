@@ -109,12 +109,12 @@ distribution/model/feature qualification.
 
 The copied `CapabilityDescriptor` schema is
 `scripts/consumers/contracts/capability-descriptor.schema.json`, exported from
-producer source `b091ac45324ed983afc3eb3937fbb44ebf9457cd` (tree
-`b3d97b431abb38f89bb8a1108263320705ae5899`) by the schema export test in the
+producer source `7b39606a3e79c4ed9a2a9a329b4f30b6fd2849d9` (tree
+`389ecc51666530c40334ddbebc7c109b1d21daab`) by the schema export test in the
 [Image-to-Text contract](image-to-text-v0.8.md). This pin identifies the schema
 and fixture contract; it does not qualify execution of that producer by this
-example. The copied schema is exactly 4,212 bytes with SHA256
-`c586a54fd8c0524dfcbae00dd298d5ee06bb70675c78e871b8a82a77c7ba5316`.
+example. The copied schema is exactly 4,981 bytes with SHA256
+`2a0270d10beaa5364ef3c598767dfcddae014a55a42d0c55b3df2bf4acff7f12`.
 The decoder rechecks that hash before use. To move the pin, rerun that export,
 copy `capability-descriptor.schema.json` over the file, and update
 `DESCRIPTOR_SCHEMA_SHA256` and this paragraph together.

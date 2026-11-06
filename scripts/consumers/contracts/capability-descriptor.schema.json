@@ -105,22 +105,46 @@
       "type": "object"
     },
     "OptionName": {
-      "enum": [
-        "max_tokens",
-        "temperature",
-        "top_p",
-        "dimensions",
-        "input_count",
-        "input_characters",
-        "width",
-        "height",
-        "seed",
-        "max_output_tokens",
-        "image_bytes",
-        "image_pixels",
-        "image_count"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "dimensions",
+            "input_count",
+            "input_characters",
+            "width",
+            "height",
+            "seed",
+            "max_output_tokens",
+            "image_bytes",
+            "image_pixels",
+            "image_count"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "total_image_bytes",
+          "description": "Decoded bytes of all images in one request.",
+          "type": "string"
+        },
+        {
+          "const": "message_count",
+          "description": "Messages in one `image_messages` input.",
+          "type": "string"
+        },
+        {
+          "const": "content_parts",
+          "description": "Content parts across one request.",
+          "type": "string"
+        },
+        {
+          "const": "input_tokens",
+          "description": "Tokens per input, including special tokens, from the served model's\nown positional limit.",
+          "type": "string"
+        }
+      ]
     },
     "OutputFormat": {
       "enum": [

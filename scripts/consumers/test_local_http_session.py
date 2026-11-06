@@ -269,8 +269,10 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
                 self.remember(borrowed, "generic-http-actual-borrowed-selection")
                 capabilities = await borrowed.capabilities("operator-missing-model")
                 self.assertEqual(capabilities["status"], 404)
-                self.assertEqual(capabilities["body"]["error"],
+                error = capabilities["body"]["error"]
+                self.assertEqual({key: error[key] for key in ("code", "outcome")},
                                  {"code": "model_not_found", "outcome": "not_admitted"})
+                self.assertIn("operator-missing-model", error["message"])
                 for kind, source in (("text", {"kind": "text", "text": "hello"}),
                                      ("audio", {"kind": "audio", "encoding": "pcm_s16le",
                                                 "sample_rate_hz": 16000, "channels": 1,
@@ -279,9 +281,12 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
                              "model": "operator-missing-model", "input": source, "output": "text"}
                     reply = await borrowed.model_operation(value)
                     self.assertEqual(reply["status"], 404)
-                    self.assertEqual(reply["body"], {"contract_version": 1,
-                        "request_id": value["request_id"],
-                        "error": {"code": "model_not_found", "outcome": "not_admitted"}})
+                    error = reply["body"]["error"]
+                    self.assertEqual({key: reply["body"][key] for key in ("contract_version", "request_id")},
+                                     {"contract_version": 1, "request_id": value["request_id"]})
+                    self.assertEqual({key: error[key] for key in ("code", "outcome")},
+                                     {"code": "model_not_found", "outcome": "not_admitted"})
+                    self.assertIn("operator-missing-model", error["message"])
                     self.records.append({"event": "actual-generic-modality-refused", "request": value,
                                          "reply": reply, "runtime_or_model_loaded": False})
             self.assertIsNone(owned._bootstrap.process.returncode)
@@ -298,7 +303,12 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
                     "model": "operator-missing-model", "input": {"kind": "text", "text": "hello"},
                     "output": "text"})
                 self.assertEqual(reply["status"], 412)
-                self.assertIsNone(reply["body"], "pre-handler fencing supplies no operation envelope")
+                # Pre-handler fencing names its reason but supplies no operation envelope.
+                body = reply["body"]
+                self.assertEqual(body["error"]["code"], "generation_mismatch")
+                self.assertIsInstance(body["error"]["message"], str)
+                self.assertNotIn("contract_version", body)
+                self.assertNotIn("request_id", body)
                 self.records.append({"event": "actual-native-refuses-controlled-stale-fence", "reply": reply})
             finally:
                 held._fence = original

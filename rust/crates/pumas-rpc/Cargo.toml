@@ -36,7 +36,7 @@ tower-http = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 crc32fast = "=1.5.0"
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 # Safe API; build the checksum-pinned bundled libjpeg-turbo statically by default.

@@ -7,100 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Fixes from the [2026-11-02 audit](docs/audits/comprehensive-audit-2026-11-02.md)
-([remediation plan](docs/plans/audit-remediation-2026-11/plan.md)).
-
-### Security
-
-- The desktop keeps every renderer on the bundled app: child windows,
-  off-app navigation, webviews and browser permissions are denied, links open
-  in the system browser, and every IPC handler checks its sender. Packaged
-  builds ignore `--dev`, `--debug` and `PUMAS_RPC_BINARY`, ship no DevTools,
-  source maps or declarations, and the shipped CSP drops loopback
-  `connect-src`.
-- The desktop launches the backend on port 0 with a fresh launch nonce and
-  accepts only its own nonce-bound readiness; the backend exits when the
-  desktop dies (`--exit-on-stdin-eof`).
-- Owned runtime children start from an environment allowlist; `LD_PRELOAD`,
-  `PYTHONPATH`, credentials and the inherited `LD_LIBRARY_PATH` are no longer
-  passed.
-- Legacy runtime stops and running checks act only on processes whose PID
-  identity record matches the live process; a command-line sweep and bare or
-  reused PIDs are never signalled.
-- Ollama installs only from publisher-SHA-256-verified archives; Torch
-  installs only from a validated per-install hash lock
-  (`--require-hashes --no-deps`); dependency installs never use the `python3`
-  on PATH; version tags that escape their directory are refused.
-- Managed Torch sidecars require a per-backend token and confine model loads
-  to the library's roots. The token is sent only to a sidecar this backend
-  launched and is currently running; a caller-named Torch `connection_url` or
-  any other server never receives it. Loopback provider traffic never uses a
-  proxy and provider clients follow no redirects.
-- Credential-less `http://` artifact sources on a network host are fetched
-  over `https` first and fall back to the plaintext URL, with a logged
-  warning, only when the HTTPS attempt gets no HTTP response. Loopback
-  sources are unchanged and credentialed plaintext stays refused.
-- Public error redaction handles control characters, labelled values, JSON
-  pairs and `Basic` credentials. The HF token is written atomically with mode
-  0600 and `registry.db` is owner-only on Unix.
-- `pumas-rpc` bounds open connections (30 s request head, 256 connections)
-  and serves with no plugins instead of loading them from a shared temp
-  directory.
-- Release builds scan dependencies (`cargo-deny`, `pnpm audit`, `pip-audit`):
-  advisory on pull requests, blocking for tags and candidates.
-
-### Changed
-
-- Rejections carry reasons: typed RPC refusals name the offending field,
-  pre-handler HTTP refusals return `{"error":{"code","message"}}`,
-  `request_limit` refusals name the bound, gateway and IPC capacity refusals
-  say what failed.
-- Additive wire fields: `stop_ollama`/`stop_torch` report `skipped` processes
-  with reasons; `health_check` echoes `launch_nonce`; Hugging Face search rows
-  carry `observedAt` and `cached`; ONNX embedding descriptors advertise the
-  model's `input_tokens` limit and image capabilities their decode bounds;
-  `preview_torch_runtime` accepts `verified_versions` to install a verified
-  combination's recorded versions.
-- The desktop decodes credential, import, delete, runtime-profile, serving,
-  HF search and status pull traffic with Rust-exported contracts, restarts a
-  backend that fails three health checks, and reports update-stream loss.
-- The renderer shows load failures, cache age and recovery reasons instead of
-  silent defaults, and backs off installation polling on transport failures.
-- The `hf-client` and `gpu-monitor` features gate behavior; ONNX work runs off
-  the async executor and derives its token limit from the model config.
-- Model index records its schema version and refuses unknown ones;
-  versions metadata changes under one write lock; review edits whose
-  `metadata.json` write was interrupted are replayed.
-- `OllamaClient::new` and `VersionManager::version_path` return `Result`.
-- Updated `tokio` to 1.54.1 (with `mio`, `socket2`, `tokio-macros`), `zstd`
-  to 0.13.4, `zstd-safe` to 7.4.0 and `ctutils` to 0.4.8, clearing
-  RUSTSEC-2026-0385, -0386 and -0391 to -0406.
-
-### Removed
-
-- `network::DownloadManager` and `DownloadProgress`, `NetworkManager::execute`
-  and `CacheStrategy`'s `allow_stale_on_offline`/`max_stale_age`.
-- `OllamaVersionManager`, `ProcessManagerFactory` and the app-manager
-  `process` module.
-- Dead renderer modules, the superseded 0.7.0 and 0.8.0-rc.1 attribution
-  sets, and the flake8 configuration.
-
-### Fixed
-
-- Orphaned Hugging Face downloads resume under their recorded commit; repo
-  IDs are validated on every metadata read; a corrupt tree cache is refetched;
-  unbounded retry settings are refused.
-- Model and package-facts removals commit with their update events; search
-  setup is atomic; corrupt rows and search failures surface as errors.
-- The legacy JSON writer syncs its directory and backup.
-- The Torch sidecar stays responsive during generation and refuses unsafe work
-  with reasons; externally referenced models stay loadable by Torch.
-- The local HTTP consumer ships the capability-descriptor schema it pins.
-
-## [0.8.0] - 2026-11-04
+## [0.8.0] - 2026-11-06
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
-downloads and known limitations.
+downloads and known limitations. This release also includes the fixes from
+the 2026-11-02 audit
+([remediation plan](docs/plans/audit-remediation-2026-11/plan.md)).
 
 ### Added
 
@@ -181,8 +93,45 @@ downloads and known limitations.
 - Desktop update streams (model library, downloads, runtime profiles, serving
   status and status telemetry) are validated against the backend's declaration.
   A rejected desktop payload says which field and rule failed.
-- Updated Electron to 43.8.1, Vite to 6.4.5, undici to 6.29.1 and 7.30.1,
-  `zip` to 2.6.1, `rustls` to 0.23.46 and `rand` to 0.10.
+- Updated Electron to 43.8.1, Vite to 8.3.5, `lucide-react` to 1.67, undici
+  to 6.29.1 and 7.30.1, `rusqlite` to 0.41, `rustls` to 0.23.46, `nix` to
+  0.31, `windows-sys` to 0.61, `base64` to 0.23 and `rand` to 0.10.
+- Rejections carry reasons: typed RPC refusals name the offending field,
+  pre-handler HTTP refusals return `{"error":{"code","message"}}`,
+  `request_limit` refusals name the bound, gateway and IPC capacity refusals
+  say what failed.
+- Additive wire fields: `stop_ollama`/`stop_torch` report `skipped` processes
+  with reasons; `health_check` echoes `launch_nonce`; Hugging Face search rows
+  carry `observedAt` and `cached`; ONNX embedding descriptors advertise the
+  model's `input_tokens` limit and image capabilities their decode bounds;
+  `preview_torch_runtime` accepts `verified_versions` to install a verified
+  combination's recorded versions.
+- The desktop decodes credential, import, delete, runtime-profile, serving,
+  HF search and status pull traffic with Rust-exported contracts, restarts a
+  backend that fails three health checks, and reports update-stream loss.
+- The renderer shows load failures, cache age and recovery reasons instead of
+  silent defaults, and backs off installation polling on transport failures.
+- The `hf-client` and `gpu-monitor` features gate behavior; ONNX work runs off
+  the async executor and derives its token limit from the model config.
+- Model index records its schema version and refuses unknown ones;
+  versions metadata changes under one write lock; review edits whose
+  `metadata.json` write was interrupted are replayed.
+- `OllamaClient::new` and `VersionManager::version_path` return `Result`.
+- Updated `tokio` to 1.54.1 (with `mio`, `socket2`, `tokio-macros`), `zstd`
+  to 0.13.4, `zstd-safe` to 7.4.0 and `ctutils` to 0.4.8, clearing
+  RUSTSEC-2026-0385, -0386 and -0391 to -0406.
+- The generated desktop contract is one shared workspace package
+  (`packages/desktop-contract`) instead of identical copies in the Electron
+  and frontend trees; the packaged app still bundles it into the preload.
+
+### Removed
+
+- `network::DownloadManager` and `DownloadProgress`, `NetworkManager::execute`
+  and `CacheStrategy`'s `allow_stale_on_offline`/`max_stale_age`.
+- `OllamaVersionManager`, `ProcessManagerFactory` and the app-manager
+  `process` module.
+- Dead renderer modules, the superseded 0.7.0 and 0.8.0-rc.1 attribution
+  sets, and the flake8 configuration.
 
 ### Fixed
 
@@ -226,14 +175,64 @@ downloads and known limitations.
   cached list at once and refreshes it in the background, instead of waiting
   for GitHub. The new-version indicator compares the newest stable release, not
   whichever release GitHub lists first (for llama.cpp, a pre-release build).
+- Orphaned Hugging Face downloads resume under their recorded commit; repo
+  IDs are validated on every metadata read; a corrupt tree cache is refetched;
+  unbounded retry settings are refused.
+- Model and package-facts removals commit with their update events; search
+  setup is atomic; corrupt rows and search failures surface as errors.
+- The legacy JSON writer syncs its directory and backup.
+- The Torch sidecar stays responsive during generation and refuses unsafe work
+  with reasons; externally referenced models stay loadable by Torch.
+- The local HTTP consumer ships the capability-descriptor schema it pins.
 
 ### Security
 
+- The desktop keeps every renderer on the bundled app: child windows,
+  off-app navigation, webviews and browser permissions are denied, links open
+  in the system browser, and every IPC handler checks its sender. Packaged
+  builds ignore `--dev`, `--debug` and `PUMAS_RPC_BINARY`, ship no DevTools,
+  source maps or declarations, and the shipped CSP drops loopback
+  `connect-src`.
+- The desktop launches the backend on port 0 with a fresh launch nonce and
+  accepts only its own nonce-bound readiness; the backend exits when the
+  desktop dies (`--exit-on-stdin-eof`).
+- Owned runtime children start from an environment allowlist; `LD_PRELOAD`,
+  `PYTHONPATH`, credentials and the inherited `LD_LIBRARY_PATH` are no longer
+  passed.
+- Legacy runtime stops and running checks act only on processes whose PID
+  identity record matches the live process; a command-line sweep and bare or
+  reused PIDs are never signalled.
+- Ollama installs only from publisher-SHA-256-verified archives; Torch
+  installs only from a validated per-install hash lock
+  (`--require-hashes --no-deps`); dependency installs never use the `python3`
+  on PATH; version tags that escape their directory are refused.
+- Managed Torch sidecars require a per-backend token and confine model loads
+  to the library's roots. The token is sent only to a sidecar this backend
+  launched and is currently running; a caller-named Torch `connection_url` or
+  any other server never receives it. Loopback provider traffic never uses a
+  proxy and provider clients follow no redirects.
+- Credential-less `http://` artifact sources on a network host are fetched
+  over `https` first and fall back to the plaintext URL, with a logged
+  warning, only when the HTTPS attempt gets no HTTP response. Loopback
+  sources are unchanged and credentialed plaintext stays refused.
+- Public error redaction handles control characters, labelled values, JSON
+  pairs and `Basic` credentials. The HF token is written atomically with mode
+  0600 and `registry.db` is owner-only on Unix.
+- `pumas-rpc` bounds open connections (30 s request head, 256 connections)
+  and serves with no plugins instead of loading them from a shared temp
+  directory.
+- Release builds scan dependencies (`cargo-deny`, `pnpm audit`, `pip-audit`):
+  advisory on pull requests, blocking for tags and candidates.
 - Managed runtime ZIP archives are read with `zip` 9.4, which fixes
   GHSA advisories for symlink-target exhaustion, AES HMAC bypass and
   dual-header parser differentials. An Ollama ZIP entry whose path would leave
   the install directory now rejects the archive instead of being written
   outside it.
+- The development `torch-server/requirements.txt` floors for torch,
+  transformers, fastapi and accelerate are raised past known advisories
+  (development input only; not shipped). The Pantograph guard interop
+  harness, whose vendored dependency lock carried zip and PyO3 advisories,
+  is removed; its Pumas-side checks are covered by core tests.
 
 ## [0.7.0] - 2026-09-17
 

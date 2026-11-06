@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import {
+  BackendReadyReader,
   PythonBridge,
   rpcRequestTimeoutMs,
   parseModelDownloadUpdateSseChunk,
@@ -129,7 +130,13 @@ function fakeChild() {
   return child;
 }
 
-function stopFixture({ platform = 'linux', options = {}, request, server } = {}) {
+const ANNOUNCED_PORT = 49153;
+
+function readyLine(nonce, port = ANNOUNCED_PORT) {
+  return `PUMAS_RPC_READY=${JSON.stringify({ version: 1, port, nonce })}\n`;
+}
+
+function stopFixture({ platform = 'linux', options = {}, request, server, announce = true } = {}) {
   const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
   const requireBridge = createRequire(bridgeUrl);
   const exports = {};
@@ -143,8 +150,15 @@ function stopFixture({ platform = 'linux', options = {}, request, server } = {})
       if (specifier === 'http' && request) return { request };
       if (specifier === 'net' && server) return { createServer: () => server };
       if (specifier === 'child_process') return {
-        spawn() {
+        spawn(_cmd, args, spawnOptions) {
           const child = fakeChild();
+          child.args = args;
+          child.env = spawnOptions?.env;
+          child.stdio = spawnOptions?.stdio;
+          // Like the real backend, report readiness once the listener is bound.
+          if (announce) {
+            setImmediate(() => child.stdout.emit('data', Buffer.from(readyLine(child.env.PUMAS_RPC_LAUNCH_NONCE))));
+          }
           children.push(child);
           return child;
         },
@@ -430,7 +444,7 @@ for (const reason of ['migration-required', 'backend-unavailable']) {
 test('failed replacement startups retain the admitted runtime retry budget and backoff', async () => {
   const { bridge, children, timers } = stopFixture({ options: { maxRestarts: 3 } });
   bridge.process = null;
-  bridge.call = async () => ({ status: 'ok' });
+  bridge.call = async () => ({ status: 'ok', launch_nonce: bridge.launchNonce });
   await bridge.start();
   assert.equal(bridge.isRunning(), true);
   children[0].exit(1);
@@ -468,25 +482,6 @@ test('an unsuccessful restart attempt cannot erase the previous cleanup failure'
   await assert.rejects(bridge.start(), /Backend binary not found/);
   assert.equal(bridge.stop(), priorStop);
   await assert.rejects(bridge.stop(), /code=9.*cleanup failed/i);
-  assert.equal(children.length, 1);
-  assert.equal(timers.pendingCount(), 0);
-});
-
-test('stop during restart port allocation retains the previous child receipt', async () => {
-  const { bridge, children, timers } = stopFixture();
-  bridge.process = null;
-  bridge.waitForReady = async () => {};
-  await bridge.start();
-  children[0].exit(9);
-  const allocated = deferred();
-  bridge.options.port = 0;
-  bridge.findAvailablePort = () => allocated.promise;
-  const restarting = bridge.start();
-  const rejected = assert.rejects(restarting, /stopped during startup/);
-  const stopFailed = assert.rejects(bridge.stop(), /code=9.*cleanup failed/i);
-  allocated.resolve(49152);
-  await rejected;
-  await stopFailed;
   assert.equal(children.length, 1);
   assert.equal(timers.pendingCount(), 0);
 });
@@ -592,133 +587,6 @@ test('unsettled startup after child exit yields bounded unconfirmed cleanup', as
   await assert.rejects(bridge.start(), /stopping/);
   ready.resolve();
   await startupFailed;
-  assert.equal(timers.pendingCount(), 0);
-});
-
-for (const closeConfirmed of [true, false]) {
-  test(`stop owns port allocation until closure is confirmed (confirmed=${closeConfirmed})`, async () => {
-    const server = new EventEmitter();
-    let allocated;
-    let closeCallback;
-    let closeCalls = 0;
-    Object.assign(server, {
-      listen(_port, _host, callback) { allocated = callback; },
-      address: () => ({ port: 49152 }),
-      close(callback) { closeCalls += 1; closeCallback = callback; },
-    });
-    const { bridge, children, timers } = stopFixture({ options: { port: 0 }, server });
-    bridge.process = null;
-    const starting = bridge.start();
-    const startupFailed = assert.rejects(starting, /stopped during startup/);
-    let stopSettled = false;
-    const stopped = bridge.stop();
-    const stopResult = closeConfirmed
-      ? stopped.then(() => { stopSettled = true; })
-      : assert.rejects(stopped, /startup.*unconfirmed.*cleanup/i);
-    await flushMicrotasks();
-    assert.equal(stopSettled, false);
-    assert.equal(closeCalls, 1);
-    assert.notEqual(bridge.cancelPortAllocation, null);
-    if (!closeConfirmed) {
-      assert.equal(await timers.runNext(), 30_000);
-      await stopResult;
-      assert.notEqual(bridge.startPromise, null);
-      assert.notEqual(bridge.cancelPortAllocation, null);
-      await assert.rejects(bridge.start(), /stopping/);
-    }
-    closeCallback();
-    await startupFailed;
-    await stopResult;
-    allocated();
-    assert.equal(children.length, 0);
-    assert.equal(bridge.startPromise, null);
-    assert.equal(bridge.cancelPortAllocation, null);
-    assert.equal(server.listenerCount('error'), 0);
-    assert.equal(timers.pendingCount(), 0);
-  });
-}
-
-test('a new startup allocation is cancelled even when the previous child has a cached stop outcome', async () => {
-  const server = new EventEmitter();
-  let closeCallback;
-  Object.assign(server, {
-    listen() {},
-    close(callback) { closeCallback = callback; },
-  });
-  const { bridge, children, timers } = stopFixture({ server });
-  bridge.process = null;
-  bridge.waitForReady = async () => {};
-  await bridge.start();
-  children[0].exit();
-  const priorStop = bridge.stop();
-  await priorStop;
-  bridge.options.port = 0;
-  const starting = bridge.start();
-  const startupFailed = assert.rejects(starting, /stopped during startup/);
-  const stopped = bridge.stop();
-  assert.notEqual(stopped, priorStop, 'the new allocation has its own shutdown owner');
-  assert.equal(typeof closeCallback, 'function');
-  closeCallback();
-  await startupFailed;
-  await stopped;
-  assert.equal(children.length, 1);
-  assert.equal(bridge.startPromise, null);
-  assert.equal(bridge.cancelPortAllocation, null);
-  assert.equal(timers.pendingCount(), 0);
-});
-
-for (const previousChild of [false, true]) {
-  test(`exceptional allocation close cannot replay an earlier successful stop (previousChild=${previousChild})`, async () => {
-    const server = new EventEmitter();
-    let allocated;
-    let closeCallback;
-    let closeCalls = 0;
-    Object.assign(server, {
-      listen(_port, _host, callback) { allocated = callback; },
-      address: () => ({ port: 49152 }),
-      close(callback) { closeCalls += 1; closeCallback = callback; },
-    });
-    const { bridge, children, timers } = stopFixture({ server });
-    bridge.process = null;
-    bridge.waitForReady = async () => {};
-    if (previousChild) {
-      await bridge.start();
-      children[0].exit();
-    }
-    const priorStop = bridge.stop();
-    await priorStop;
-    bridge.options.port = 0;
-    const starting = bridge.start();
-    const startupFailed = assert.rejects(starting, /simulated allocation close failure/);
-    allocated();
-    closeCallback(new Error('simulated allocation close failure'));
-    await startupFailed;
-    const allocationOwner = bridge.cancelPortAllocation;
-    assert.equal(bridge.startPromise, null);
-    assert.notEqual(allocationOwner, null, 'an exceptional close retains allocation ownership');
-    const stopped = bridge.stop();
-    assert.notEqual(stopped, priorStop, 'retained allocation ownership invalidates the earlier receipt');
-    await assert.rejects(stopped, /allocation closure unconfirmed.*cleanup incomplete/);
-    assert.equal(bridge.stop(), stopped, 'repeated stop shares the same incomplete outcome');
-    assert.equal(bridge.cancelPortAllocation, allocationOwner);
-    await assert.rejects(bridge.start(), /allocation closure is unconfirmed/);
-    assert.equal(children.length, previousChild ? 1 : 0);
-    assert.equal(closeCalls, 1);
-    assert.equal(timers.pendingCount(), 0);
-  });
-}
-
-test('real loopback allocation is closed and startup settled before stop resolves', { timeout: 5_000 }, async () => {
-  const timers = new FakeTimerController();
-  const bridge = createBridge(timers);
-  bridge.options.port = 0;
-  const starting = bridge.start();
-  const startupFailed = assert.rejects(starting, /stopped during startup/);
-  await bridge.stop();
-  await startupFailed;
-  assert.equal(bridge.startPromise, null);
-  assert.equal(bridge.cancelPortAllocation, null);
-  assert.equal(bridge.process, null);
   assert.equal(timers.pendingCount(), 0);
 });
 
@@ -990,48 +858,89 @@ function createBridge(timerController) {
   });
 }
 
-test('stop during port allocation prevents the pending start from spawning a backend', async () => {
-  const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
-  const requireBridge = createRequire(bridgeUrl);
-  const exports = {};
-  const server = new EventEmitter();
-  let portAllocated;
-  let spawned = 0;
-  Object.assign(server, {
-    listen(_port, _host, callback) { portAllocated = callback; },
-    address: () => ({ port: 49152 }),
-    close(callback) { callback(); },
-  });
-  runInNewContext(readFileSync(bridgeUrl, 'utf8'), {
-    exports,
-    process: { env: {} },
-    setTimeout,
-    clearTimeout,
-    require(specifier) {
-      if (specifier === 'net') return { createServer: () => server };
-      if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
-      if (specifier === 'child_process') return {
-        spawn() {
-          spawned += 1;
-          throw new Error('forbidden post-stop spawn');
-        },
-      };
-      return requireBridge(specifier);
-    },
-  });
-  const bridge = new exports.PythonBridge({
-    port: 0,
-    debug: false,
-    rustBinaryPath: process.execPath,
-    launcherRoot: process.cwd(),
-  });
+test('launch binds port 0, exits on stdin EOF and passes a fresh nonce only in the environment', async () => {
+  const { bridge, children } = stopFixture({ options: { port: 0 } });
+  bridge.process = null;
+  bridge.waitForReady = async () => {};
+  bridge.call = () => Promise.resolve({ status: 'shutting_down' });
+  const nonces = [];
+  for (let launch = 0; launch < 2; launch += 1) {
+    await bridge.start();
+    const child = children[launch];
+    const portFlag = child.args.indexOf('--port');
+    assert.equal(child.args[portFlag + 1], '0');
+    assert.ok(child.args.includes('--exit-on-stdin-eof'));
+    assert.equal(child.stdio[0], 'pipe', 'stdin stays piped so parent death reaches the backend');
+    const nonce = child.env.PUMAS_RPC_LAUNCH_NONCE;
+    assert.match(nonce, /^[0-9a-f]{64}$/);
+    assert.ok(child.args.every((arg) => !arg.includes(nonce)), 'argv is readable by other local users');
+    nonces.push(nonce);
+    const stopped = bridge.stop();
+    child.exit();
+    await stopped;
+  }
+  assert.notEqual(nonces[0], nonces[1]);
+});
+
+test('readiness uses the announced port and requires the health echo of this launch nonce', async () => {
+  const { bridge, children, timers } = stopFixture({ options: { port: 0 } });
+  bridge.process = null;
+  const answers = [];
+  bridge.call = async (method) => {
+    assert.equal(method, 'health_check');
+    answers.push(bridge.port);
+    // Another process answering on the port echoes some other nonce.
+    return answers.length === 1
+      ? { status: 'ok', launch_nonce: 'another-launch' }
+      : { status: 'ok', launch_nonce: bridge.launchNonce };
+  };
   const starting = bridge.start();
-  const stoppedStart = assert.rejects(starting, /stopped during startup/);
-  await bridge.stop();
-  portAllocated();
-  await stoppedStart;
-  assert.equal(spawned, 0);
+  for (let turn = 0; turn < 50 && timers.nextDelay() !== 100; turn += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(bridge.isRunning(), false, 'a foreign nonce is not readiness');
+  assert.equal(await timers.runNext(), 100);
+  await starting;
+  assert.deepEqual(answers, [ANNOUNCED_PORT, ANNOUNCED_PORT]);
+  assert.equal(bridge.isRunning(), true);
+  bridge.call = () => Promise.resolve({ status: 'shutting_down' });
+  const stopped = bridge.stop();
+  children[0].exit();
+  await stopped;
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('a readiness line naming another launch nonce refuses startup', async () => {
+  const { bridge, children, timers } = stopFixture({ options: { port: 0 }, announce: false });
+  bridge.process = null;
+  bridge.call = async () => ({ status: 'ok', launch_nonce: bridge.launchNonce });
+  const starting = bridge.start();
+  const refused = assert.rejects(starting, /does not echo this launch nonce/);
+  children[0].stdout.emit('data', Buffer.from(readyLine('a-different-launch')));
+  await refused;
   assert.equal(bridge.isRunning(), false);
+  bridge.call = () => Promise.resolve({ status: 'shutting_down' });
+  const stopped = bridge.stop();
+  children[0].exit();
+  await stopped;
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('the readiness reader joins split chunks and ignores other output', async () => {
+  const reader = new BackendReadyReader('n0nce');
+  reader.push('RPC_PORT=1234\nordinary log line\nPUMAS_RPC_READY={"version":1,');
+  reader.push('"port":4321,"nonce":"n0nce"}\r\n');
+  assert.equal(await reader.port, 4321);
+  for (const [line, reason] of [
+    ['PUMAS_RPC_READY=not-json\n', /not JSON/],
+    ['PUMAS_RPC_READY={"version":2,"port":1,"nonce":"n0nce"}\n', /version 2/],
+    ['PUMAS_RPC_READY={"version":1,"port":0,"nonce":"n0nce"}\n', /no valid port/],
+    ['PUMAS_RPC_READY={"version":1,"port":1,"nonce":null}\n', /does not echo/],
+  ]) {
+    const refused = new BackendReadyReader('n0nce');
+    refused.push(line);
+    await assert.rejects(refused.port, reason);
+  }
 });
 
 test('bridge is not reported running until the RPC server is ready', () => {

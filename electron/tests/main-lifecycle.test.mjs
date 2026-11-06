@@ -166,12 +166,6 @@ function createFailedProcessRuntime() {
   const children = [];
   let now = 0;
   const module = {};
-  const server = new EventEmitter();
-  Object.assign(server, {
-    listen(_port, _host, callback) { queueMicrotask(callback); },
-    address: () => ({ port: 49152 }),
-    close(callback) { callback(); },
-  });
   runInNewContext(readFileSync(new URL('../dist/python-bridge.js', import.meta.url), 'utf8'), {
     exports: module,
     Buffer,
@@ -185,12 +179,15 @@ function createFailedProcessRuntime() {
     clearTimeout(timer) { timers.delete(timer); },
     require(specifier) {
       if (specifier === 'electron-log') return { debug() {}, info() {}, warn() {}, error() {} };
-      if (specifier === 'net') return { createServer: () => server };
       if (specifier === 'child_process') return {
-        spawn() {
+        spawn(_cmd, _args, options) {
           const child = new EventEmitter();
           child.stdout = new EventEmitter();
           child.stderr = new EventEmitter();
+          // The backend announces its bound port and this launch's nonce.
+          const nonce = options.env.PUMAS_RPC_LAUNCH_NONCE;
+          queueMicrotask(() => child.stdout.emit('data', Buffer.from(
+            `PUMAS_RPC_READY=${JSON.stringify({ version: 1, port: 49152, nonce })}\n`)));
           children.push(child);
           return child;
         },

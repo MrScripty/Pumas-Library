@@ -8,7 +8,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
-import * as net from 'net';
+import { randomBytes } from 'crypto';
 import log from 'electron-log';
 import { BackendStartupError, BackendStartupFailureReader } from './backend-startup';
 import { decodeS3ImportRpcResult, isS3ImportMethod, S3_RPC_FAILURE, S3_RPC_RESPONSE_LIMIT } from './s3-import-rpc';
@@ -326,6 +326,72 @@ interface BackendExit {
   startupError?: Error;
 }
 
+export const LAUNCH_NONCE_ENV = 'PUMAS_RPC_LAUNCH_NONCE';
+const READY_PREFIX = 'PUMAS_RPC_READY=';
+
+/**
+ * Reads the backend's `PUMAS_RPC_READY={"version":1,"port":N,"nonce":...}`
+ * stdout line. The port is accepted only from a line that echoes this
+ * launch's nonce; a well-formed line naming another nonce is refused.
+ */
+export class BackendReadyReader {
+  readonly port: Promise<number>;
+  private buffered = '';
+  private settled = false;
+  private resolvePort!: (port: number) => void;
+  private rejectPort!: (error: Error) => void;
+
+  constructor(private readonly nonce: string) {
+    this.port = new Promise<number>((resolve, reject) => {
+      this.resolvePort = resolve;
+      this.rejectPort = reject;
+    });
+  }
+
+  push(chunk: string): void {
+    if (this.settled) return;
+    this.buffered += chunk;
+    let newline = this.buffered.indexOf('\n');
+    while (newline >= 0 && !this.settled) {
+      const line = this.buffered.slice(0, newline).replace(/\r$/, '');
+      this.buffered = this.buffered.slice(newline + 1);
+      if (line.startsWith(READY_PREFIX)) this.readLine(line.slice(READY_PREFIX.length));
+      newline = this.buffered.indexOf('\n');
+    }
+    // A line longer than any readiness frame is ordinary output; drop it.
+    if (this.buffered.length > 4096) this.buffered = '';
+  }
+
+  private readLine(json: string): void {
+    let frame: unknown;
+    try {
+      frame = JSON.parse(json);
+    } catch {
+      this.fail('the backend readiness line is not JSON');
+      return;
+    }
+    if (typeof frame !== 'object' || frame === null || Array.isArray(frame)) {
+      this.fail('the backend readiness line is not an object');
+      return;
+    }
+    const { version, port, nonce } = frame as Record<string, unknown>;
+    if (version !== 1) this.fail(`the backend readiness version ${JSON.stringify(version)} is not supported`);
+    else if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65_535) {
+      this.fail('the backend readiness line names no valid port');
+    } else if (nonce !== this.nonce) {
+      this.fail('the backend readiness line does not echo this launch nonce');
+    } else {
+      this.settled = true;
+      this.resolvePort(port as number);
+    }
+  }
+
+  private fail(reason: string): void {
+    this.settled = true;
+    this.rejectPort(new Error(`Backend readiness refused: ${reason}`));
+  }
+}
+
 export class PythonBridge {
   private options: Required<Omit<PythonBridgeOptions, 'timerController'>>;
   private timerController: PythonBridgeTimerController;
@@ -333,17 +399,17 @@ export class PythonBridge {
   // Releasing the live slot does not discard the previous owner's cleanup receipt.
   private terminalExit: { child: ChildProcess; outcome: BackendExit } | null = null;
   private startPromise: Promise<void> | null = null;
-  private cancelPortAllocation: (() => void) | null = null;
   private failedStarts = new WeakMap<ChildProcess, Error>();
   private stopOperation: {
     child: ChildProcess | null;
     startup: Promise<void> | null;
-    allocation: (() => void) | null;
     promise: Promise<void>;
     settled: boolean;
   } | null = null;
   private serverReady = false;
   private port = 0;
+  /** Fresh per launch; the child echoes it so readiness is our own child's. */
+  private launchNonce: string | null = null;
   private restartCount = 0;
   private isShuttingDown = false;
   private healthCheckTimer: BridgeTimer | null = null;
@@ -418,74 +484,27 @@ export class PythonBridge {
   }
 
   /**
-   * Find an available port
-   */
-  private async findAvailablePort(): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const server = net.createServer();
-      let closing = false;
-      let settled = false;
-      let cancelled = false;
-      let port: number | null = null;
-      let failure: Error | null = null;
-      const finish = (error?: Error): void => {
-        if (settled) return;
-        settled = true;
-        if (error && (!('code' in error) || error.code !== 'ERR_SERVER_NOT_RUNNING')) {
-          // Retain the cancellation owner when listener closure is unconfirmed.
-          reject(error);
-          return;
-        }
-        server.removeListener('error', onError);
-        if (this.cancelPortAllocation === cancel) this.cancelPortAllocation = null;
-        if (cancelled) reject(new Error('Backend bridge stopped during startup'));
-        else if (failure) reject(failure);
-        else if (port === null) reject(new Error('Failed to get server address'));
-        else resolve(port);
-      };
-      const close = (): void => {
-        if (closing) return;
-        closing = true;
-        server.close(finish);
-      };
-      const onError = (error: Error): void => {
-        failure = error;
-        close();
-      };
-      const cancel = (): void => {
-        cancelled = true;
-        close();
-      };
-      this.cancelPortAllocation = cancel;
-      server.on('error', onError);
-      try {
-        server.listen(0, '127.0.0.1', () => {
-          if (settled || cancelled) return;
-          const address = server.address();
-          if (address && typeof address === 'object') port = address.port;
-          close();
-        });
-      } catch (error) {
-        onError(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
-  }
-
-  /**
    * Get the command and arguments for the backend
    */
-  private getBackendCommand(): { cmd: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } {
+  private getBackendCommand(launchNonce: string): { cmd: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } {
     return {
       cmd: this.options.rustBinaryPath,
       args: [
-        '--port', String(this.port),
+        // Port 0 lets the backend bind and report its own port, so no other
+        // process can take a port Electron chose and released (ELE-06).
+        '--port', String(this.options.port || 0),
         '--launcher-root', this.options.launcherRoot,
+        // stdin stays piped and is never written: when Electron dies the pipe
+        // closes and the backend drains instead of orphaning (ELE-08).
+        '--exit-on-stdin-eof',
         ...(this.options.debug ? ['--debug'] : []),
       ],
       cwd: this.options.launcherRoot,
       env: {
         ...process.env,
         RUST_LOG: this.options.debug ? 'debug' : 'info',
+        // Environment, not argv: other local users can read argv.
+        [LAUNCH_NONCE_ENV]: launchNonce,
       },
     };
   }
@@ -499,9 +518,6 @@ export class PythonBridge {
       return Promise.reject(new Error('Backend bridge stopping; previous cleanup may be unconfirmed'));
     }
     if (this.startPromise) return this.startPromise;
-    if (this.cancelPortAllocation) {
-      return Promise.reject(new Error('Backend startup allocation closure is unconfirmed'));
-    }
     if (this.process) {
       log.warn('Backend process already running');
       return Promise.resolve();
@@ -519,15 +535,14 @@ export class PythonBridge {
     this.clearRestartTimer();
     this.clearHealthCheckTimer();
 
-    // Find available port
-    this.port = this.options.port || await this.findAvailablePort();
-    if (this.isShuttingDown) {
-      throw new Error('Backend bridge stopped during startup');
-    }
-    log.info(`Starting backend bridge on port ${this.port}`);
+    // The backend reports its bound port in its readiness line.
+    this.port = 0;
+    const launchNonce = randomBytes(32).toString('hex');
+    this.launchNonce = launchNonce;
+    log.info('Starting backend bridge');
 
     // Get command configuration
-    const { cmd, args, cwd, env } = this.getBackendCommand();
+    const { cmd, args, cwd, env } = this.getBackendCommand(launchNonce);
 
     // Verify binary exists
     if (!fs.existsSync(cmd)) {
@@ -547,9 +562,14 @@ export class PythonBridge {
     });
     this.process = child;
     this.stopOperation = null;
+    // A parent that exits closes this pipe; nothing is ever written to it.
+    child.stdin?.on('error', () => {});
 
     const backendLabel = 'Rust';
     const startupFailure = new BackendStartupFailureReader();
+    const announcement = new BackendReadyReader(launchNonce);
+    const announced = announcement.port;
+    void announced.catch(() => {});
     // close follows stdout drain; exit can arrive before the diagnostic frame.
     let startupClosed!: () => void;
     const closedBeforeReady = new Promise<never>((_resolve, reject) => {
@@ -562,8 +582,13 @@ export class PythonBridge {
     // stays at debug so the persisted (info) log never holds it. The startup
     // failure frame reaches the user through its own decoded channel.
     child.stdout?.on('data', (data: Buffer) => {
-      if (!this.serverReady) startupFailure.push(data.toString());
-      const output = data.toString().trim();
+      if (!this.serverReady) {
+        startupFailure.push(data.toString());
+        announcement.push(data.toString());
+      }
+      // The readiness line carries the launch nonce; keep it out of logs.
+      const output = data.toString().split('\n')
+        .filter((line) => !line.startsWith(READY_PREFIX)).join('\n').trim();
       if (output) {
         log.debug(`[${backendLabel}] ${output}`);
       }
@@ -621,7 +646,7 @@ export class PythonBridge {
 
     // Wait for the server to be ready
     try {
-      await this.waitForReady(closedBeforeReady);
+      await this.waitForReady(closedBeforeReady, announced);
     } finally {
       child.removeListener('close', startupClosed);
     }
@@ -646,8 +671,23 @@ export class PythonBridge {
   /**
    * Wait for the RPC server to be ready
    */
-  private async waitForReady(closedBeforeReady: Promise<never>, timeout: number = 30000): Promise<void> {
+  private async waitForReady(
+    closedBeforeReady: Promise<never>,
+    announced: Promise<number>,
+    timeout: number = 30000,
+  ): Promise<void> {
     const startTime = Date.now();
+    let deadline: BridgeTimer | undefined;
+    try {
+      // The bound port comes only from our child's own readiness line.
+      this.port = await Promise.race([announced, closedBeforeReady, new Promise<never>((_resolve, reject) => {
+        deadline = this.timerController.setTimeout(
+          () => reject(new Error('RPC server did not report readiness within timeout')), timeout);
+      })]);
+    } finally {
+      if (deadline !== undefined) this.timerController.clearTimeout(deadline);
+    }
+    log.info(`Backend bridge listening on port ${this.port}`);
 
     while (Date.now() - startTime < timeout) {
       if (this.isShuttingDown || !this.process) {
@@ -673,8 +713,11 @@ export class PythonBridge {
    */
   private async healthCheck(): Promise<boolean> {
     try {
-      const response = await this.call('health_check', {}) as { status?: string } | null;
-      return response !== null && response?.status === 'ok';
+      const response = await this.call('health_check', {}) as { status?: string; launch_nonce?: string } | null;
+      // Only our own child echoes our launch nonce; anything else on the
+      // port is not this backend.
+      return response !== null && response?.status === 'ok'
+        && (this.launchNonce === null || response.launch_nonce === this.launchNonce);
     } catch {
       return false;
     }
@@ -749,22 +792,20 @@ export class PythonBridge {
   /**
    * Stop one captured child. The shutdown RPC only acknowledges admission;
    * natural exit code 0 is the backend's receipt for completed owned cleanup.
-   * Replay the same outcome for captured child, startup and allocation owners, including failure.
+   * Replay the same outcome for captured child and startup owners, including failure.
    */
   stop(): Promise<void> {
     const child = this.process ?? this.terminalExit?.child ?? null;
     const startup = this.startPromise;
-    const allocation = this.cancelPortAllocation;
     if (this.stopOperation && (!this.stopOperation.settled
       || ((this.stopOperation.child === child || !child)
-        && (!startup || this.stopOperation.startup === startup)
-        && (!allocation || this.stopOperation.allocation === allocation)))) {
+        && (!startup || this.stopOperation.startup === startup)))) {
       return this.stopOperation.promise;
     }
     let resolve!: () => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
-    const operation = { child, startup, allocation, promise, settled: false };
+    const operation = { child, startup, promise, settled: false };
     this.stopOperation = operation;
     this.isShuttingDown = true;
     this.serverReady = false;
@@ -815,8 +856,7 @@ export class PythonBridge {
       this.stopServingStatusUpdateStream();
       this.stopStatusTelemetryUpdateStream();
       for (const cancel of [...this.pendingRpcCalls]) cancel();
-      this.cancelPortAllocation?.();
-      if (!child && !starting && !this.cancelPortAllocation) return;
+      if (!child && !starting) return;
 
       log.info('Stopping Rust backend bridge...');
       const graceExpired = new Promise<'expired'>((resolve) => {
@@ -829,9 +869,6 @@ export class PythonBridge {
             graceExpired.then(() => false),
           ]);
           if (!settled) throw new Error('Backend startup settlement unconfirmed; cleanup incomplete');
-        }
-        if (this.cancelPortAllocation) {
-          throw new Error('Backend startup allocation closure unconfirmed; cleanup incomplete');
         }
       };
       if (!child) {

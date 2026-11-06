@@ -190,8 +190,18 @@ durable ownership into Electron.
 A ready backend is health-checked every 30 seconds. Three consecutive failed
 checks mark it hung: Electron sends SIGTERM (SIGKILL after the force-wait on
 Unix; Windows terminates directly), and the exit takes the normal crash
-restart path, bounded by `maxRestarts`. Making `pumas-rpc` exit when Electron
-itself dies is the backend's job (stdin EOF / parent-death signal).
+restart path, bounded by `maxRestarts`.
+
+Electron launches `pumas-rpc` with `--port 0`, so the backend binds and
+reports its own port; no port is chosen, released and raced for. Each launch
+passes a fresh 256-bit `PUMAS_RPC_LAUNCH_NONCE` in the child environment (never
+argv). Electron takes the port only from a
+`PUMAS_RPC_READY={"version":1,"port":N,"nonce":...}` stdout line that echoes
+that nonce, and treats the backend as ready (and, later, healthy) only when
+`health_check` also echoes it, so another process on the same port is never
+mistaken for its child. A readiness line with another nonce refuses startup.
+The child's stdin stays piped and unwritten, and `--exit-on-stdin-eof` makes
+the backend drain and exit when Electron dies and the pipe closes.
 
 The RPC server binds loopback only and has no LAN mode; see
 [Security](../docs/SECURITY.md) for its Host/Origin admission checks.

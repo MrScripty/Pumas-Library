@@ -56,6 +56,8 @@ pub enum OpenAiGatewayEndpoint {
     Embeddings,
     /// llama.cpp's TypeSafe-compatible decision API, `/v1/systemone`.
     SystemOne,
+    /// Jina/Cohere-style document reranking, `/v1/rerank`.
+    Rerank,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -244,6 +246,7 @@ impl ProviderBehavior {
                 OpenAiGatewayEndpoint::Completions,
                 OpenAiGatewayEndpoint::Embeddings,
                 OpenAiGatewayEndpoint::SystemOne,
+                OpenAiGatewayEndpoint::Rerank,
             ],
             launch_kinds: vec![
                 ProviderLaunchKind::BinaryProcess,

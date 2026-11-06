@@ -36,7 +36,7 @@ const OPENAI_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_EMBEDDINGS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_GATEWAY_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 const GENERATION_CANCELLED: &str = "The generation ended before a result: the caller disconnected, Pumas is shutting down or the model's serving session stopped. The provider outcome is unknown; do not assume it was not run.";
-/// Total timeout for non-generation gateway routes (models, embeddings).
+/// Total timeout for non-generation gateway routes (models, embeddings, rerank).
 /// Generation routes never use this budget.
 const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -808,6 +808,14 @@ fn openai_gateway_policy_for_path(path: &str) -> Option<OpenAiGatewayEndpointPol
         }),
         "/v1/embeddings" => Some(OpenAiGatewayEndpointPolicy {
             endpoint: OpenAiGatewayEndpoint::Embeddings,
+            max_request_body_bytes: OPENAI_EMBEDDINGS_BODY_BYTES,
+            generation: false,
+            request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),
+        }),
+        // A served reranker scores documents against a query. Like embeddings
+        // it is a bounded, finite request with no generation lifetime.
+        "/v1/rerank" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::Rerank,
             max_request_body_bytes: OPENAI_EMBEDDINGS_BODY_BYTES,
             generation: false,
             request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),

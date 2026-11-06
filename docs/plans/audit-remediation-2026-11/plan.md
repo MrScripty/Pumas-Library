@@ -18,9 +18,22 @@ asked for its open issues to be re-checked against v0.8.0. This plan covers
 the audit's re-check of CS-01..CS-15; it does not close that program's own
 issue list.
 
-**Current phase:** planning. No fixes have started.
+**Current phase:** verifying (2026-11-06). Slices S1–S12 are implemented on
+branch `fix/audit-2026-11-remediation`. Decisions D1–D6 were taken as
+recommended below, pending owner confirmation in review. The full local
+verification set passes on the integrated tree: the Rust workspace, s3,
+frontend, Electron, desktop contract, launcher, release, consumer and Torch
+suites. Not yet proven:
 
-**Next slice:** [S1 — Electron window and navigation boundary](#s1--electron-window-and-navigation-boundary).
+- CI on all three operating systems;
+- a click-through in a real Electron GUI (ELE-01's manual check);
+- Torch `tests_native` on a GPU;
+- the Rust Torch stage through the RPC with a managed Python. The resolver's
+  two phases were run for real on Linux.
+
+**Next slice:** owner review of the PR and the open decisions under
+[Blockers](#blockers). After merge, remove this plan once its decisions are
+recorded in the owning docs (CONTRIBUTING.md plan lifecycle).
 
 ## Verification summary
 
@@ -375,9 +388,39 @@ These are independent small PRs; group them as convenient.
 
 ## Blockers
 
-- D1–D6 need owner answers before S9, S8, S4, S12 and S7 respectively.
-- The audit file and `docs/breif/future.md` are untracked. Commit the audit
-  (as point-in-time evidence, indexed in `docs/README.md`) or keep it local.
+- **Release gate:** the dependency scan fails on the exact pins of the audio
+  candidate recipe (`audio_candidate_recipe.json`), with 63 PyPI findings in
+  certifi, filelock, pillow, setuptools, torch 2.10.0 and transformers 5.4.0.
+  The scan is advisory on PRs, but tag and candidate runs fail until each pin
+  is raised or recorded as an accepted exception with a reason. Owner
+  decision. Whether that recipe counts as "shipped" (gating) is also to
+  confirm.
+- **Behaviour changes to confirm in review:**
+  - One corrupt `models` row now fails listing and search, as the strict
+    snapshot already did, instead of being skipped.
+  - A leftover rule table together with its `*_legacy` copy refuses startup
+    until it is settled by hand.
+  - Owned children no longer inherit `LD_LIBRARY_PATH`, `LD_PRELOAD` or
+    `PYTHON*`.
+  - Without `hf-client`, the core builder never starts the HF client.
+  - Torch refuses model paths outside the library root and external-reference
+    roots.
+  - Audio `max_output_tokens` other than 512 is refused at the typed boundary.
+- **Deferred, with reasons:**
+  - RT-08 idle timeout between frames: `PumasLocalClient` cannot reconnect.
+  - RT-06 PDEATHSIG applies only to process_owner children, because Linux
+    signals on exit of the spawning thread.
+  - ELE-10 signing and the macOS hardened runtime need certificates.
+  - `TorchServerConfig` keeps a hand-written desktop decoder, because the
+    contract export builds without app-manager.
+  - `RuntimeEndpointUrl` deserialises without `parse()`
+    (`#[serde(transparent)]`). Switching to `try_from` risks a stored bad row
+    stopping profiles from loading.
+  - The four `HeaderResourceStrip` tooltips wrap non-focusable icons.
+  - Torch's API token is generated once per backend process, not once per
+    launch.
+  - Externally referenced models imported while Torch runs need a Torch
+    restart.
 
 ## Appendix: verification at b091ac45
 

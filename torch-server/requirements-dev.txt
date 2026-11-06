@@ -2,7 +2,7 @@
 #   uv pip compile torch-server/requirements-dev.txt --universal --generate-hashes --python-version 3.12 --output-file torch-server/requirements-dev.lock --no-cache
 ruff==0.17.3
 packaging==26.3
-pydantic>=2.0,<3
+pydantic>=2.14.2,<3
 numpy==2.5.4
 # Installed-file import closure uses the existing managed runtime's exact versions.
 fastapi==0.162.0

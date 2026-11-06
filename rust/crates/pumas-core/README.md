@@ -56,6 +56,10 @@ all attempts and backoff; retries do not reset it, and another file receives its
 own budget. The clock range is checked before public worker/store admission.
 HTTP `elapsed = Duration::ZERO` preserves the existing opt-out. Attempt limits,
 source identity, verification requirements, receipts and public shapes are unchanged.
+A credential-less `http://` source on a network host is tried over `https`
+first and falls back to plaintext only when that attempt gets no HTTP response;
+the HTTPS attempt counts against the same budget. See
+[Plaintext sources prefer HTTPS](../../../docs/contracts/artifact-acquisition.md#plaintext-sources-prefer-https).
 
 Expiry prevents a new source/body effect from starting, but already registered
 filesystem effects are still drained before retry or return. Partial inputs keep

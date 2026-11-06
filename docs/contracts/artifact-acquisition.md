@@ -81,6 +81,30 @@ credential channel must use the HTTPS-only constructor. Plaintext literal-IP
 loopback credential fixtures exist only in unit-test builds and are not enabled
 by the public `test-support` feature or a production constructor.
 
+### Plaintext sources prefer HTTPS
+
+A credential-less `http://` artifact source on a network host is requested over
+`https` first: the same URL with scheme `https`, where a default port becomes
+443 and an explicit non-default port is kept. Any HTTP response to that attempt,
+including an error status such as `404`, is the source's answer. The original
+`http://` URL is requested only when the HTTPS attempt gets no HTTP response:
+connect failure, refused or reset connection, TLS handshake or certificate
+failure, or a timeout of the caller's own client. Certificate failures fall
+back too: the caller asked for plaintext, so the fallback is never weaker than
+the source URL itself, and artifact integrity comes from the manifest's
+size/digest verification, not TLS. Each fallback logs a warning with the host,
+the HTTPS port and the reason, never the path, query or credentials. No probe
+deadline is added; the caller's client timeouts and the acquisition elapsed
+budget bound the HTTPS attempt. An `AcquisitionHttpClient::https` transport
+upgrades a plaintext source but never falls back.
+
+Not upgraded: `https://` sources, literal loopback IP sources (`127.0.0.0/8`,
+`::1`), whose traffic never leaves the machine, and credentialed plaintext
+sources, which remain refused before any connection. `localhost` is a name,
+not a literal address, and is upgraded. The scheme is a transport choice only:
+Range, strong-ETag, resource-identity and digest checks are unchanged and apply
+to whichever response is used.
+
 Continuation still requires a matching strong ETag and total length. For
 `github` on `release-assets.githubusercontent.com`, only SAS expiry/signature
 and JWT transport-grant fields are ignored in effective-resource comparison.

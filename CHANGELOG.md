@@ -36,6 +36,10 @@ Fixes from the [2026-11-02 audit](docs/audits/comprehensive-audit-2026-11-02.md)
   launched and is currently running; a caller-named Torch `connection_url` or
   any other server never receives it. Loopback provider traffic never uses a
   proxy and provider clients follow no redirects.
+- Credential-less `http://` artifact sources on a network host are fetched
+  over `https` first and fall back to the plaintext URL, with a logged
+  warning, only when the HTTPS attempt gets no HTTP response. Loopback
+  sources are unchanged and credentialed plaintext stays refused.
 - Public error redaction handles control characters, labelled values, JSON
   pairs and `Basic` credentials. The HF token is written atomically with mode
   0600 and `registry.db` is owner-only on Unix.

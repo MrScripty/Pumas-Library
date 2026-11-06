@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -169,6 +170,13 @@ def main():
     try:
         port = ready.get(timeout=25)
         base = f"http://127.0.0.1:{port}"
+        # Startup runs one connectivity probe in the background. Every probe is
+        # refused by the proxy, so the library reports offline once it ends;
+        # only calls after that point can be attributed to the cached search.
+        probe_deadline = time.monotonic() + 20
+        while not rpc(base, "get_network_status", {})["is_offline"]:
+            check(time.monotonic() < probe_deadline, "startup connectivity probe did not settle")
+            time.sleep(0.1)
         seed_ordinary_search(root)
         cached_calls_before = len(proxy.calls)
         results["startup_upstream_call_count"] = cached_calls_before

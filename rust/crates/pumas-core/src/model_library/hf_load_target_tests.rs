@@ -955,3 +955,38 @@ async fn hf_package_observation_child() {
         Some(expected.as_str())
     );
 }
+
+#[tokio::test]
+async fn hf_owner_fresh_restores_a_missing_summary_and_round_trips_on_the_wire() {
+    let (_temp, library, _model_dir) = synthetic_cohere_library().await;
+    let original = ready_target(&library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;
+    let detail = cached(&library, ModelPackageFactsCacheScope::Detail);
+    remove_summary(&library);
+    let response = library
+        .resolve_model_artifact_load_target(hf_request(
+            PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+        ))
+        .await
+        .unwrap();
+    assert!(response.is_ready(), "{response:?}");
+    // OwnerFresh rebuilds the Summary row from a Detail-only cache, and that
+    // row is exactly what the public summary API reports.
+    let summary = cached(&library, ModelPackageFactsCacheScope::Summary);
+    assert_eq!(summary.source_fingerprint, detail.source_fingerprint);
+    let reported = library
+        .resolve_model_package_facts_summary(MODEL_ID)
+        .await
+        .unwrap()
+        .summary
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&summary.facts_json).unwrap(),
+        serde_json::to_value(reported).unwrap()
+    );
+    // Consumers receive this response serialized; decoding it must preserve
+    // the whole target, including path, revision and observation token.
+    let decoded: crate::models::ResolveModelArtifactLoadTargetResponse =
+        serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
+    assert_eq!(decoded, response);
+    assert_eq!(decoded.target.unwrap(), original);
+}

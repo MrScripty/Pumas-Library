@@ -3,7 +3,7 @@ import type {
   StatusTelemetrySnapshot as DesktopStatusTelemetrySnapshot,
   SystemResources as DesktopSystemResources,
   StatusTelemetryUpdateNotification as DesktopStatusTelemetryUpdateNotification,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 import type { BaseResponse } from './api-common';
 
 // ============================================================================

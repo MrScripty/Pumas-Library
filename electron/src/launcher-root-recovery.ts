@@ -1,7 +1,7 @@
 import type {
   LauncherRootSelectionResult,
   LauncherRootStartupState,
-} from './generated/desktop-contract';
+} from './desktop-contract';
 import {
   LauncherRootPersistenceError,
   LauncherRootSelectionError,

@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import Ajv from 'ajv';
 import standaloneCode from 'ajv/dist/standalone/index.js';
 import { _ } from 'ajv/dist/compile/codegen/index.js';
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const supported = new Set(['$schema', '$id', '$ref', 'title', 'description', 'definitions', 'type', 'properties', 'required', 'additionalProperties', 'items', 'anyOf', 'oneOf', 'allOf', 'enum', 'const', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', 'uniqueItems', 'minProperties', 'maxProperties', 'default', 'format']);
@@ -185,11 +185,12 @@ export async function generate(contract, { runtimeRoot = resolve(root, 'electron
   const hash = createHash('sha256').update(JSON.stringify(contract)).digest('hex');
   const banner = `// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ${hash}. DO NOT EDIT.\n`;
   const names = Object.keys(contract.schemas).sort();
-  const declarations = names.map(name => `export declare function validate${name}(value: unknown): boolean;`).join('\n');
-  const wrappers = names.map(name => `export function decode${name}(input: unknown): DecodeOutcome<${name}> { return decode(input, validate${name}); }`).join('\n');
-  const source = banner + `import { ${names.map(name => `validate${name}`).join(', ')} } from './desktop-contract.validators.js';\n` +
-    [...types].sort(([a],[b])=>a.localeCompare(b)).map(([name,type])=>`export type ${name} = ${type};`).join('\n') + `\n
+  const typeDeclarations = [...types].sort(([a],[b])=>a.localeCompare(b)).map(([name,type])=>`export type ${name} = ${type};`).join('\n') + `\n
 export type DecodeOutcome<T> = { readonly status: 'valid'; readonly value: T } | { readonly status: 'invalid' | 'unsupported' | 'unavailable'; readonly message: string };
+`;
+  const wrapperDeclarations = names.map(name => `export declare function decode${name}(input: unknown): DecodeOutcome<${name}>;`).join('\n');
+  const wrappers = names.map(name => `export function decode${name}(input: unknown): DecodeOutcome<${name}> { return decode(input, validate${name}); }`).join('\n');
+  const source = `import { ${names.map(name => `validate${name}`).join(', ')} } from './desktop-contract.validators.js';\n` + typeDeclarations + `
 
 class InvalidJsonRepresentation extends Error {}
 
@@ -238,8 +239,18 @@ function decode<T>(input: unknown, validate: (value: unknown) => boolean): Decod
   }
 }
 ${wrappers}\n`;
-  return {'desktop-contract.ts':source, 'desktop-contract.validators.js':banner+compiled.outputFiles[0].text, 'desktop-contract.validators.d.ts':banner+declarations+'\n'};
+  // Ship JavaScript with declarations rather than TypeScript source: Electron's
+  // tsc build (rootDir ./src) cannot compile a source file from another package.
+  const decoders = await transform(source, {loader:'ts', format:'esm', target:'es2022', sourcefile:'desktop-contract.ts'});
+  return {
+    'desktop-contract.js':banner+decoders.code,
+    'desktop-contract.d.ts':banner+typeDeclarations+'\n'+wrapperDeclarations+'\n',
+    'desktop-contract.validators.js':banner+compiled.outputFiles[0].text,
+  };
 }
+
+/** Directory of the shared workspace package both desktop consumers import. */
+export const generatedDirectory = resolve(root, 'packages/desktop-contract/generated');
 
 async function main() {
   const args = process.argv.slice(2);
@@ -262,15 +273,18 @@ async function main() {
     raw = exported.stdout;
   }
   const files = await generate(mergeOwnedContracts(JSON.parse(raw), await electronOwnedContracts()));
-  for (const packageName of ['electron','frontend']) {
-    for (const [name, content] of Object.entries(files)) {
-      const path = resolve(root, packageName, 'src/generated', name);
-      if (args.includes('--check')) {
-        if (await readFile(path,'utf8') !== content) throw new Error(`Stale generated contract: ${path}`);
-      } else {
-        await mkdir(dirname(path),{recursive:true});
-        await writeFile(path,content);
-      }
+  if (args.includes('--check')) {
+    const present = (await readdir(generatedDirectory).catch(() => [])).sort();
+    const expected = Object.keys(files).sort();
+    if (JSON.stringify(present) !== JSON.stringify(expected)) throw new Error(`Generated contract files ${JSON.stringify(present)} differ from ${JSON.stringify(expected)} in ${generatedDirectory}`);
+  }
+  for (const [name, content] of Object.entries(files)) {
+    const path = resolve(generatedDirectory, name);
+    if (args.includes('--check')) {
+      if (await readFile(path,'utf8') !== content) throw new Error(`Stale generated contract: ${path}`);
+    } else {
+      await mkdir(dirname(path),{recursive:true});
+      await writeFile(path,content);
     }
   }
 }

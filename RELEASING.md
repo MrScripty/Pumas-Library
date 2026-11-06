@@ -34,7 +34,8 @@ match source manifests exactly; the manifests identify `0.8.0`.
 
 1. Update `CHANGELOG.md` and the version's release notes. Keep an empty
    `Unreleased` section for subsequent changes.
-2. Set the same version in root, frontend, and Electron `package.json`, and
+2. Set the same version in root, frontend, Electron and
+   `packages/desktop-contract` `package.json`, and
    `[workspace.package]` in `rust/Cargo.toml`. Update the workspace package
    versions in `rust/Cargo.lock` without resolving new dependencies.
 3. Run `npm run check:release-versions -- vX.Y.Z`. CI also compares version tags

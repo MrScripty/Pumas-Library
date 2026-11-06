@@ -10,6 +10,7 @@ const versions = new Map([
   ['package.json', readPackageVersion('package.json')],
   ['frontend/package.json', readPackageVersion('frontend/package.json')],
   ['electron/package.json', readPackageVersion('electron/package.json')],
+  ['packages/desktop-contract/package.json', readPackageVersion('packages/desktop-contract/package.json')],
   ['rust/Cargo.toml [workspace.package]', readRustWorkspaceVersion()],
 ]);
 

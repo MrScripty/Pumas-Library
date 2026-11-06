@@ -4,7 +4,7 @@ import type {
   ModelLibraryRefreshScope as DesktopModelLibraryRefreshScope,
   ModelLibraryUpdateEvent as DesktopModelLibraryUpdateEvent,
   ModelLibraryUpdateNotification as DesktopModelLibraryUpdateNotification,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 
 // Declared once by the backend (`/events/model-library-updates`) and generated;
 // preload validates every pushed notification against that declaration.

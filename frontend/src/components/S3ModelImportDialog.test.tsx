@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { S3ModelImportDialog } from './S3ModelImportDialog';
-import type { S3BundleProgressWire, S3ImportOutcome } from '../generated/desktop-contract';
+import type { S3BundleProgressWire, S3ImportOutcome } from '@pumas/desktop-contract';
 const hook = vi.hoisted(() => ({ snapshot: null as S3ImportOutcome | null, error: null,
   bundleProgress: null as S3BundleProgressWire | null, commandBusy: false, startBundle: vi.fn(), start: vi.fn(), startAuthenticated: vi.fn(), cancel: vi.fn(), observeAgain: vi.fn() }));
 vi.mock('../hooks/useS3ModelImport', () => ({ useS3ModelImport: () => hook }));

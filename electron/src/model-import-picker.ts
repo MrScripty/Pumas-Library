@@ -3,7 +3,7 @@ import type { OpenDialogReturnValue } from 'electron';
 import {
   decodeModelImportSelection as decodeGeneratedModelImportSelection,
   type ModelImportSelection,
-} from './generated/desktop-contract';
+} from './desktop-contract';
 
 /**
  * Desktop-only selection, not authority to import or mutate model files.

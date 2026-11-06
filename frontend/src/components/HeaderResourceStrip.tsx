@@ -1,5 +1,5 @@
 import { BicepsFlexed, Cpu, Gpu } from 'lucide-react';
-import type { AppResourceUsage } from '../generated/desktop-contract';
+import type { AppResourceUsage } from '@pumas/desktop-contract';
 import type { SystemResources } from '../types/apps';
 import { formatBytes } from '../utils/formatters';
 import { Tooltip } from './ui';

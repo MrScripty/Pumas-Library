@@ -18,9 +18,9 @@ export interface VersionRelease {
   installing?: boolean;
 }
 
-export type VersionStatus = import('../generated/desktop-contract').VersionStatusOutcome['status'];
+export type VersionStatus = import('@pumas/desktop-contract').VersionStatusOutcome['status'];
 
-export type VersionInfo = import('../generated/desktop-contract').VersionInfoOutcome['info'];
+export type VersionInfo = import('@pumas/desktop-contract').VersionInfoOutcome['info'];
 
 export interface InstallationProgress {
   tag: string;
@@ -52,4 +52,4 @@ export interface InstallationProgress {
 
 export type InstallNetworkStatus = 'idle' | 'downloading' | 'stalled' | 'failed';
 
-export type CacheStatus = import('../generated/desktop-contract').GithubCacheStatusOutcome;
+export type CacheStatus = import('@pumas/desktop-contract').GithubCacheStatusOutcome;

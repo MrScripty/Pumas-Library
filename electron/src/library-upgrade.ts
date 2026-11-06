@@ -1,6 +1,6 @@
 /** Explicit metadata-only upgrade of the main process's selected library. */
 import { spawn, type ChildProcess } from 'child_process';
-import { decodeLibraryUpgradeConfirmation } from './generated/desktop-contract';
+import { decodeLibraryUpgradeConfirmation } from './desktop-contract';
 import type { LibraryUpgradeConfirmation, LibraryUpgradeResult, LibraryUpgradeReadyState } from './library-upgrade-contract';
 export type { LibraryUpgradeConfirmation, LibraryUpgradeResult } from './library-upgrade-contract';
 type ReadyState = LibraryUpgradeReadyState;

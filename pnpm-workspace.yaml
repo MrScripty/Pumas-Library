@@ -1,6 +1,7 @@
 packages:
   - frontend
   - electron
+  - packages/desktop-contract
 allowBuilds:
   electron: true
   electron-winstaller: true

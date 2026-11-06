@@ -1,4 +1,4 @@
-import type { RuntimeInstallationProgress } from '../generated/desktop-contract';
+import type { RuntimeInstallationProgress } from '@pumas/desktop-contract';
 import type {
   InstallationProgress,
   InstallNetworkStatus,

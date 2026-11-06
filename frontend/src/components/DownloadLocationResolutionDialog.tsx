@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
-import type { DownloadLocationReport, DownloadResolutionRequest } from '../generated/desktop-contract';
+import type { DownloadLocationReport, DownloadResolutionRequest } from '@pumas/desktop-contract';
 import { modelsAPI } from '../api/models';
 import { ModalDialog } from './ui';
 

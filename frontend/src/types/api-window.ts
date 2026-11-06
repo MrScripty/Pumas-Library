@@ -25,6 +25,6 @@ export type {
   LauncherRootSelectionAction,
   LauncherRootSelectionResult,
   LauncherRootStartupState,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 
 // ============================================================================

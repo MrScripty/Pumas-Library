@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useS3PrefixDiscovery } from './useS3PrefixDiscovery';
 import type { S3ImportDraft } from './useS3ModelImport';
-import type { S3DiscoveryOutcome } from '../generated/desktop-contract';
+import type { S3DiscoveryOutcome } from '@pumas/desktop-contract';
 const calls = vi.hoisted(() => ({ start: vi.fn(), auth: vi.fn(), get: vi.fn(), cancel: vi.fn() }));
 vi.mock('../api/import', () => ({importAPI: {startS3PrefixDiscovery: calls.start, startAuthenticatedS3PrefixDiscovery: calls.auth,
   getS3PrefixDiscovery: calls.get, cancelS3PrefixDiscovery: calls.cancel}}));

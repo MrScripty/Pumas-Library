@@ -4,7 +4,7 @@ import { TorchInstallPreview } from './TorchInstallPreview';
 import {
   decodeInstallationProgressOutcome,
   decodeTorchRuntimePreviewOutcome,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 import type { TorchReleaseOptionsOutcome, TorchRuntimeOptions, TorchRuntimePreviewOutcome, TorchRuntimePreviewRequest, TorchVerifiedRuntime } from '../types/torch-install';
 
 type ReadySelection = Extract<TorchRuntimePreviewOutcome, { status: 'ready' }>;

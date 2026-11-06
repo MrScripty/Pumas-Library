@@ -4,7 +4,7 @@ import { ModalDialog } from './ui/ModalDialog';
 import { S3PersistedImportsPanel } from './S3PersistedImportsPanel';
 import { useS3PrefixDiscovery } from '../hooks/useS3PrefixDiscovery';
 import { useS3ModelImport, type S3ImportDraft } from '../hooks/useS3ModelImport';
-import type { S3PinnedFileParams, S3ImportOutcome } from '../generated/desktop-contract';
+import type { S3PinnedFileParams, S3ImportOutcome } from '@pumas/desktop-contract';
 
 const fields = [
   ['endpoint', 'HTTPS endpoint origin', 'https://s3.example.com'],

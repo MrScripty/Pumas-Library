@@ -1,5 +1,5 @@
 import React from 'react';
-import type { AppResourceUsage } from '../generated/desktop-contract';
+import type { AppResourceUsage } from '@pumas/desktop-contract';
 import type { SystemResources } from '../types/apps';
 import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 import { HeaderStatusBadge, HeaderUpdateControls, HeaderWindowControls } from './HeaderControls';

@@ -11,7 +11,7 @@ import type {
   TorchReleaseOptionsOutcome as DesktopTorchReleaseOptionsOutcome,
   TorchVerifiedRuntime as DesktopTorchVerifiedRuntime,
   TrialTorchRuntimeOutcome as DesktopTrialTorchRuntimeOutcome,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 
 // Declared once by the Rust producer (pumas-rpc contract) and generated.
 export type TorchRuntimePreviewOutcome = DesktopTorchRuntimePreviewOutcome;

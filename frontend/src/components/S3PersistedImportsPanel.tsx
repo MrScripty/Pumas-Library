@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { importAPI } from '../api/import';
-import { decodeS3PersistedImportsWire, type S3PersistedImportsWire } from '../generated/desktop-contract';
+import { decodeS3PersistedImportsWire, type S3PersistedImportsWire } from '@pumas/desktop-contract';
 
 /** Explicit inspection is independent of the process-local import controller. */
 export function S3PersistedImportsPanel() {

@@ -18,3 +18,6 @@ scripts/release/licenses/managed-python-supplemental/* -text -whitespace
 docs/release-attribution/**/THIRD-PARTY-NOTICES.txt -text -whitespace
 # Archive-captured CPython metadata and license texts are evidence and must remain verbatim.
 docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/**/managed-python-licenses/full-archive/** -text -whitespace
+
+# Generated desktop contract: excluded from language statistics and collapsed in diffs.
+packages/desktop-contract/generated/** linguist-generated

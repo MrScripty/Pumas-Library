@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateApiCallPayload } from '../dist/ipc-validation.js';
-import { decodeS3ImportOutcome, decodeS3ImportCancelOutcome } from '../dist/generated/desktop-contract.js';
+import { decodeS3ImportOutcome, decodeS3ImportCancelOutcome } from '../dist/desktop-contract.js';
 
 const id = 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
 const request = { operation_id: id, endpoint: 'https://source.invalid', region: 'fixture-region',

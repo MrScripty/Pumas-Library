@@ -1,4 +1,4 @@
-import type { DownloadProgressOutcome } from '../generated/desktop-contract';
+import type { DownloadProgressOutcome } from '@pumas/desktop-contract';
 import type { ModelDownloadSnapshotEntry } from '../types/api-models';
 
 /** Canonical list and push progress share one nullable-to-presentation projection. */

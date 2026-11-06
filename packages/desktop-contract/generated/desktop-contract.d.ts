@@ -1,5 +1,4 @@
 // Generated from the pumas-rpc contract export and electron/contracts; SHA256 fcf7c51b5fb42225cb3b41014d8c43e38795a325e91abfcd1f87369f00f447f5. DO NOT EDIT.
-import { validateAvailableVersionsOutcome, validateBackendStatusOutcome, validateCancelInstallationOutcome, validateCatalogSearchOutcome, validateCheckVersionDependenciesOutcome, validateCheckVersionDependenciesParams, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadLocationReport, validateDownloadMutationOutcome, validateDownloadResolutionRequest, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateFindTorchAlternativesParams, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateGetReleaseDependenciesOutcome, validateGetReleaseDependenciesParams, validateGetTorchReleaseOptionsParams, validateGetTorchRuntimeProbeParams, validateGithubCacheStatusOutcome, validateHfDownloadDetailsOutcome, validateHfModelSearchOutcome, validateImportBatchParams, validateImportModelParams, validateInferenceSettingsOutcome, validateInstallVersionDependenciesOutcome, validateInstallVersionDependenciesParams, validateInstallVersionOutcome, validateInstallVersionParams, validateInstallationProgressOutcome, validateInstalledVersionsOutcome, validateLauncherRootSelectionResult, validateLauncherRootStartupState, validateLibraryModelMetadataOutcome, validateLibraryStatusResponse, validateLibraryUpgradeConfirmation, validateLibraryUpgradeResult, validateLinkHealthOutcome, validateModelCategoryOutcome, validateModelDownloadUpdateOutcome, validateModelIdParams, validateModelImportSelection, validateModelIndexRefreshOutcome, validateModelLibraryUpdateNotification, validateModelLookupOutcome, validateModelLookupParams, validateModelsOutcome, validateNetworkStatusResponse, validatePartialDownloadOutcome, validatePreviewTorchRuntimeParams, validatePublicError, validateRecoverDownloadParams, validateRemoveVersionOutcome, validateRouterProfileSyncStatus, validateRuntimeLaunchOutcome, validateRuntimeLaunchParams, validateRuntimeProfileUpdateFeed, validateRuntimeProfilesSnapshotResponse, validateRuntimeRunningOutcome, validateRuntimeStopOutcome, validateS3AuthenticatedBundleImportParams, validateS3AuthenticatedDiscoveryParams, validateS3AuthenticatedImportParams, validateS3BundleImportObservation, validateS3BundleImportParams, validateS3ConditionalFileParams, validateS3CredentialParams, validateS3DiscoveryOutcome, validateS3DiscoveryParams, validateS3ImportCancelOutcome, validateS3ImportCancelParams, validateS3ImportOutcome, validateS3ImportParams, validateS3ImportStatusParams, validateS3PersistedImportsWire, validateS3PinnedFileParams, validateS3ReadMode, validateS3SelectedFileParams, validateS3TransferRetryParams, validateS3TransferRetryState, validateSearchCatalogParams, validateSelectedVersionOutcome, validateServingStatusResponse, validateServingStatusUpdateFeed, validateSetDefaultVersionOutcome, validateSetDefaultVersionParams, validateSetHfTokenParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateStartupFailureFrame, validateStatusTelemetrySnapshot, validateStatusTelemetryUpdateNotification, validateStopRuntimeProfileGenerationOutcome, validateStopRuntimeProfileGenerationParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateSwitchVersionOutcome, validateSwitchVersionParams, validateTorchAdapterRequirement, validateTorchAlternativeMatch, validateTorchAlternativesOutcome, validateTorchAlternativesStatus, validateTorchCapabilityProbe, validateTorchDriverAvailability, validateTorchGpuVendor, validateTorchInstalledRuntime, validateTorchProbeAdapterStatus, validateTorchProbeCoreStatus, validateTorchProbeStatus, validateTorchPythonChoice, validateTorchReleaseCombination, validateTorchReleaseDriverStatus, validateTorchReleaseOptionsOutcome, validateTorchReleaseOptionsStatus, validateTorchReleaseRecommendation, validateTorchRuntimeOptionsOutcome, validateTorchRuntimePreview, validateTorchRuntimePreviewArtifact, validateTorchRuntimePreviewOutcome, validateTorchRuntimePreviewQualification, validateTorchRuntimePreviewRejectionReason, validateTorchRuntimeProbeOutcome, validateTorchTrialCleanup, validateTorchTrialHealthStatus, validateTorchTrialStartupStatus, validateTorchVerifiedPackage, validateTorchVerifiedRuntime, validateTrialTorchRuntimeOutcome, validateTrialTorchRuntimeParams, validateUpdateInferenceSettingsOutcome, validateUpdateInferenceSettingsParams, validateUpdateModelNotesOutcome, validateUpdateModelNotesParams, validateUpdateStreamError, validateValidateInstallationsOutcome, validateVersionInfoOutcome, validateVersionStatusOutcome } from './desktop-contract.validators.js';
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -265,194 +264,148 @@ export type VersionStatusOutcome = { "status": RuntimeVersionStatus; "success": 
 
 export type DecodeOutcome<T> = { readonly status: 'valid'; readonly value: T } | { readonly status: 'invalid' | 'unsupported' | 'unavailable'; readonly message: string };
 
-class InvalidJsonRepresentation extends Error {}
-
-function copyJson(value: unknown, ancestors: Set<object>, budget: { remaining: number }): unknown {
-  if (--budget.remaining < 0) throw new InvalidJsonRepresentation('Oversized value');
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'object' || ancestors.has(value)) throw new InvalidJsonRepresentation('Invalid JSON value');
-  ancestors.add(value);
-  if (Object.getOwnPropertySymbols(value).length !== 0) throw new InvalidJsonRepresentation('Invalid symbol property');
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  const entries = Object.entries(descriptors).filter(([key]) => !(Array.isArray(value) && key === 'length'));
-  if (Array.isArray(value) && (entries.length !== value.length || entries.some(([key]) => !/^(0|[1-9][0-9]*)$/.test(key)))) throw new InvalidJsonRepresentation('Invalid array properties');
-  const result: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : Object.create(null) as Record<string, unknown>;
-  for (const [key, descriptor] of entries) {
-    if (!descriptor.enumerable || !('value' in descriptor)) throw new InvalidJsonRepresentation('Invalid property');
-    Object.defineProperty(result, key, {value:copyJson(descriptor.value, ancestors, budget), enumerable:true, writable:false, configurable:false});
-  }
-  ancestors.delete(value);
-  return Object.freeze(result);
-}
-
-type ValidationError = { readonly instancePath?: string; readonly keyword?: string; readonly message?: string; readonly params?: { readonly additionalProperty?: unknown } };
-
-// The reason names the failed rule, its location and any unexpected field
-// name. It never includes a field's value.
-function rejectionReason(validate: (value: unknown) => boolean): string {
-  const error = (validate as { errors?: ReadonlyArray<ValidationError> | null }).errors?.[0];
-  if (!error) return 'Invalid desktop contract payload.';
-  const field = error.params?.additionalProperty;
-  const rule = error.keyword === 'additionalProperties' && typeof field === 'string'
-    ? `unexpected field ${JSON.stringify(field.slice(0, 64))}`
-    : error.message ?? error.keyword ?? 'rejected';
-  return `Invalid desktop contract payload at ${error.instancePath || '/'}: ${rule}.`.slice(0, 512);
-}
-
-function decode<T>(input: unknown, validate: (value: unknown) => boolean): DecodeOutcome<T> {
-  try {
-    const value = copyJson(input, new Set(), {remaining: 1_000_000});
-    if (!validate(value)) return {status:'invalid', message:rejectionReason(validate)};
-    // The generated complete validator establishes this representation.
-    return {status:'valid', value:value as T};
-  } catch (error) {
-    const reason = error instanceof InvalidJsonRepresentation ? `: ${error.message}` : '';
-    return {status:'invalid', message:`Invalid desktop contract payload${reason}.`};
-  }
-}
-export function decodeAvailableVersionsOutcome(input: unknown): DecodeOutcome<AvailableVersionsOutcome> { return decode(input, validateAvailableVersionsOutcome); }
-export function decodeBackendStatusOutcome(input: unknown): DecodeOutcome<BackendStatusOutcome> { return decode(input, validateBackendStatusOutcome); }
-export function decodeCancelInstallationOutcome(input: unknown): DecodeOutcome<CancelInstallationOutcome> { return decode(input, validateCancelInstallationOutcome); }
-export function decodeCatalogSearchOutcome(input: unknown): DecodeOutcome<CatalogSearchOutcome> { return decode(input, validateCatalogSearchOutcome); }
-export function decodeCheckVersionDependenciesOutcome(input: unknown): DecodeOutcome<CheckVersionDependenciesOutcome> { return decode(input, validateCheckVersionDependenciesOutcome); }
-export function decodeCheckVersionDependenciesParams(input: unknown): DecodeOutcome<CheckVersionDependenciesParams> { return decode(input, validateCheckVersionDependenciesParams); }
-export function decodeConversionCancelledOutcome(input: unknown): DecodeOutcome<ConversionCancelledOutcome> { return decode(input, validateConversionCancelledOutcome); }
-export function decodeConversionEnvironmentOutcome(input: unknown): DecodeOutcome<ConversionEnvironmentOutcome> { return decode(input, validateConversionEnvironmentOutcome); }
-export function decodeConversionListOutcome(input: unknown): DecodeOutcome<ConversionListOutcome> { return decode(input, validateConversionListOutcome); }
-export function decodeConversionProgressResponse(input: unknown): DecodeOutcome<ConversionProgressResponse> { return decode(input, validateConversionProgressResponse); }
-export function decodeConversionSetupStartedOutcome(input: unknown): DecodeOutcome<ConversionSetupStartedOutcome> { return decode(input, validateConversionSetupStartedOutcome); }
-export function decodeConversionSetupStatusOutcome(input: unknown): DecodeOutcome<ConversionSetupStatusOutcome> { return decode(input, validateConversionSetupStatusOutcome); }
-export function decodeConversionStartedOutcome(input: unknown): DecodeOutcome<ConversionStartedOutcome> { return decode(input, validateConversionStartedOutcome); }
-export function decodeDownloadIdParams(input: unknown): DecodeOutcome<DownloadIdParams> { return decode(input, validateDownloadIdParams); }
-export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<DownloadListOutcome> { return decode(input, validateDownloadListOutcome); }
-export function decodeDownloadLocationReport(input: unknown): DecodeOutcome<DownloadLocationReport> { return decode(input, validateDownloadLocationReport); }
-export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome> { return decode(input, validateDownloadMutationOutcome); }
-export function decodeDownloadResolutionRequest(input: unknown): DecodeOutcome<DownloadResolutionRequest> { return decode(input, validateDownloadResolutionRequest); }
-export function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome> { return decode(input, validateDownloadStartedOutcome); }
-export function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome> { return decode(input, validateDownloadStatusOutcome); }
-export function decodeFindTorchAlternativesParams(input: unknown): DecodeOutcome<FindTorchAlternativesParams> { return decode(input, validateFindTorchAlternativesParams); }
-export function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams> { return decode(input, validateGetBackendSetupParams); }
-export function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams> { return decode(input, validateGetHfDownloadDetailsParams); }
-export function decodeGetReleaseDependenciesOutcome(input: unknown): DecodeOutcome<GetReleaseDependenciesOutcome> { return decode(input, validateGetReleaseDependenciesOutcome); }
-export function decodeGetReleaseDependenciesParams(input: unknown): DecodeOutcome<GetReleaseDependenciesParams> { return decode(input, validateGetReleaseDependenciesParams); }
-export function decodeGetTorchReleaseOptionsParams(input: unknown): DecodeOutcome<GetTorchReleaseOptionsParams> { return decode(input, validateGetTorchReleaseOptionsParams); }
-export function decodeGetTorchRuntimeProbeParams(input: unknown): DecodeOutcome<GetTorchRuntimeProbeParams> { return decode(input, validateGetTorchRuntimeProbeParams); }
-export function decodeGithubCacheStatusOutcome(input: unknown): DecodeOutcome<GithubCacheStatusOutcome> { return decode(input, validateGithubCacheStatusOutcome); }
-export function decodeHfDownloadDetailsOutcome(input: unknown): DecodeOutcome<HfDownloadDetailsOutcome> { return decode(input, validateHfDownloadDetailsOutcome); }
-export function decodeHfModelSearchOutcome(input: unknown): DecodeOutcome<HfModelSearchOutcome> { return decode(input, validateHfModelSearchOutcome); }
-export function decodeImportBatchParams(input: unknown): DecodeOutcome<ImportBatchParams> { return decode(input, validateImportBatchParams); }
-export function decodeImportModelParams(input: unknown): DecodeOutcome<ImportModelParams> { return decode(input, validateImportModelParams); }
-export function decodeInferenceSettingsOutcome(input: unknown): DecodeOutcome<InferenceSettingsOutcome> { return decode(input, validateInferenceSettingsOutcome); }
-export function decodeInstallVersionDependenciesOutcome(input: unknown): DecodeOutcome<InstallVersionDependenciesOutcome> { return decode(input, validateInstallVersionDependenciesOutcome); }
-export function decodeInstallVersionDependenciesParams(input: unknown): DecodeOutcome<InstallVersionDependenciesParams> { return decode(input, validateInstallVersionDependenciesParams); }
-export function decodeInstallVersionOutcome(input: unknown): DecodeOutcome<InstallVersionOutcome> { return decode(input, validateInstallVersionOutcome); }
-export function decodeInstallVersionParams(input: unknown): DecodeOutcome<InstallVersionParams> { return decode(input, validateInstallVersionParams); }
-export function decodeInstallationProgressOutcome(input: unknown): DecodeOutcome<InstallationProgressOutcome> { return decode(input, validateInstallationProgressOutcome); }
-export function decodeInstalledVersionsOutcome(input: unknown): DecodeOutcome<InstalledVersionsOutcome> { return decode(input, validateInstalledVersionsOutcome); }
-export function decodeLauncherRootSelectionResult(input: unknown): DecodeOutcome<LauncherRootSelectionResult> { return decode(input, validateLauncherRootSelectionResult); }
-export function decodeLauncherRootStartupState(input: unknown): DecodeOutcome<LauncherRootStartupState> { return decode(input, validateLauncherRootStartupState); }
-export function decodeLibraryModelMetadataOutcome(input: unknown): DecodeOutcome<LibraryModelMetadataOutcome> { return decode(input, validateLibraryModelMetadataOutcome); }
-export function decodeLibraryStatusResponse(input: unknown): DecodeOutcome<LibraryStatusResponse> { return decode(input, validateLibraryStatusResponse); }
-export function decodeLibraryUpgradeConfirmation(input: unknown): DecodeOutcome<LibraryUpgradeConfirmation> { return decode(input, validateLibraryUpgradeConfirmation); }
-export function decodeLibraryUpgradeResult(input: unknown): DecodeOutcome<LibraryUpgradeResult> { return decode(input, validateLibraryUpgradeResult); }
-export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome> { return decode(input, validateLinkHealthOutcome); }
-export function decodeModelCategoryOutcome(input: unknown): DecodeOutcome<ModelCategoryOutcome> { return decode(input, validateModelCategoryOutcome); }
-export function decodeModelDownloadUpdateOutcome(input: unknown): DecodeOutcome<ModelDownloadUpdateOutcome> { return decode(input, validateModelDownloadUpdateOutcome); }
-export function decodeModelIdParams(input: unknown): DecodeOutcome<ModelIdParams> { return decode(input, validateModelIdParams); }
-export function decodeModelImportSelection(input: unknown): DecodeOutcome<ModelImportSelection> { return decode(input, validateModelImportSelection); }
-export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }
-export function decodeModelLibraryUpdateNotification(input: unknown): DecodeOutcome<ModelLibraryUpdateNotification> { return decode(input, validateModelLibraryUpdateNotification); }
-export function decodeModelLookupOutcome(input: unknown): DecodeOutcome<ModelLookupOutcome> { return decode(input, validateModelLookupOutcome); }
-export function decodeModelLookupParams(input: unknown): DecodeOutcome<ModelLookupParams> { return decode(input, validateModelLookupParams); }
-export function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome> { return decode(input, validateModelsOutcome); }
-export function decodeNetworkStatusResponse(input: unknown): DecodeOutcome<NetworkStatusResponse> { return decode(input, validateNetworkStatusResponse); }
-export function decodePartialDownloadOutcome(input: unknown): DecodeOutcome<PartialDownloadOutcome> { return decode(input, validatePartialDownloadOutcome); }
-export function decodePreviewTorchRuntimeParams(input: unknown): DecodeOutcome<PreviewTorchRuntimeParams> { return decode(input, validatePreviewTorchRuntimeParams); }
-export function decodePublicError(input: unknown): DecodeOutcome<PublicError> { return decode(input, validatePublicError); }
-export function decodeRecoverDownloadParams(input: unknown): DecodeOutcome<RecoverDownloadParams> { return decode(input, validateRecoverDownloadParams); }
-export function decodeRemoveVersionOutcome(input: unknown): DecodeOutcome<RemoveVersionOutcome> { return decode(input, validateRemoveVersionOutcome); }
-export function decodeRouterProfileSyncStatus(input: unknown): DecodeOutcome<RouterProfileSyncStatus> { return decode(input, validateRouterProfileSyncStatus); }
-export function decodeRuntimeLaunchOutcome(input: unknown): DecodeOutcome<RuntimeLaunchOutcome> { return decode(input, validateRuntimeLaunchOutcome); }
-export function decodeRuntimeLaunchParams(input: unknown): DecodeOutcome<RuntimeLaunchParams> { return decode(input, validateRuntimeLaunchParams); }
-export function decodeRuntimeProfileUpdateFeed(input: unknown): DecodeOutcome<RuntimeProfileUpdateFeed> { return decode(input, validateRuntimeProfileUpdateFeed); }
-export function decodeRuntimeProfilesSnapshotResponse(input: unknown): DecodeOutcome<RuntimeProfilesSnapshotResponse> { return decode(input, validateRuntimeProfilesSnapshotResponse); }
-export function decodeRuntimeRunningOutcome(input: unknown): DecodeOutcome<RuntimeRunningOutcome> { return decode(input, validateRuntimeRunningOutcome); }
-export function decodeRuntimeStopOutcome(input: unknown): DecodeOutcome<RuntimeStopOutcome> { return decode(input, validateRuntimeStopOutcome); }
-export function decodeS3AuthenticatedBundleImportParams(input: unknown): DecodeOutcome<S3AuthenticatedBundleImportParams> { return decode(input, validateS3AuthenticatedBundleImportParams); }
-export function decodeS3AuthenticatedDiscoveryParams(input: unknown): DecodeOutcome<S3AuthenticatedDiscoveryParams> { return decode(input, validateS3AuthenticatedDiscoveryParams); }
-export function decodeS3AuthenticatedImportParams(input: unknown): DecodeOutcome<S3AuthenticatedImportParams> { return decode(input, validateS3AuthenticatedImportParams); }
-export function decodeS3BundleImportObservation(input: unknown): DecodeOutcome<S3BundleImportObservation> { return decode(input, validateS3BundleImportObservation); }
-export function decodeS3BundleImportParams(input: unknown): DecodeOutcome<S3BundleImportParams> { return decode(input, validateS3BundleImportParams); }
-export function decodeS3ConditionalFileParams(input: unknown): DecodeOutcome<S3ConditionalFileParams> { return decode(input, validateS3ConditionalFileParams); }
-export function decodeS3CredentialParams(input: unknown): DecodeOutcome<S3CredentialParams> { return decode(input, validateS3CredentialParams); }
-export function decodeS3DiscoveryOutcome(input: unknown): DecodeOutcome<S3DiscoveryOutcome> { return decode(input, validateS3DiscoveryOutcome); }
-export function decodeS3DiscoveryParams(input: unknown): DecodeOutcome<S3DiscoveryParams> { return decode(input, validateS3DiscoveryParams); }
-export function decodeS3ImportCancelOutcome(input: unknown): DecodeOutcome<S3ImportCancelOutcome> { return decode(input, validateS3ImportCancelOutcome); }
-export function decodeS3ImportCancelParams(input: unknown): DecodeOutcome<S3ImportCancelParams> { return decode(input, validateS3ImportCancelParams); }
-export function decodeS3ImportOutcome(input: unknown): DecodeOutcome<S3ImportOutcome> { return decode(input, validateS3ImportOutcome); }
-export function decodeS3ImportParams(input: unknown): DecodeOutcome<S3ImportParams> { return decode(input, validateS3ImportParams); }
-export function decodeS3ImportStatusParams(input: unknown): DecodeOutcome<S3ImportStatusParams> { return decode(input, validateS3ImportStatusParams); }
-export function decodeS3PersistedImportsWire(input: unknown): DecodeOutcome<S3PersistedImportsWire> { return decode(input, validateS3PersistedImportsWire); }
-export function decodeS3PinnedFileParams(input: unknown): DecodeOutcome<S3PinnedFileParams> { return decode(input, validateS3PinnedFileParams); }
-export function decodeS3ReadMode(input: unknown): DecodeOutcome<S3ReadMode> { return decode(input, validateS3ReadMode); }
-export function decodeS3SelectedFileParams(input: unknown): DecodeOutcome<S3SelectedFileParams> { return decode(input, validateS3SelectedFileParams); }
-export function decodeS3TransferRetryParams(input: unknown): DecodeOutcome<S3TransferRetryParams> { return decode(input, validateS3TransferRetryParams); }
-export function decodeS3TransferRetryState(input: unknown): DecodeOutcome<S3TransferRetryState> { return decode(input, validateS3TransferRetryState); }
-export function decodeSearchCatalogParams(input: unknown): DecodeOutcome<SearchCatalogParams> { return decode(input, validateSearchCatalogParams); }
-export function decodeSelectedVersionOutcome(input: unknown): DecodeOutcome<SelectedVersionOutcome> { return decode(input, validateSelectedVersionOutcome); }
-export function decodeServingStatusResponse(input: unknown): DecodeOutcome<ServingStatusResponse> { return decode(input, validateServingStatusResponse); }
-export function decodeServingStatusUpdateFeed(input: unknown): DecodeOutcome<ServingStatusUpdateFeed> { return decode(input, validateServingStatusUpdateFeed); }
-export function decodeSetDefaultVersionOutcome(input: unknown): DecodeOutcome<SetDefaultVersionOutcome> { return decode(input, validateSetDefaultVersionOutcome); }
-export function decodeSetDefaultVersionParams(input: unknown): DecodeOutcome<SetDefaultVersionParams> { return decode(input, validateSetDefaultVersionParams); }
-export function decodeSetHfTokenParams(input: unknown): DecodeOutcome<SetHfTokenParams> { return decode(input, validateSetHfTokenParams); }
-export function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<StartBackendSetupParams> { return decode(input, validateStartBackendSetupParams); }
-export function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams> { return decode(input, validateStartConversionSetupParams); }
-export function decodeStartupFailureFrame(input: unknown): DecodeOutcome<StartupFailureFrame> { return decode(input, validateStartupFailureFrame); }
-export function decodeStatusTelemetrySnapshot(input: unknown): DecodeOutcome<StatusTelemetrySnapshot> { return decode(input, validateStatusTelemetrySnapshot); }
-export function decodeStatusTelemetryUpdateNotification(input: unknown): DecodeOutcome<StatusTelemetryUpdateNotification> { return decode(input, validateStatusTelemetryUpdateNotification); }
-export function decodeStopRuntimeProfileGenerationOutcome(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationOutcome> { return decode(input, validateStopRuntimeProfileGenerationOutcome); }
-export function decodeStopRuntimeProfileGenerationParams(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationParams> { return decode(input, validateStopRuntimeProfileGenerationParams); }
-export function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome> { return decode(input, validateSuccessOutcome); }
-export function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome> { return decode(input, validateSupportedQuantTypesOutcome); }
-export function decodeSwitchVersionOutcome(input: unknown): DecodeOutcome<SwitchVersionOutcome> { return decode(input, validateSwitchVersionOutcome); }
-export function decodeSwitchVersionParams(input: unknown): DecodeOutcome<SwitchVersionParams> { return decode(input, validateSwitchVersionParams); }
-export function decodeTorchAdapterRequirement(input: unknown): DecodeOutcome<TorchAdapterRequirement> { return decode(input, validateTorchAdapterRequirement); }
-export function decodeTorchAlternativeMatch(input: unknown): DecodeOutcome<TorchAlternativeMatch> { return decode(input, validateTorchAlternativeMatch); }
-export function decodeTorchAlternativesOutcome(input: unknown): DecodeOutcome<TorchAlternativesOutcome> { return decode(input, validateTorchAlternativesOutcome); }
-export function decodeTorchAlternativesStatus(input: unknown): DecodeOutcome<TorchAlternativesStatus> { return decode(input, validateTorchAlternativesStatus); }
-export function decodeTorchCapabilityProbe(input: unknown): DecodeOutcome<TorchCapabilityProbe> { return decode(input, validateTorchCapabilityProbe); }
-export function decodeTorchDriverAvailability(input: unknown): DecodeOutcome<TorchDriverAvailability> { return decode(input, validateTorchDriverAvailability); }
-export function decodeTorchGpuVendor(input: unknown): DecodeOutcome<TorchGpuVendor> { return decode(input, validateTorchGpuVendor); }
-export function decodeTorchInstalledRuntime(input: unknown): DecodeOutcome<TorchInstalledRuntime> { return decode(input, validateTorchInstalledRuntime); }
-export function decodeTorchProbeAdapterStatus(input: unknown): DecodeOutcome<TorchProbeAdapterStatus> { return decode(input, validateTorchProbeAdapterStatus); }
-export function decodeTorchProbeCoreStatus(input: unknown): DecodeOutcome<TorchProbeCoreStatus> { return decode(input, validateTorchProbeCoreStatus); }
-export function decodeTorchProbeStatus(input: unknown): DecodeOutcome<TorchProbeStatus> { return decode(input, validateTorchProbeStatus); }
-export function decodeTorchPythonChoice(input: unknown): DecodeOutcome<TorchPythonChoice> { return decode(input, validateTorchPythonChoice); }
-export function decodeTorchReleaseCombination(input: unknown): DecodeOutcome<TorchReleaseCombination> { return decode(input, validateTorchReleaseCombination); }
-export function decodeTorchReleaseDriverStatus(input: unknown): DecodeOutcome<TorchReleaseDriverStatus> { return decode(input, validateTorchReleaseDriverStatus); }
-export function decodeTorchReleaseOptionsOutcome(input: unknown): DecodeOutcome<TorchReleaseOptionsOutcome> { return decode(input, validateTorchReleaseOptionsOutcome); }
-export function decodeTorchReleaseOptionsStatus(input: unknown): DecodeOutcome<TorchReleaseOptionsStatus> { return decode(input, validateTorchReleaseOptionsStatus); }
-export function decodeTorchReleaseRecommendation(input: unknown): DecodeOutcome<TorchReleaseRecommendation> { return decode(input, validateTorchReleaseRecommendation); }
-export function decodeTorchRuntimeOptionsOutcome(input: unknown): DecodeOutcome<TorchRuntimeOptionsOutcome> { return decode(input, validateTorchRuntimeOptionsOutcome); }
-export function decodeTorchRuntimePreview(input: unknown): DecodeOutcome<TorchRuntimePreview> { return decode(input, validateTorchRuntimePreview); }
-export function decodeTorchRuntimePreviewArtifact(input: unknown): DecodeOutcome<TorchRuntimePreviewArtifact> { return decode(input, validateTorchRuntimePreviewArtifact); }
-export function decodeTorchRuntimePreviewOutcome(input: unknown): DecodeOutcome<TorchRuntimePreviewOutcome> { return decode(input, validateTorchRuntimePreviewOutcome); }
-export function decodeTorchRuntimePreviewQualification(input: unknown): DecodeOutcome<TorchRuntimePreviewQualification> { return decode(input, validateTorchRuntimePreviewQualification); }
-export function decodeTorchRuntimePreviewRejectionReason(input: unknown): DecodeOutcome<TorchRuntimePreviewRejectionReason> { return decode(input, validateTorchRuntimePreviewRejectionReason); }
-export function decodeTorchRuntimeProbeOutcome(input: unknown): DecodeOutcome<TorchRuntimeProbeOutcome> { return decode(input, validateTorchRuntimeProbeOutcome); }
-export function decodeTorchTrialCleanup(input: unknown): DecodeOutcome<TorchTrialCleanup> { return decode(input, validateTorchTrialCleanup); }
-export function decodeTorchTrialHealthStatus(input: unknown): DecodeOutcome<TorchTrialHealthStatus> { return decode(input, validateTorchTrialHealthStatus); }
-export function decodeTorchTrialStartupStatus(input: unknown): DecodeOutcome<TorchTrialStartupStatus> { return decode(input, validateTorchTrialStartupStatus); }
-export function decodeTorchVerifiedPackage(input: unknown): DecodeOutcome<TorchVerifiedPackage> { return decode(input, validateTorchVerifiedPackage); }
-export function decodeTorchVerifiedRuntime(input: unknown): DecodeOutcome<TorchVerifiedRuntime> { return decode(input, validateTorchVerifiedRuntime); }
-export function decodeTrialTorchRuntimeOutcome(input: unknown): DecodeOutcome<TrialTorchRuntimeOutcome> { return decode(input, validateTrialTorchRuntimeOutcome); }
-export function decodeTrialTorchRuntimeParams(input: unknown): DecodeOutcome<TrialTorchRuntimeParams> { return decode(input, validateTrialTorchRuntimeParams); }
-export function decodeUpdateInferenceSettingsOutcome(input: unknown): DecodeOutcome<UpdateInferenceSettingsOutcome> { return decode(input, validateUpdateInferenceSettingsOutcome); }
-export function decodeUpdateInferenceSettingsParams(input: unknown): DecodeOutcome<UpdateInferenceSettingsParams> { return decode(input, validateUpdateInferenceSettingsParams); }
-export function decodeUpdateModelNotesOutcome(input: unknown): DecodeOutcome<UpdateModelNotesOutcome> { return decode(input, validateUpdateModelNotesOutcome); }
-export function decodeUpdateModelNotesParams(input: unknown): DecodeOutcome<UpdateModelNotesParams> { return decode(input, validateUpdateModelNotesParams); }
-export function decodeUpdateStreamError(input: unknown): DecodeOutcome<UpdateStreamError> { return decode(input, validateUpdateStreamError); }
-export function decodeValidateInstallationsOutcome(input: unknown): DecodeOutcome<ValidateInstallationsOutcome> { return decode(input, validateValidateInstallationsOutcome); }
-export function decodeVersionInfoOutcome(input: unknown): DecodeOutcome<VersionInfoOutcome> { return decode(input, validateVersionInfoOutcome); }
-export function decodeVersionStatusOutcome(input: unknown): DecodeOutcome<VersionStatusOutcome> { return decode(input, validateVersionStatusOutcome); }
+export declare function decodeAvailableVersionsOutcome(input: unknown): DecodeOutcome<AvailableVersionsOutcome>;
+export declare function decodeBackendStatusOutcome(input: unknown): DecodeOutcome<BackendStatusOutcome>;
+export declare function decodeCancelInstallationOutcome(input: unknown): DecodeOutcome<CancelInstallationOutcome>;
+export declare function decodeCatalogSearchOutcome(input: unknown): DecodeOutcome<CatalogSearchOutcome>;
+export declare function decodeCheckVersionDependenciesOutcome(input: unknown): DecodeOutcome<CheckVersionDependenciesOutcome>;
+export declare function decodeCheckVersionDependenciesParams(input: unknown): DecodeOutcome<CheckVersionDependenciesParams>;
+export declare function decodeConversionCancelledOutcome(input: unknown): DecodeOutcome<ConversionCancelledOutcome>;
+export declare function decodeConversionEnvironmentOutcome(input: unknown): DecodeOutcome<ConversionEnvironmentOutcome>;
+export declare function decodeConversionListOutcome(input: unknown): DecodeOutcome<ConversionListOutcome>;
+export declare function decodeConversionProgressResponse(input: unknown): DecodeOutcome<ConversionProgressResponse>;
+export declare function decodeConversionSetupStartedOutcome(input: unknown): DecodeOutcome<ConversionSetupStartedOutcome>;
+export declare function decodeConversionSetupStatusOutcome(input: unknown): DecodeOutcome<ConversionSetupStatusOutcome>;
+export declare function decodeConversionStartedOutcome(input: unknown): DecodeOutcome<ConversionStartedOutcome>;
+export declare function decodeDownloadIdParams(input: unknown): DecodeOutcome<DownloadIdParams>;
+export declare function decodeDownloadListOutcome(input: unknown): DecodeOutcome<DownloadListOutcome>;
+export declare function decodeDownloadLocationReport(input: unknown): DecodeOutcome<DownloadLocationReport>;
+export declare function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome>;
+export declare function decodeDownloadResolutionRequest(input: unknown): DecodeOutcome<DownloadResolutionRequest>;
+export declare function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome>;
+export declare function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome>;
+export declare function decodeFindTorchAlternativesParams(input: unknown): DecodeOutcome<FindTorchAlternativesParams>;
+export declare function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams>;
+export declare function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams>;
+export declare function decodeGetReleaseDependenciesOutcome(input: unknown): DecodeOutcome<GetReleaseDependenciesOutcome>;
+export declare function decodeGetReleaseDependenciesParams(input: unknown): DecodeOutcome<GetReleaseDependenciesParams>;
+export declare function decodeGetTorchReleaseOptionsParams(input: unknown): DecodeOutcome<GetTorchReleaseOptionsParams>;
+export declare function decodeGetTorchRuntimeProbeParams(input: unknown): DecodeOutcome<GetTorchRuntimeProbeParams>;
+export declare function decodeGithubCacheStatusOutcome(input: unknown): DecodeOutcome<GithubCacheStatusOutcome>;
+export declare function decodeHfDownloadDetailsOutcome(input: unknown): DecodeOutcome<HfDownloadDetailsOutcome>;
+export declare function decodeHfModelSearchOutcome(input: unknown): DecodeOutcome<HfModelSearchOutcome>;
+export declare function decodeImportBatchParams(input: unknown): DecodeOutcome<ImportBatchParams>;
+export declare function decodeImportModelParams(input: unknown): DecodeOutcome<ImportModelParams>;
+export declare function decodeInferenceSettingsOutcome(input: unknown): DecodeOutcome<InferenceSettingsOutcome>;
+export declare function decodeInstallVersionDependenciesOutcome(input: unknown): DecodeOutcome<InstallVersionDependenciesOutcome>;
+export declare function decodeInstallVersionDependenciesParams(input: unknown): DecodeOutcome<InstallVersionDependenciesParams>;
+export declare function decodeInstallVersionOutcome(input: unknown): DecodeOutcome<InstallVersionOutcome>;
+export declare function decodeInstallVersionParams(input: unknown): DecodeOutcome<InstallVersionParams>;
+export declare function decodeInstallationProgressOutcome(input: unknown): DecodeOutcome<InstallationProgressOutcome>;
+export declare function decodeInstalledVersionsOutcome(input: unknown): DecodeOutcome<InstalledVersionsOutcome>;
+export declare function decodeLauncherRootSelectionResult(input: unknown): DecodeOutcome<LauncherRootSelectionResult>;
+export declare function decodeLauncherRootStartupState(input: unknown): DecodeOutcome<LauncherRootStartupState>;
+export declare function decodeLibraryModelMetadataOutcome(input: unknown): DecodeOutcome<LibraryModelMetadataOutcome>;
+export declare function decodeLibraryStatusResponse(input: unknown): DecodeOutcome<LibraryStatusResponse>;
+export declare function decodeLibraryUpgradeConfirmation(input: unknown): DecodeOutcome<LibraryUpgradeConfirmation>;
+export declare function decodeLibraryUpgradeResult(input: unknown): DecodeOutcome<LibraryUpgradeResult>;
+export declare function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome>;
+export declare function decodeModelCategoryOutcome(input: unknown): DecodeOutcome<ModelCategoryOutcome>;
+export declare function decodeModelDownloadUpdateOutcome(input: unknown): DecodeOutcome<ModelDownloadUpdateOutcome>;
+export declare function decodeModelIdParams(input: unknown): DecodeOutcome<ModelIdParams>;
+export declare function decodeModelImportSelection(input: unknown): DecodeOutcome<ModelImportSelection>;
+export declare function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome>;
+export declare function decodeModelLibraryUpdateNotification(input: unknown): DecodeOutcome<ModelLibraryUpdateNotification>;
+export declare function decodeModelLookupOutcome(input: unknown): DecodeOutcome<ModelLookupOutcome>;
+export declare function decodeModelLookupParams(input: unknown): DecodeOutcome<ModelLookupParams>;
+export declare function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome>;
+export declare function decodeNetworkStatusResponse(input: unknown): DecodeOutcome<NetworkStatusResponse>;
+export declare function decodePartialDownloadOutcome(input: unknown): DecodeOutcome<PartialDownloadOutcome>;
+export declare function decodePreviewTorchRuntimeParams(input: unknown): DecodeOutcome<PreviewTorchRuntimeParams>;
+export declare function decodePublicError(input: unknown): DecodeOutcome<PublicError>;
+export declare function decodeRecoverDownloadParams(input: unknown): DecodeOutcome<RecoverDownloadParams>;
+export declare function decodeRemoveVersionOutcome(input: unknown): DecodeOutcome<RemoveVersionOutcome>;
+export declare function decodeRouterProfileSyncStatus(input: unknown): DecodeOutcome<RouterProfileSyncStatus>;
+export declare function decodeRuntimeLaunchOutcome(input: unknown): DecodeOutcome<RuntimeLaunchOutcome>;
+export declare function decodeRuntimeLaunchParams(input: unknown): DecodeOutcome<RuntimeLaunchParams>;
+export declare function decodeRuntimeProfileUpdateFeed(input: unknown): DecodeOutcome<RuntimeProfileUpdateFeed>;
+export declare function decodeRuntimeProfilesSnapshotResponse(input: unknown): DecodeOutcome<RuntimeProfilesSnapshotResponse>;
+export declare function decodeRuntimeRunningOutcome(input: unknown): DecodeOutcome<RuntimeRunningOutcome>;
+export declare function decodeRuntimeStopOutcome(input: unknown): DecodeOutcome<RuntimeStopOutcome>;
+export declare function decodeS3AuthenticatedBundleImportParams(input: unknown): DecodeOutcome<S3AuthenticatedBundleImportParams>;
+export declare function decodeS3AuthenticatedDiscoveryParams(input: unknown): DecodeOutcome<S3AuthenticatedDiscoveryParams>;
+export declare function decodeS3AuthenticatedImportParams(input: unknown): DecodeOutcome<S3AuthenticatedImportParams>;
+export declare function decodeS3BundleImportObservation(input: unknown): DecodeOutcome<S3BundleImportObservation>;
+export declare function decodeS3BundleImportParams(input: unknown): DecodeOutcome<S3BundleImportParams>;
+export declare function decodeS3ConditionalFileParams(input: unknown): DecodeOutcome<S3ConditionalFileParams>;
+export declare function decodeS3CredentialParams(input: unknown): DecodeOutcome<S3CredentialParams>;
+export declare function decodeS3DiscoveryOutcome(input: unknown): DecodeOutcome<S3DiscoveryOutcome>;
+export declare function decodeS3DiscoveryParams(input: unknown): DecodeOutcome<S3DiscoveryParams>;
+export declare function decodeS3ImportCancelOutcome(input: unknown): DecodeOutcome<S3ImportCancelOutcome>;
+export declare function decodeS3ImportCancelParams(input: unknown): DecodeOutcome<S3ImportCancelParams>;
+export declare function decodeS3ImportOutcome(input: unknown): DecodeOutcome<S3ImportOutcome>;
+export declare function decodeS3ImportParams(input: unknown): DecodeOutcome<S3ImportParams>;
+export declare function decodeS3ImportStatusParams(input: unknown): DecodeOutcome<S3ImportStatusParams>;
+export declare function decodeS3PersistedImportsWire(input: unknown): DecodeOutcome<S3PersistedImportsWire>;
+export declare function decodeS3PinnedFileParams(input: unknown): DecodeOutcome<S3PinnedFileParams>;
+export declare function decodeS3ReadMode(input: unknown): DecodeOutcome<S3ReadMode>;
+export declare function decodeS3SelectedFileParams(input: unknown): DecodeOutcome<S3SelectedFileParams>;
+export declare function decodeS3TransferRetryParams(input: unknown): DecodeOutcome<S3TransferRetryParams>;
+export declare function decodeS3TransferRetryState(input: unknown): DecodeOutcome<S3TransferRetryState>;
+export declare function decodeSearchCatalogParams(input: unknown): DecodeOutcome<SearchCatalogParams>;
+export declare function decodeSelectedVersionOutcome(input: unknown): DecodeOutcome<SelectedVersionOutcome>;
+export declare function decodeServingStatusResponse(input: unknown): DecodeOutcome<ServingStatusResponse>;
+export declare function decodeServingStatusUpdateFeed(input: unknown): DecodeOutcome<ServingStatusUpdateFeed>;
+export declare function decodeSetDefaultVersionOutcome(input: unknown): DecodeOutcome<SetDefaultVersionOutcome>;
+export declare function decodeSetDefaultVersionParams(input: unknown): DecodeOutcome<SetDefaultVersionParams>;
+export declare function decodeSetHfTokenParams(input: unknown): DecodeOutcome<SetHfTokenParams>;
+export declare function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<StartBackendSetupParams>;
+export declare function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams>;
+export declare function decodeStartupFailureFrame(input: unknown): DecodeOutcome<StartupFailureFrame>;
+export declare function decodeStatusTelemetrySnapshot(input: unknown): DecodeOutcome<StatusTelemetrySnapshot>;
+export declare function decodeStatusTelemetryUpdateNotification(input: unknown): DecodeOutcome<StatusTelemetryUpdateNotification>;
+export declare function decodeStopRuntimeProfileGenerationOutcome(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationOutcome>;
+export declare function decodeStopRuntimeProfileGenerationParams(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationParams>;
+export declare function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome>;
+export declare function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome>;
+export declare function decodeSwitchVersionOutcome(input: unknown): DecodeOutcome<SwitchVersionOutcome>;
+export declare function decodeSwitchVersionParams(input: unknown): DecodeOutcome<SwitchVersionParams>;
+export declare function decodeTorchAdapterRequirement(input: unknown): DecodeOutcome<TorchAdapterRequirement>;
+export declare function decodeTorchAlternativeMatch(input: unknown): DecodeOutcome<TorchAlternativeMatch>;
+export declare function decodeTorchAlternativesOutcome(input: unknown): DecodeOutcome<TorchAlternativesOutcome>;
+export declare function decodeTorchAlternativesStatus(input: unknown): DecodeOutcome<TorchAlternativesStatus>;
+export declare function decodeTorchCapabilityProbe(input: unknown): DecodeOutcome<TorchCapabilityProbe>;
+export declare function decodeTorchDriverAvailability(input: unknown): DecodeOutcome<TorchDriverAvailability>;
+export declare function decodeTorchGpuVendor(input: unknown): DecodeOutcome<TorchGpuVendor>;
+export declare function decodeTorchInstalledRuntime(input: unknown): DecodeOutcome<TorchInstalledRuntime>;
+export declare function decodeTorchProbeAdapterStatus(input: unknown): DecodeOutcome<TorchProbeAdapterStatus>;
+export declare function decodeTorchProbeCoreStatus(input: unknown): DecodeOutcome<TorchProbeCoreStatus>;
+export declare function decodeTorchProbeStatus(input: unknown): DecodeOutcome<TorchProbeStatus>;
+export declare function decodeTorchPythonChoice(input: unknown): DecodeOutcome<TorchPythonChoice>;
+export declare function decodeTorchReleaseCombination(input: unknown): DecodeOutcome<TorchReleaseCombination>;
+export declare function decodeTorchReleaseDriverStatus(input: unknown): DecodeOutcome<TorchReleaseDriverStatus>;
+export declare function decodeTorchReleaseOptionsOutcome(input: unknown): DecodeOutcome<TorchReleaseOptionsOutcome>;
+export declare function decodeTorchReleaseOptionsStatus(input: unknown): DecodeOutcome<TorchReleaseOptionsStatus>;
+export declare function decodeTorchReleaseRecommendation(input: unknown): DecodeOutcome<TorchReleaseRecommendation>;
+export declare function decodeTorchRuntimeOptionsOutcome(input: unknown): DecodeOutcome<TorchRuntimeOptionsOutcome>;
+export declare function decodeTorchRuntimePreview(input: unknown): DecodeOutcome<TorchRuntimePreview>;
+export declare function decodeTorchRuntimePreviewArtifact(input: unknown): DecodeOutcome<TorchRuntimePreviewArtifact>;
+export declare function decodeTorchRuntimePreviewOutcome(input: unknown): DecodeOutcome<TorchRuntimePreviewOutcome>;
+export declare function decodeTorchRuntimePreviewQualification(input: unknown): DecodeOutcome<TorchRuntimePreviewQualification>;
+export declare function decodeTorchRuntimePreviewRejectionReason(input: unknown): DecodeOutcome<TorchRuntimePreviewRejectionReason>;
+export declare function decodeTorchRuntimeProbeOutcome(input: unknown): DecodeOutcome<TorchRuntimeProbeOutcome>;
+export declare function decodeTorchTrialCleanup(input: unknown): DecodeOutcome<TorchTrialCleanup>;
+export declare function decodeTorchTrialHealthStatus(input: unknown): DecodeOutcome<TorchTrialHealthStatus>;
+export declare function decodeTorchTrialStartupStatus(input: unknown): DecodeOutcome<TorchTrialStartupStatus>;
+export declare function decodeTorchVerifiedPackage(input: unknown): DecodeOutcome<TorchVerifiedPackage>;
+export declare function decodeTorchVerifiedRuntime(input: unknown): DecodeOutcome<TorchVerifiedRuntime>;
+export declare function decodeTrialTorchRuntimeOutcome(input: unknown): DecodeOutcome<TrialTorchRuntimeOutcome>;
+export declare function decodeTrialTorchRuntimeParams(input: unknown): DecodeOutcome<TrialTorchRuntimeParams>;
+export declare function decodeUpdateInferenceSettingsOutcome(input: unknown): DecodeOutcome<UpdateInferenceSettingsOutcome>;
+export declare function decodeUpdateInferenceSettingsParams(input: unknown): DecodeOutcome<UpdateInferenceSettingsParams>;
+export declare function decodeUpdateModelNotesOutcome(input: unknown): DecodeOutcome<UpdateModelNotesOutcome>;
+export declare function decodeUpdateModelNotesParams(input: unknown): DecodeOutcome<UpdateModelNotesParams>;
+export declare function decodeUpdateStreamError(input: unknown): DecodeOutcome<UpdateStreamError>;
+export declare function decodeValidateInstallationsOutcome(input: unknown): DecodeOutcome<ValidateInstallationsOutcome>;
+export declare function decodeVersionInfoOutcome(input: unknown): DecodeOutcome<VersionInfoOutcome>;
+export declare function decodeVersionStatusOutcome(input: unknown): DecodeOutcome<VersionStatusOutcome>;

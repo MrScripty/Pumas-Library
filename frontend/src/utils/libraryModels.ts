@@ -1,5 +1,5 @@
 import type { ModelCategory, ModelInfo } from '../types/apps';
-import type { CatalogModel } from '../generated/desktop-contract';
+import type { CatalogModel } from '@pumas/desktop-contract';
 import { modelCategoryRank } from './modelCategories';
 
 function getConvertibleFormat(format?: string): ModelInfo['primaryFormat'] {

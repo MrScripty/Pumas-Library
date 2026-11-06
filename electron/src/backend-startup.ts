@@ -6,7 +6,7 @@
  * may come from another build, so unknown fields are ignored and an unknown
  * reason is treated as `backend-unavailable`.
  */
-import { decodeStartupFailureFrame } from './generated/desktop-contract';
+import { decodeStartupFailureFrame } from './desktop-contract';
 
 const STARTUP_FAILURE_PREFIX = 'PUMAS_STARTUP_FAILURE=';
 const MAX_STARTUP_LINE_LENGTH = 1024;

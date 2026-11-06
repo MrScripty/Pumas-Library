@@ -2,7 +2,7 @@ import type {
   RuntimeProfileEvent as DesktopRuntimeProfileEvent,
   RuntimeProfileEventKind as DesktopRuntimeProfileEventKind,
   RuntimeProfileUpdateFeed as DesktopRuntimeProfileUpdateFeed,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 import type { BaseResponse } from './api-common';
 
 export type RuntimeProviderId = 'ollama' | 'llama_cpp' | 'onnx_runtime' | 'torch';

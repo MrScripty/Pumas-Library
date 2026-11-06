@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 const fixturePath = process.env.PUMAS_DESKTOP_CONTRACT_FIXTURES;
 if (!fixturePath) throw new Error('Run this integration test through with-desktop-contract-fixtures.mjs.');
 const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
-const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
+const compiled = await build({entryPoints:[fileURLToPath(new URL('../../packages/desktop-contract/generated/desktop-contract.js', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
 test('router synchronization metadata preserves producer states and rejects malformed observations', () => {

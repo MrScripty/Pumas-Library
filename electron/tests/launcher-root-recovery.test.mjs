@@ -8,7 +8,7 @@ import {
   projectLauncherRootStartupState,
   sanitizeRecoveryDetail,
 } from '../dist/launcher-root-recovery.js';
-import { decodeLauncherRootStartupState } from '../dist/generated/desktop-contract.js';
+import { decodeLauncherRootStartupState } from '../dist/desktop-contract.js';
 import {
   LauncherRootPersistenceError,
   LauncherRootSelectionError,

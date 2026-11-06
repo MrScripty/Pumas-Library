@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { APIError } from '../errors';
 import { importAPI } from '../api/import';
-import { decodeS3DiscoveryParams, decodeS3AuthenticatedDiscoveryParams, type S3CredentialParams, type S3DiscoveryOutcome } from '../generated/desktop-contract';
+import { decodeS3DiscoveryParams, decodeS3AuthenticatedDiscoveryParams, type S3CredentialParams, type S3DiscoveryOutcome } from '@pumas/desktop-contract';
 import type { S3ImportDraft } from './useS3ModelImport';
 
 type DiscoveryOwner = {id: string; observing: boolean; cancelling: boolean};

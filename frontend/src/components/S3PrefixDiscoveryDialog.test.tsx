@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { S3ModelImportDialog } from './S3ModelImportDialog';
-import type { S3DiscoveryOutcome, S3ImportOutcome } from '../generated/desktop-contract';
+import type { S3DiscoveryOutcome, S3ImportOutcome } from '@pumas/desktop-contract';
 const discovery=vi.hoisted(() => ({snapshot:null as S3DiscoveryOutcome|null,busy:false,error:null,start:vi.fn(),cancel:vi.fn(),reset:vi.fn(),observeAgain:vi.fn()}));
 const imports=vi.hoisted(() => ({snapshot:{status:'idle'} as S3ImportOutcome,bundleProgress:null,error:null,commandBusy:false,start:vi.fn(),startAuthenticated:vi.fn(),startBundle:vi.fn(),cancel:vi.fn(),observeAgain:vi.fn()}));
 vi.mock('../hooks/useS3PrefixDiscovery',()=>({useS3PrefixDiscovery:()=>discovery}));

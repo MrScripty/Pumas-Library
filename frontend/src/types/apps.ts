@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import type { CatalogRecoveryIdentity } from '../generated/desktop-contract';
+import type { CatalogRecoveryIdentity } from '@pumas/desktop-contract';
 
 export type AppStatus = 'idle' | 'running' | 'installing' | 'error';
 export type AppIconState = 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';

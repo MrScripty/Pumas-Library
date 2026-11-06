@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { importAPI } from '../api/import';
-import { decodeS3TransferRetryState, type S3TransferRetryState, type S3ImportOutcome, type S3CredentialParams } from '../generated/desktop-contract';
+import { decodeS3TransferRetryState, type S3TransferRetryState, type S3ImportOutcome, type S3CredentialParams } from '@pumas/desktop-contract';
 
 /** Availability is advisory. The existing owner checks exact custody on retry. */
 export function S3TransferRetryPanel({outcome, busy, onRetry, clearEpoch = 0}: {

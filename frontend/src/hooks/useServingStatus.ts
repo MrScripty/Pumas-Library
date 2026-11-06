@@ -3,7 +3,7 @@ import { getElectronAPI } from '../api/adapter';
 import type { ServingStatusSnapshot } from '../types/api-serving';
 import type { ModelServeErrorCode } from '../types/api-serving';
 import type { RouterProfileSyncStatus } from '../types/api-serving';
-import { decodeRouterProfileSyncStatus } from '../generated/desktop-contract';
+import { decodeRouterProfileSyncStatus } from '@pumas/desktop-contract';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useServingStatus');

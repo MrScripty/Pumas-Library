@@ -5,7 +5,8 @@
   "packageManager": "pnpm@10.33.0",
   "workspaces": [
     "frontend",
-    "electron"
+    "electron",
+    "packages/desktop-contract"
   ],
   "scripts": {
     "check:dependency-ownership": "node scripts/dev/check-workspace-dependency-ownership.mjs",

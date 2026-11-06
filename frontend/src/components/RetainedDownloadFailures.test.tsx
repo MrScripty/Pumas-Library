@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RetainedDownloadFailures } from './RetainedDownloadFailures';
-import type { DownloadLocationReport } from '../generated/desktop-contract';
+import type { DownloadLocationReport } from '@pumas/desktop-contract';
 import type { DownloadStatus } from '../hooks/modelDownloadState';
 
 const { inspect, resolve } = vi.hoisted(() => ({ inspect: vi.fn(), resolve: vi.fn() }));

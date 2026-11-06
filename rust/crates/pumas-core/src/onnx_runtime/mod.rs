@@ -25,7 +25,7 @@ mod tokenizer;
 
 pub use config::{OnnxInputTokenLimit, OnnxModelConfig};
 pub use fake::FakeOnnxEmbeddingBackend;
-pub use manager::{OnnxEmbeddingBackend, OnnxSessionManager};
+pub use manager::{OnnxEmbeddingBackend, OnnxOperationLease, OnnxSessionManager};
 pub use postprocess::{
     OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
     OnnxOutputTensorSelection,

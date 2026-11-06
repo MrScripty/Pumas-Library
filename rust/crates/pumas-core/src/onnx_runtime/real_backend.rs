@@ -10,7 +10,8 @@ use async_trait::async_trait;
 
 use super::{
     FakeOnnxEmbeddingBackend, OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxEmbeddingResponse,
-    OnnxLoadRequest, OnnxModelId, OnnxRuntimeError, OnnxRuntimeSession, OnnxSessionStatus,
+    OnnxLoadRequest, OnnxModelId, OnnxOperationLease, OnnxRuntimeError, OnnxRuntimeSession,
+    OnnxSessionStatus,
 };
 
 #[derive(Debug)]
@@ -72,6 +73,29 @@ impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
             Self::Real(backend) => backend.embed_with_admission(request, admission).await,
         }
     }
+
+    async fn load_leased(
+        &self,
+        request: OnnxLoadRequest,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        match self {
+            Self::Fake(backend) => backend.load_leased(request, lease).await,
+            Self::Real(backend) => backend.load_leased(request, lease).await,
+        }
+    }
+
+    async fn embed_leased(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        match self {
+            Self::Fake(backend) => backend.embed_leased(request, admission, lease).await,
+            Self::Real(backend) => backend.embed_leased(request, admission, lease).await,
+        }
+    }
 }
 
 /// ONNX Runtime sessions keyed by model id.
@@ -104,15 +128,66 @@ impl RealOnnxEmbeddingBackend {
             .lock()
             .map_err(|_| OnnxRuntimeError::backend("ONNX real backend lock poisoned"))
     }
+
+    async fn load_holding(
+        &self,
+        request: OnnxLoadRequest,
+        lease: Option<OnnxOperationLease>,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        let session = run_blocking(lease, move || OnnxRuntimeSession::load(request)).await?;
+        let status = session.status();
+        self.sessions()?.insert(
+            status.model_id.clone(),
+            LoadedSession {
+                status: status.clone(),
+                session: Arc::new(Mutex::new(session)),
+            },
+        );
+        Ok(status)
+    }
+
+    async fn embed_holding(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+        lease: Option<OnnxOperationLease>,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        let session = self
+            .sessions()?
+            .get(&request.model_id)
+            .map(|loaded| loaded.session.clone())
+            .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?;
+        if let Some(marker) = admission {
+            marker.store(true, Ordering::Release);
+        }
+        run_blocking(lease, move || {
+            session
+                .lock()
+                .map_err(|_| OnnxRuntimeError::backend("ONNX session lock poisoned"))?
+                .embed(request)
+        })
+        .await
+    }
 }
 
 /// Run blocking ONNX work off the async executor.
-async fn run_blocking<T, F>(work: F) -> Result<T, OnnxRuntimeError>
+///
+/// Dropping the returned future does not stop native work already running, so
+/// `lease` moves into the work and is released only when the work ends.
+async fn run_blocking<T, F>(
+    lease: Option<OnnxOperationLease>,
+    work: F,
+) -> Result<T, OnnxRuntimeError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, OnnxRuntimeError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(work).await.map_err(|error| {
+    tokio::task::spawn_blocking(move || {
+        let _lease = lease;
+        work()
+    })
+    .await
+    .map_err(|error| {
         OnnxRuntimeError::backend(if error.is_panic() {
             "ONNX Runtime work panicked"
         } else {
@@ -124,16 +199,15 @@ where
 #[async_trait]
 impl OnnxEmbeddingBackend for RealOnnxEmbeddingBackend {
     async fn load(&self, request: OnnxLoadRequest) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        let session = run_blocking(move || OnnxRuntimeSession::load(request)).await?;
-        let status = session.status();
-        self.sessions()?.insert(
-            status.model_id.clone(),
-            LoadedSession {
-                status: status.clone(),
-                session: Arc::new(Mutex::new(session)),
-            },
-        );
-        Ok(status)
+        self.load_holding(request, None).await
+    }
+
+    async fn load_leased(
+        &self,
+        request: OnnxLoadRequest,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        self.load_holding(request, Some(lease)).await
     }
 
     async fn unload(
@@ -170,20 +244,58 @@ impl OnnxEmbeddingBackend for RealOnnxEmbeddingBackend {
         request: OnnxEmbeddingRequest,
         admission: Option<&AtomicBool>,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
-        let session = self
-            .sessions()?
-            .get(&request.model_id)
-            .map(|loaded| loaded.session.clone())
-            .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?;
-        if let Some(marker) = admission {
-            marker.store(true, Ordering::Release);
+        self.embed_holding(request, admission, None).await
+    }
+
+    async fn embed_leased(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        self.embed_holding(request, admission, Some(lease)).await
+    }
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use std::{sync::mpsc, time::Duration};
+
+    use tokio::sync::Semaphore;
+
+    use super::*;
+
+    /// A disconnect drops the awaiting future while native work still runs; the
+    /// work keeps its share of the limit until it ends, so neither new work nor
+    /// shutdown can claim that capacity early.
+    #[tokio::test]
+    async fn cancelled_blocking_work_keeps_its_lease_until_it_ends() {
+        let semaphore = Arc::new(Semaphore::new(1));
+        let lease = OnnxOperationLease::new(semaphore.clone().acquire_owned().await.unwrap());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let work = run_blocking(Some(lease), move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(())
+        });
+        let mut work = Box::pin(work);
+        tokio::select! {
+            _ = &mut work => panic!("work must still be blocked"),
+            _ = tokio::task::spawn_blocking(move || started_rx.recv().unwrap()) => {}
         }
-        run_blocking(move || {
-            session
-                .lock()
-                .map_err(|_| OnnxRuntimeError::backend("ONNX session lock poisoned"))?
-                .embed(request)
-        })
-        .await
+        drop(work);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            semaphore.available_permits(),
+            0,
+            "running work keeps its lease"
+        );
+
+        release_tx.send(()).unwrap();
+        let _returned = tokio::time::timeout(Duration::from_secs(5), semaphore.acquire())
+            .await
+            .expect("the lease returns when the work ends")
+            .unwrap();
     }
 }

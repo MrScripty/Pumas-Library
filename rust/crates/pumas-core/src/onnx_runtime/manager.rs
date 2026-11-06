@@ -7,12 +7,32 @@ use std::{
 };
 
 use async_trait::async_trait;
-use tokio::{sync::Semaphore, time::timeout};
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time::timeout,
+};
 
 use super::{
     OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
     OnnxSessionStatus,
 };
+
+/// One admitted operation's share of [`OnnxSessionManager`]'s concurrency limit.
+///
+/// The operation counts against the limit, and shutdown waits for it, until the
+/// lease is dropped. A backend whose work can outlive the future that awaits it
+/// (blocking-pool work keeps running when a disconnect drops the caller) moves
+/// the lease into that work so it is released only when the work ends.
+#[derive(Debug)]
+pub struct OnnxOperationLease {
+    _permit: OwnedSemaphorePermit,
+}
+
+impl OnnxOperationLease {
+    pub(super) fn new(permit: OwnedSemaphorePermit) -> Self {
+        Self { _permit: permit }
+    }
+}
 
 #[async_trait]
 pub trait OnnxEmbeddingBackend: Send + Sync {
@@ -39,6 +59,32 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
             marker.store(true, Ordering::Release);
         }
         self.embed(request).await
+    }
+
+    /// Load while `lease` is held for as long as the load may run. The default
+    /// suits backends whose work stops when this future is dropped.
+    async fn load_leased(
+        &self,
+        request: OnnxLoadRequest,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        let result = self.load(request).await;
+        drop(lease);
+        result
+    }
+
+    /// [`Self::embed_with_admission`] while `lease` is held for as long as the
+    /// work may run. The default suits backends whose work stops when this
+    /// future is dropped.
+    async fn embed_leased(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        let result = self.embed_with_admission(request, admission).await;
+        drop(lease);
+        result
     }
 }
 
@@ -79,8 +125,8 @@ where
         &self,
         request: OnnxLoadRequest,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        let _permit = self.operation_permit().await?;
-        self.backend.load(request).await
+        let lease = OnnxOperationLease::new(self.operation_permit().await?);
+        self.backend.load_leased(request, lease).await
     }
 
     pub async fn unload(
@@ -110,8 +156,8 @@ where
         request: OnnxEmbeddingRequest,
         admission: Option<&AtomicBool>,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
-        let _permit = self.operation_permit().await?;
-        self.backend.embed_with_admission(request, admission).await
+        let lease = OnnxOperationLease::new(self.operation_permit().await?);
+        self.backend.embed_leased(request, admission, lease).await
     }
 
     /// Controlled test custody of the real operation queue; never inference evidence.

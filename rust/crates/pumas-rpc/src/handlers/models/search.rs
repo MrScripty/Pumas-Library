@@ -12,21 +12,15 @@ pub async fn search_hf_models(state: &AppState, params: &Value) -> pumas_library
         .map(|value| value.max(0) as usize)
         .unwrap_or(limit);
 
-    match state
+    let outcome = match state
         .api
         .search_hf_models_with_hydration(&query, kind, limit, hydrate_limit)
         .await
     {
-        Ok(models) => Ok(json!({
-            "success": true,
-            "models": models
-        })),
-        Err(e) => Ok(json!({
-            "success": false,
-            "models": [],
-            "error": crate::contract::PublicError::from(&e).message
-        })),
-    }
+        Ok(models) => crate::contract::HfModelSearchOutcome::found(models),
+        Err(e) => crate::contract::HfModelSearchOutcome::failed(&e),
+    };
+    Ok(serde_json::to_value(outcome)?)
 }
 
 pub async fn get_related_models(state: &AppState, params: &Value) -> pumas_library::Result<Value> {

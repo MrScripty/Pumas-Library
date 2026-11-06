@@ -613,6 +613,7 @@ pub struct ModelData {
 /// non-optional to match frontend TypeScript expectations. The frontend cannot
 /// handle null values for these fields. Use empty strings/arrays as defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HuggingFaceModel {
     pub repo_id: String,

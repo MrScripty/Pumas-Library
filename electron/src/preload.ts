@@ -91,6 +91,9 @@ import {
   decodeRuntimeLaunchOutcome,
   decodeRuntimeLaunchParams,
   decodeRuntimeStopOutcome,
+  decodeRuntimeProfilesSnapshotResponse,
+  decodeServingStatusResponse,
+  decodeHfModelSearchOutcome,
   decodeSetDefaultVersionOutcome,
   decodeSetDefaultVersionParams,
   decodeInstallVersionOutcome,
@@ -471,7 +474,7 @@ const electronAPI = {
     requireDecoded(decodeRuntimeLaunchParams({}), 'stop_ollama request')
   ),
   get_runtime_profiles_snapshot: () =>
-    apiCall('get_runtime_profiles_snapshot'),
+    validatedApiCall('get_runtime_profiles_snapshot', decodeRuntimeProfilesSnapshotResponse),
   list_runtime_profile_updates_since: (cursor?: string | null, limit?: number) =>
     apiCall('list_runtime_profile_updates_since', { cursor, limit }),
   upsert_runtime_profile: (profile: Record<string, unknown>) =>
@@ -486,7 +489,7 @@ const electronAPI = {
     apiCall('launch_runtime_profile', { profile_id: profileId, tag, model_id: modelId }),
   stop_runtime_profile: (profileId: string) =>
     apiCall('stop_runtime_profile', { profile_id: profileId }),
-  get_serving_status: () => apiCall('get_serving_status'),
+  get_serving_status: () => validatedApiCall('get_serving_status', decodeServingStatusResponse),
   list_serving_status_updates_since: (cursor?: string | null) =>
     apiCall('list_serving_status_updates_since', { cursor }),
   validate_model_serving_config: (request: Record<string, unknown>) =>
@@ -591,7 +594,8 @@ const electronAPI = {
     limit?: number,
     hydrateLimit?: number
   ) =>
-    apiCall('search_hf_models', { query, kind, limit, hydrate_limit: hydrateLimit }),
+    validatedApiCall('search_hf_models', decodeHfModelSearchOutcome,
+      withoutUndefined({ query, kind, limit, hydrate_limit: hydrateLimit })),
   get_hf_download_details: async (repoId: string, quants?: string[] | null) => {
     const params = requireDecoded(decodeGetHfDownloadDetailsParams({
       repo_id: repoId, ...(quants === undefined ? {} : { quants }),

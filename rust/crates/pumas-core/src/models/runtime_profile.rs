@@ -38,6 +38,7 @@ impl RuntimeProfileId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct RuntimeEndpointUrl(String);
 
@@ -88,6 +89,7 @@ impl RuntimeEndpointUrl {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct RuntimePort(u16);
 
@@ -115,6 +117,7 @@ pub enum RuntimeProviderId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProviderMode {
     TorchServe,
@@ -125,6 +128,7 @@ pub enum RuntimeProviderMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeManagementMode {
     Managed,
@@ -132,6 +136,7 @@ pub enum RuntimeManagementMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeDeviceMode {
     Auto,
@@ -142,6 +147,7 @@ pub enum RuntimeDeviceMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum LlamaCppProfileMode {
     Router,
@@ -149,6 +155,7 @@ pub enum LlamaCppProfileMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeLifecycleState {
     Unknown,
@@ -161,6 +168,7 @@ pub enum RuntimeLifecycleState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeDeviceSettings {
     pub mode: RuntimeDeviceMode,
@@ -184,6 +192,7 @@ impl Default for RuntimeDeviceSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeSchedulerSettings {
     #[serde(default)]
@@ -205,6 +214,7 @@ impl Default for RuntimeSchedulerSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeProfileConfig {
     pub profile_id: RuntimeProfileId,
@@ -246,6 +256,7 @@ fn default_profile_enabled() -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ModelRuntimeRoute {
     pub provider: RuntimeProviderId,
@@ -257,6 +268,7 @@ pub struct ModelRuntimeRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeProfileStatus {
     pub profile_id: RuntimeProfileId,
@@ -272,6 +284,7 @@ pub struct RuntimeProfileStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeProfilesSnapshot {
     pub schema_version: u32,
@@ -405,6 +418,7 @@ impl RuntimeProfileUpdateFeed {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeProfilesSnapshotResponse {
     pub success: bool,

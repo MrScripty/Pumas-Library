@@ -12,6 +12,7 @@ use super::{RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeProfileId, RuntimeProv
 const SERVING_CURSOR_ZERO: &str = "serving:0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ServingEndpointMode {
     NotConfigured,
@@ -20,6 +21,7 @@ pub enum ServingEndpointMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ServedModelLoadState {
     Requested,
@@ -31,6 +33,7 @@ pub enum ServedModelLoadState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelServeErrorSeverity {
     NonCritical,
@@ -38,6 +41,7 @@ pub enum ModelServeErrorSeverity {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelServeErrorCode {
     InvalidRequest,
@@ -59,6 +63,7 @@ pub enum ModelServeErrorCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ModelServeError {
     pub code: ModelServeErrorCode,
@@ -245,6 +250,7 @@ impl ModelServeValidationResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ServingEndpointStatus {
     pub endpoint_mode: ServingEndpointMode,
@@ -268,6 +274,7 @@ impl ServingEndpointStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ServedModelStatus {
     pub model_id: String,
@@ -334,6 +341,7 @@ impl RouterProfileSyncStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ServingStatusSnapshot {
     pub schema_version: u32,
@@ -359,6 +367,7 @@ impl ServingStatusSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ServingStatusResponse {
     pub success: bool,

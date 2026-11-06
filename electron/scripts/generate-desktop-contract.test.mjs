@@ -69,6 +69,8 @@ test('dictionary projection preserves readonly recursive references', () => {
 });
 
 test('closed empty objects do not project as the non-nullish empty-object type', () => {
+  assert.equal(schemaType({type:'object', additionalProperties:true}),
+    '{ readonly [key: string]: unknown }');
   assert.equal(schemaType({type:'object', additionalProperties:false}),
     'Readonly<Record<string, never>>');
 });

@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 df4ce0fd83782cb777d46b1f11ef1092f86b17898fae882549baef785b1aaafa. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 fccfa3cfdd8e84563ea91990579c9b0870c23234e336eeb0851231d1327f50e6. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -28,6 +28,7 @@ export declare function validateGetTorchReleaseOptionsParams(value: unknown): bo
 export declare function validateGetTorchRuntimeProbeParams(value: unknown): boolean;
 export declare function validateGithubCacheStatusOutcome(value: unknown): boolean;
 export declare function validateHfDownloadDetailsOutcome(value: unknown): boolean;
+export declare function validateHfModelSearchOutcome(value: unknown): boolean;
 export declare function validateImportBatchParams(value: unknown): boolean;
 export declare function validateImportModelParams(value: unknown): boolean;
 export declare function validateInferenceSettingsOutcome(value: unknown): boolean;
@@ -63,6 +64,7 @@ export declare function validateRouterProfileSyncStatus(value: unknown): boolean
 export declare function validateRuntimeLaunchOutcome(value: unknown): boolean;
 export declare function validateRuntimeLaunchParams(value: unknown): boolean;
 export declare function validateRuntimeProfileUpdateFeed(value: unknown): boolean;
+export declare function validateRuntimeProfilesSnapshotResponse(value: unknown): boolean;
 export declare function validateRuntimeRunningOutcome(value: unknown): boolean;
 export declare function validateRuntimeStopOutcome(value: unknown): boolean;
 export declare function validateS3AuthenticatedBundleImportParams(value: unknown): boolean;
@@ -87,6 +89,7 @@ export declare function validateS3TransferRetryParams(value: unknown): boolean;
 export declare function validateS3TransferRetryState(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;
 export declare function validateSelectedVersionOutcome(value: unknown): boolean;
+export declare function validateServingStatusResponse(value: unknown): boolean;
 export declare function validateServingStatusUpdateFeed(value: unknown): boolean;
 export declare function validateSetDefaultVersionOutcome(value: unknown): boolean;
 export declare function validateSetDefaultVersionParams(value: unknown): boolean;

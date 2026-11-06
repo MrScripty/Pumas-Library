@@ -1103,6 +1103,36 @@ impl SuccessOutcome {
     }
 }
 
+/// `search_hf_models` result. A failed search keeps `models` empty and names
+/// the public reason.
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct HfModelSearchOutcome {
+    success: bool,
+    models: Vec<pumas_library::models::HuggingFaceModel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "String"))]
+    error: Option<String>,
+}
+
+impl HfModelSearchOutcome {
+    pub(crate) fn found(models: Vec<pumas_library::models::HuggingFaceModel>) -> Self {
+        Self {
+            success: true,
+            models,
+            error: None,
+        }
+    }
+
+    pub(crate) fn failed(error: &pumas_library::PumasError) -> Self {
+        Self {
+            success: false,
+            models: Vec::new(),
+            error: Some(PublicError::from(error).message.into_owned()),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub(crate) struct HfAuthOutcome {
     success: bool,

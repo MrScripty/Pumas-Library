@@ -884,6 +884,14 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     expect(screen.queryByRole('button', { name: /Save/ })).not.toBeInTheDocument();
   });
 
+  /** A wire-complete search row from the Rust producer, with test overrides. */
+  function producerSearchModel(overrides: Partial<RemoteModelInfo>): RemoteModelInfo {
+    const search = fixture['hf_model_search'] as { models?: RemoteModelInfo[] } | undefined;
+    const produced = search?.models?.[0];
+    if (!produced) throw new ValidationError('Missing HF search producer fixture', 'producer-fixtures');
+    return { ...produced, ...overrides };
+  }
+
   it('hydrates exact producer download details through bundled preload and the real search hook', async () => {
     const produced = fixture['hf_download_details_success'];
     const decoded = decodeHfDownloadDetailsOutcome(produced);
@@ -891,11 +899,11 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
       throw new ValidationError('Missing successful HF producer fixture', 'producer-fixtures');
     }
     const details = decoded.value.details;
-    const model: RemoteModelInfo = {
+    const model = producerSearchModel({
       repoId: details.repoId, name: 'Fixture model', developer: 'fixture',
       kind: 'text-generation', formats: ['gguf'], quants: ['Q4_K_M'],
-      url: 'https://huggingface.co/fixture/model',
-    };
+      url: 'https://huggingface.co/fixture/model', downloadOptions: [],
+    });
     const requests = installActualPreload(undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, { models: [model], details: produced });
     const { result } = renderHook(() => useRemoteModelSearch({ enabled: true, searchQuery: 'fixture', debounceMs: 0 }));
@@ -909,11 +917,11 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
   });
 
   it('does not project malformed download details received through the bundled preload', async () => {
-    const model: RemoteModelInfo = {
+    const model = producerSearchModel({
       repoId: 'fixture/model', name: 'Fixture model', developer: 'fixture',
       kind: 'text-generation', formats: ['gguf'], quants: ['Q4_K_M'],
-      url: 'https://huggingface.co/fixture/model', totalSizeBytes: null,
-    };
+      url: 'https://huggingface.co/fixture/model', totalSizeBytes: null, downloadOptions: [],
+    });
     installActualPreload(undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, { models: [model], details: {
         success: true, details: { repoId: model.repoId,

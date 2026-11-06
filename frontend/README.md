@@ -99,4 +99,4 @@ does not include them. `test:desktop-contract` crosses the real bundled preload 
 [Development](../docs/DEVELOPMENT.md) describes its prerequisites. For
 representative desktop behavior, build and run through the root launcher.
 Open frontend findings are tracked in the
-[current standards audit](../docs/audits/current-standards-2026-09-03/README.md).
+[frontend and UI issue list](../docs/plans/current-standards-remediation-2026-09-03/frontend-and-ui/issues.md).

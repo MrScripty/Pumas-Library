@@ -88,4 +88,4 @@ boundary-specific safety argument.
 
 See [Architecture](../docs/ARCHITECTURE.md),
 [Development](../docs/DEVELOPMENT.md), and the
-[current standards audit](../docs/audits/current-standards-2026-09-03/README.md).
+[open Rust library and RPC issues](../docs/plans/current-standards-remediation-2026-09-03/rust-library-and-rpc/issues.md).

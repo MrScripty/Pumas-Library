@@ -81,5 +81,5 @@ release evidence that exercises the exact packaged cohort through:
 - invalid-input and error projection; and
 - the documented target/runtime versions.
 
-The [current standards audit](audits/current-standards-2026-09-03/README.md)
-tracks the remaining binding and packaging gaps.
+The [desktop, release, bindings and Torch issues](plans/current-standards-remediation-2026-09-03/desktop-release-bindings-and-torch/issues.md)
+track the remaining binding and packaging gaps.

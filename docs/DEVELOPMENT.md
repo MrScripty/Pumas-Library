@@ -262,7 +262,8 @@ snapshots and must name their code and standards baselines.
 ## Retained-download recovery qualification
 
 The [contract](contracts/download-location-reconciliation.md) owns local acceptance;
-[the runbook](runbooks/download-location-reconciliation.md) describes the user action.
+[Opening an older library](library-upgrade.md#recover-a-failed-download-whose-files-moved)
+describes the user action.
 Run `cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library retained_location`
 with default features and `--no-default-features`. The native CI matrix runs both.
 `scripts/acceptance/download_location_reconciliation.py RPC --temporary-parent PATH`

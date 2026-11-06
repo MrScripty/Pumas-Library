@@ -877,7 +877,7 @@ unavailable until required-real target runners execute it.
 
 **Reports:** Program evidence is indexed in the [ledger](execution-ledger.md#reports).
 
-**Audit source:** [Current standards audit](../../audits/current-standards-2026-09-03/README.md)
+**Audit source:** Current standards audit (`docs/audits/current-standards-2026-09-03/README.md`, removed; see Git history at `0a4c0a8e`)
 
 ## Objective
 

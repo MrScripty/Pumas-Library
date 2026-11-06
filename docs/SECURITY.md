@@ -240,4 +240,4 @@ review: `axum` 0.7, `rusqlite` 0.32, `sysinfo` 0.32, `notify` 7, `governor` 0.7,
 ## Current Security Work
 
 Open security and boundary findings are tracked in the
-[current standards audit](audits/current-standards-2026-09-03/README.md).
+[current-standards remediation issues](plans/current-standards-remediation-2026-09-03/issues.md).

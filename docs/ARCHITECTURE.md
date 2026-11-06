@@ -49,7 +49,7 @@ through the same builder/API and restricted local IPC dispatcher. It supports
 indexed list/get/literal-search observations and same-boot, exact-checkpoint cold
 reopen using the existing physical lease. It admits no acquisition, child/service
 launch or external HTTP owner. Full/legacy/unknown histories remain refused; see
-the [restricted custody contract](plans/operating-owner-custody-design.md).
+the [restricted custody contract](contracts/restricted-owner-custody.md).
 
 On Linux/macOS the existing owner also holds the physical launcher directory
 across independent rendezvous registries and symlink aliases. The lifetime is
@@ -58,7 +58,7 @@ blocking effects. After `shutdown_instance`, drop the API and those handles
 before starting a new owner. This strengthens live exclusion only: unknown or
 failed registry generations are still refused, and a free lock does not qualify
 recovery from crashed owners or external runtime children. See the
-[discovery plan](plans/local-discovery-bootstrap.md#slice-3-durable-identity-and-qualified-lifetime-custody)
+[local discovery contract](contracts/local-discovery-bootstrap.md#slice-3-durable-identity-and-qualified-lifetime-custody)
 for the remaining physical-identity and child-custody gates.
 
 An embedding application or standalone RPC process constructs the owner; in
@@ -218,8 +218,8 @@ build.
 
 ## Known Boundary Work
 
-The [current standards audit](audits/current-standards-2026-09-03/README.md)
-tracks gaps in RPC authentication/decoding, persistence atomicity and migration,
+The [current-standards remediation issues](plans/current-standards-remediation-2026-09-03/issues.md)
+track gaps in RPC authentication/decoding, persistence atomicity and migration,
 async shutdown, cached-state provenance, release evidence, accessibility, and
 binding support. Those findings supersede optimistic claims in removed plans or
 older documentation.

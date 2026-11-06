@@ -29,7 +29,7 @@ does not waive review for that later design.
 
 **Reports:** Planned evidence reports are indexed in the [execution ledger](execution-ledger.md#reports).
 
-**Audit source:** [Desktop, release, bindings, and Torch](../../../audits/current-standards-2026-09-03/desktop-release-bindings-and-torch.md)
+**Audit source:** Desktop, release, bindings, and Torch (`docs/audits/current-standards-2026-09-03/desktop-release-bindings-and-torch.md`, removed; see Git history at `0a4c0a8e`)
 
 ## Objective
 

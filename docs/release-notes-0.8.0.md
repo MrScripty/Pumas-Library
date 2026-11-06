@@ -17,6 +17,7 @@ The largest changes are:
 - digest-checked local imports and S3 imports
 - inference-enabled headless builds for Linux, Windows and macOS
 - an explicit, backed-up upgrade for older libraries
+- a locked-down desktop app and hash-checked runtime installs
 
 ## For desktop users
 
@@ -65,6 +66,21 @@ old preset keep working.
 - A failed Torch startup trial says why the managed launch failed.
 - Desktop views that receive an invalid update report it and reload instead of
   going stale.
+- A failed download whose files an older version moved can be kept without
+  downloading it again: see
+  [Recover a failed download whose files moved](library-upgrade.md#recover-a-failed-download-whose-files-moved).
+
+### Safer desktop and runtimes
+
+- The desktop app stays on its own bundled pages. Links open in your browser;
+  other sites, pop-up windows and browser permission requests are refused.
+  Packaged builds have no DevTools and ignore `--dev`, `--debug` and
+  `PUMAS_RPC_BINARY`.
+- Ollama installs only from archives that match the publisher's SHA-256, and
+  Torch installs only from a hash-checked lock made for that install.
+- Runtimes start with a minimal environment: `LD_PRELOAD`, `PYTHONPATH` and
+  credentials are not passed to them. Stopping a runtime signals only processes
+  that Pumas started and recorded.
 
 ## For applications that use Pumas
 
@@ -90,6 +106,11 @@ provider ignores it. `/v1/models` lists each model ID once, with its profiles.
 Responses may gain fields, capabilities and enum values within contract
 version 1. Ignore what you do not use. See the
 [model operations contract](contracts/model-operations-v1.md).
+
+Refusals that happen before a request reaches its handler return
+`{"error":{"code","message"}}`, and `request_limit` refusals name the bound.
+`pumas-rpc` limits open connections (256) and the time allowed to send request
+headers (30 s).
 
 ### New capabilities
 
@@ -128,6 +149,11 @@ schema versions rather than matching product versions.
   never starts a download.
 - Merging libraries refuses copied imports that carry a publication receipt
   bound to their current library root; leave those in place.
+- `OllamaClient::new` and `VersionManager::version_path` return `Result`.
+- Removed: `network::DownloadManager` and `DownloadProgress`,
+  `NetworkManager::execute`, `CacheStrategy`'s `allow_stale_on_offline` and
+  `max_stale_age`, `OllamaVersionManager`, `ProcessManagerFactory` and the
+  app-manager `process` module.
 
 ### Acquisition
 
@@ -140,6 +166,10 @@ schema versions rather than matching product versions.
   details resolved after you select a model.
 - A managed GGUF keeps its selected primary file and projector through library
   moves, and a directory's primary file is never its projector.
+- A credential-less `http://` source on a network host is fetched over HTTPS
+  first. Pumas falls back to the plaintext URL, with a logged warning, only
+  when the HTTPS attempt gets no HTTP response. Credentialed plaintext sources
+  are still refused.
 
 ### llama.cpp serving
 

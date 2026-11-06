@@ -239,4 +239,4 @@ Packaging requires `frontend/dist` plus a matching `pumas-rpc` staged under
 `CSC_IDENTITY_AUTO_DISCOVERY=false`, so installers are unsigned and the
 config declares no signing identity. Do not treat a successful package assembly as proof
 that the application runs on that platform. See [Releasing](../RELEASING.md)
-and the [current standards audit](../docs/audits/current-standards-2026-09-03/README.md).
+and the [open desktop, release and Torch issues](../docs/plans/current-standards-remediation-2026-09-03/desktop-release-bindings-and-torch/issues.md).

@@ -7,7 +7,7 @@ and `docs/adr/0003-download-location-reconciliation.md`, admitted with M1.
 
 ## Evidence, alternatives and selected tradeoff
 
-The [investigation](../../../investigations/download-path-discrepancy-2026-10-10.md)
+The investigation (`docs/investigations/download-path-discrepancy-2026-10-10.md`, removed; see Git history at `0a4c0a8e`)
 records three absent old destinations and three populated new catalog paths.
 Historical logs show renames between completed files and the next file-open
 failure. Current code already denies competing workspace mutation under custody.

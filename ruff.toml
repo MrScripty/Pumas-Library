@@ -13,6 +13,10 @@ exclude = [
   "venv",
 ]
 
+[lint]
+# Ruff 0.17 widened its default rule set; keep the long-standing defaults explicit.
+select = ["E4", "E7", "E9", "F"]
+
 [format]
 indent-style = "space"
 line-ending = "lf"

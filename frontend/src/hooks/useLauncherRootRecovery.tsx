@@ -50,6 +50,11 @@ type LauncherRootPresentation =
 
 const STARTUP_POLL_INTERVAL_MS = 100;
 
+/** Append the resolver's own reason, when Electron passed one, to the guidance. */
+function withRecoveryDetail(guidance: string, detail: string | null | undefined): string {
+  return detail ? `${guidance} Reason: ${detail}` : guidance;
+}
+
 function isElectronRenderer(): boolean {
   return typeof navigator !== 'undefined' && /\bElectron\/\d/.test(navigator.userAgent);
 }
@@ -415,11 +420,12 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
             (canSelectLibrary
               ? 'Close other apps using the library and reopen Pumas Library, or select another library.'
               : `Close other apps using the library or correct the ${presentation.state.authoritySource} launch input, then reopen Pumas Library.`)
-        : canSelectLibrary
+        : withRecoveryDetail(canSelectLibrary
           ? reason === 'invalid'
             ? 'The saved Pumas library is not valid. Select an existing library to continue.'
             : 'The saved Pumas library is unavailable. Restore access or select another library.'
-          : `The ${presentation.state.authoritySource} launcher input controls this library. Correct that launch input and reopen Pumas Library.`;
+          : `The ${presentation.state.authoritySource} launcher input controls this library. Correct that launch input and reopen Pumas Library.`,
+        presentation.state.detail);
     if (reason === 'migration-required' && upgradePhase !== 'idle') {
       const confirming = upgradePhase === 'confirm';
       const running = upgradePhase === 'running';

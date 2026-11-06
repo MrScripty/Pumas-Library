@@ -94,7 +94,6 @@ jobs:
     needs: lint-workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    continue-on-error: ${{ !((github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -122,7 +121,14 @@ jobs:
           echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $tool_dir/cargo-deny.tar.gz" | sha256sum --check
           tar -xzf "$tool_dir/cargo-deny.tar.gz" -C "$tool_dir" --strip-components=1 cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
       - name: Scan Rust, JavaScript and Python dependency inputs
+        id: scan
+        # Advisory outside candidate runs: the step may fail without failing the
+        # job, and the next step reports it as a warning on the run.
+        continue-on-error: ${{ !((github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)) }}
         run: node scripts/release/dependency-audit.mjs run --output "${{ runner.temp }}/current-vulnerability-results" --cargo-deny "${{ runner.temp }}/cargo-deny/cargo-deny" --python python
+      - name: Report an advisory scan failure
+        if: steps.scan.outcome == 'failure'
+        run: echo "::warning title=Dependency scan found unaccepted findings::Advisory on this run; version tags and candidate runs fail on it. See the current-vulnerability-results artifact."
       - name: Upload current vulnerability results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

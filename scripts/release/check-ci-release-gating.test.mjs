@@ -294,7 +294,15 @@ test('dependency audit is advisory on reviews, blocking on candidates and feeds 
   assert.match(audit, /^    needs: lint-workflows$/m);
   assert.doesNotMatch(audit, /^    if:/m, 'the scan runs for every trigger');
   // D6: a failing scan never fails a review run, and always fails a candidate run.
-  assert.ok(audit.includes(`    continue-on-error: \${{ !(${versionTagGuard}) }}\n`));
+  // The scan step, not the job, is advisory, so a review run's check stays green
+  // and carries a warning instead of showing as failed.
+  assert.doesNotMatch(audit, /^    continue-on-error:/m, 'the job itself never ignores a failure');
+  const scan = audit.slice(audit.indexOf('Scan Rust, JavaScript and Python dependency inputs'));
+  assert.match(scan, /^        id: scan$/m);
+  assert.ok(scan.includes(`        continue-on-error: \${{ !(${versionTagGuard}) }}\n`));
+  const report = audit.slice(audit.indexOf('Report an advisory scan failure'));
+  assert.match(report, /^        if: steps\.scan\.outcome == 'failure'$/m);
+  assert.match(report, /::warning /);
   assert.match(audit, /persist-credentials: false/);
   assert.doesNotMatch(audit, /secrets\.|permissions:|cargo install|pip install (?!--require-hashes)/);
   assert.match(audit, /pip install --require-hashes -r scripts\/dev\/pip-audit-python\.lock/);

@@ -172,8 +172,9 @@ the root `packageManager`.
 
 The scan fails when a gating scan has a finding that is not accepted, when a
 gating scan cannot audit one of its packages, or when any scanner fails to run.
-On pull requests and pushes to `main` that failure is advisory: the job is
-marked failed and the run continues. On version tags and `build_candidates`
+On pull requests and pushes to `main` that failure is advisory: the scan step
+may fail without failing the job, and the run shows a warning that points to the
+results artifact. On version tags and `build_candidates`
 dispatches it blocks: `release-candidate` needs the job, and it refuses a
 review that did not pass or that scanned a different commit. The results
 artifact holds each tool's raw report and a `summary.json` that names the

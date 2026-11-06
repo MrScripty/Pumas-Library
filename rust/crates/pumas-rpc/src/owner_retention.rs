@@ -588,6 +588,15 @@ mod tests {
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
+            // Read the whole request head before replying: hyper rejects a
+            // response that arrives before its request was written.
+            let mut request = Vec::new();
+            let mut read = [0; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = stream.read(&mut read).await.unwrap();
+                assert!(count > 0, "client closed before sending its request");
+                request.extend_from_slice(&read[..count]);
+            }
             stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
             for part in parts {
                 stream
@@ -598,9 +607,6 @@ mod tests {
                 stream.write_all(b"\r\n").await.unwrap();
             }
             stream.write_all(b"0\r\n\r\n").await.unwrap();
-            // Drain the small request so socket close does not reset unread bytes.
-            let mut request = [0; 4096];
-            let _ = stream.read(&mut request).await;
             stream.shutdown().await.unwrap();
         });
         let response = reqwest::Client::builder()

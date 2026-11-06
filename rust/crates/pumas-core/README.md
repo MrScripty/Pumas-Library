@@ -439,9 +439,9 @@ invalidation observation, not a whole-package content digest: equal-length
 byte changes that restore mtime may leave it unchanged. Primary-file hashes and
 managed acquisition verification remain separate evidence.
 
-The synthetic producer tests and the pinned Pantograph guard interoperability
-runner at `tests/pantograph_guard_interop/run.py` exercise this handoff without
-loading model tensors. Real Cohere processor-file completeness requires a
+The synthetic producer tests exercise this handoff without loading model
+tensors. Consumers check their own admission rules against this public contract
+in their own repositories. Real Cohere processor-file completeness requires a
 separate pinned member-manifest audit, and runtime compatibility is not claimed.
 
 See the native [local intent example](examples/intent_model.rs) and [managed

@@ -23,6 +23,9 @@ pub enum Capability {
     /// Typed questions about a state answered with probabilities by a native
     /// decision model (llama.cpp `/v1/systemone`, e.g. Kev, OpenJev).
     Decision,
+    /// Relevance of each document to a query, scored by a reranker
+    /// (llama.cpp `/v1/rerank`).
+    Rerank,
 }
 impl Capability {
     pub fn path(self) -> Option<&'static str> {
@@ -31,6 +34,7 @@ impl Capability {
             Self::TextGeneration => "/v1/completions",
             Self::TextEmbedding | Self::MultimodalEmbedding => "/v1/embeddings",
             Self::Decision => "/v1/systemone",
+            Self::Rerank => "/v1/rerank",
             Self::ImageGeneration => "/v1/images/generations",
             Self::AudioTranscription | Self::AudioClassification => return None,
         })
@@ -95,6 +99,11 @@ pub enum OperationInput {
         /// Optional images, for decision models with a loaded projector.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         images: Vec<DecisionImage>,
+    },
+    /// A query and the documents a reranker scores against it.
+    Rerank {
+        query: String,
+        documents: Vec<String>,
     },
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -189,6 +198,7 @@ pub enum OutputFormat {
     PngBase64,
     Labels,
     Decisions,
+    RelevanceScores,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +229,11 @@ pub enum OperationOptions {
         max_output_tokens: Option<u32>,
     },
     Decision {},
+    Rerank {
+        /// Return only the `top_n` most relevant documents; all by default.
+        #[serde(default)]
+        top_n: Option<usize>,
+    },
 }
 /// The existing private speech owner's closed language vocabulary.
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -270,6 +285,22 @@ pub enum OperationResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         input_tokens: Option<u64>,
     },
+    /// Documents ordered from most to least relevant.
+    RelevanceScores {
+        results: Vec<RelevanceScore>,
+        /// Prompt tokens evaluated across all query-document pairs, when reported.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_tokens: Option<u64>,
+    },
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct RelevanceScore {
+    /// Position of the document in `input.documents`.
+    pub index: usize,
+    /// The reranker's score; higher is more relevant. Its scale is the
+    /// model's own and is comparable only within one model.
+    pub relevance_score: f64,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -526,6 +557,7 @@ pub enum SemanticTask {
     ImageToText,
     MultimodalEmbedding,
     Decision,
+    Rerank,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -541,6 +573,7 @@ pub enum InputFormat {
     PcmF32le,
     ContentBatch,
     Decision,
+    Rerank,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
@@ -624,6 +657,8 @@ pub enum OptionName {
     /// Tokens per input, including special tokens, from the served model's
     /// own positional limit.
     InputTokens,
+    /// Documents returned by a `rerank` operation.
+    TopN,
 }
 
 #[cfg(test)]
@@ -724,6 +759,7 @@ mod image_to_text_schema_tests {
                 json!("audio_classification"),
                 json!("multimodal_embedding"),
                 json!("decision"),
+                json!("rerank"),
             ],
             "new capabilities are appended; consumers ignore ones they do not use"
         );

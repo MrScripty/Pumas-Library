@@ -7,8 +7,8 @@ the desktop library now shows models by what they are used for.
 The largest changes are:
 
 - a typed model-operations API with model discovery (`GET /v1/served-models`)
-- new `decision` and `multimodal_embedding` capabilities, and bounded
-  image-to-text
+- new `decision`, `rerank` and `multimodal_embedding` capabilities, and
+  bounded image-to-text
 - models grouped by use, with new **Decision and evaluation** and **Video
   generation** categories, input/output badges and adapter marking
 - a model's category is metadata: changing it never moves a model or changes
@@ -115,8 +115,12 @@ headers (30 s).
 ### New capabilities
 
 - **`decision`**: typed choice, score and yes/no questions answered with
-  probabilities by llama.cpp native decision models such as Kev and OpenJev.
-  Needs llama.cpp **b11429** or newer.
+  probabilities by llama.cpp native decision models such as Kev, OpenJev and
+  Laya. Needs llama.cpp **b11429** or newer.
+- **`rerank`**: scores documents against a query with a llama.cpp reranker
+  (for example Qwen3-Reranker), most relevant first, with an optional `top_n`.
+  Served rerankers are also reachable at the Jina/Cohere-style
+  `POST /v1/rerank` route.
 - **`multimodal_embedding`**: image and mixed text/image embeddings from
   llama.cpp embedding models with a projector, such as EmbeddingGemma 2. Needs
   llama.cpp **b11454** or newer.
@@ -176,6 +180,13 @@ schema versions rather than matching product versions.
 - Embedding and reranking models launch in embedding/reranking mode in
   dedicated profiles too, with a micro-batch that fits whole inputs (the served
   context, otherwise 8,192 tokens, never more than the trained context).
+- Non-causal decision models such as Laya (ModernBERT) get the same
+  whole-input micro-batch, so inputs longer than 512 tokens are no longer
+  refused. Causal decision models such as Kev are unchanged.
+- A reranker GGUF without a ranking head (`cls.output.weight`), such as one
+  converted as a plain language model, is refused when served, with a reason,
+  instead of returning meaningless scores. Use a GGUF converted for reranking,
+  such as `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF`.
 - Ollama embedding models load through `/api/embed`.
 
 ## Upgrading an existing library

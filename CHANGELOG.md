@@ -32,7 +32,11 @@ the 2026-11-02 audit
 - `multimodal_embedding` capability: image and mixed text/image embeddings
   for llama.cpp embedding models with a projector, such as EmbeddingGemma 2.
 - `decision` capability: typed choice/score/yes-no questions answered with
-  probabilities by llama.cpp native decision models such as Kev and OpenJev.
+  probabilities by llama.cpp native decision models such as Kev, OpenJev and
+  Laya.
+- `rerank` capability and `POST /v1/rerank` gateway route: llama.cpp
+  rerankers score documents against a query, most relevant first, with an
+  optional `top_n`.
 - Models are grouped by what they are used for, with new **Decision and
   evaluation** and **Video generation** categories. Each row shows the inputs
   and outputs the model handles and marks LoRA/PEFT adapters. A "Used as"
@@ -145,6 +149,10 @@ the 2026-11-02 audit
   served context when the profile sets one, otherwise 8,192 tokens, never more
   than the model's trained context. Ollama embedding models load through
   `/api/embed`.
+- Non-causal llama.cpp decision models such as Laya get the same whole-input
+  micro-batch; inputs over 512 tokens were refused.
+- Serving a reranker GGUF that has no ranking head (`cls.output.weight`) is
+  refused with a reason instead of returning meaningless scores.
 - Saved download state that this version cannot read (for example, fields
   written by a newer Pumas) no longer stops the backend. The library, models
   and inference start, downloads are disabled without rewriting that state,

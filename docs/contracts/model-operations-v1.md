@@ -53,8 +53,8 @@ These rules apply to every route in this contract.
 | `request_id` | yes | Caller correlation ID, 1–128 of `A-Za-z0-9-_.:`. Echoed in every response. |
 | `model` | yes | Served model alias. |
 | `profile` | no | Exact serving profile; needed only when the alias is served by more than one profile. |
-| `input` | yes | Tagged by `kind`: `text`, `text_batch`, `messages`, `image_messages`, `image`, `content_batch`, `decision`, or the reserved `audio`. |
-| `output` | yes | `text`, `embeddings_float32`, `png_base64`, `decisions`, or the reserved `labels`, `pcm_s16le`, `pcm_f32le`. |
+| `input` | yes | Tagged by `kind`: `text`, `text_batch`, `messages`, `image_messages`, `image`, `content_batch`, `decision`, `rerank`, or the reserved `audio`. |
+| `output` | yes | `text`, `embeddings_float32`, `png_base64`, `decisions`, `relevance_scores`, or the reserved `labels`, `pcm_s16le`, `pcm_f32le`. |
 | `capability` | no | Selects one capability explicitly. |
 | `semantic_task` | no | Narrows resolution to one semantic task. |
 | `options` | no | Tagged options; defaults apply per capability. `image_generation` requires width and height. |
@@ -126,13 +126,15 @@ actual adapter/readiness checks. It is a current observation; admission checks
 the same serving identity again before handing work to a provider.
 
 The implemented capabilities are `chat_generation`, `text_generation`,
-`text_embedding`, `image_generation`, `image_to_text`, `multimodal_embedding`
-and `decision`. Vision-language models (`image-text-to-text`) offer chat,
+`text_embedding`, `image_generation`, `image_to_text`, `multimodal_embedding`,
+`decision` and `rerank`. Vision-language models (`image-text-to-text`) offer chat,
 text generation and image-to-text. `multimodal_embedding` and image input to
 `decision` need a dedicated llama.cpp session with its projector loaded.
 `decision` is offered only when llama.cpp reports the model as a native
 decision model (`decisions` output modality); such models offer no text
-generation. `audio_transcription` and `audio_classification` are explicitly
+generation. `rerank` is offered for models recorded as rerankers
+(`text-ranking`) served by llama.cpp; serving refuses a reranker GGUF without
+a ranking head (`cls.output.weight`). `audio_transcription` and `audio_classification` are explicitly
 unavailable with `unqualified_audio_runtime` until the production custody
 bridge and installed runtime are qualified. Build/protocol identity is reported by
 `pumas-rpc --build-info`; these endpoints define no competing identity type.
@@ -169,6 +171,7 @@ Capability inputs and outputs:
 | `image_generation` | `text` | `png_base64` | `image_generation` |
 | `image_to_text` | `image`, `image_messages`, or `messages` with image parts | `text` | `text_generation` |
 | `decision` | `decision` | `decisions` | `decision` (optional) |
+| `rerank` | `rerank` | `relevance_scores` | `rerank` (optional) |
 
 Limits come from the serving runtime, not from Pumas. Each descriptor's
 `option_bounds` reports them: `max_tokens` is bounded by the served context
@@ -210,9 +213,23 @@ probability-weighted level index), `legend`, `probabilities` and
 Probabilities are scaled by the model's stored temperatures and are not
 calibrated for any particular data.
 
+`rerank` input is `{"kind":"rerank","query":"...","documents":["...",...]}`;
+the query and every document must be nonblank. Options are
+`{"kind":"rerank","top_n":N}` with optional positive `top_n`. The result is
+`{"kind":"relevance_scores","results":[{"index":...,"relevance_score":...}],
+"input_tokens":...}`, ordered most relevant first (ties keep document order)
+and cut to `top_n`. `index` is the document's position in `documents`.
+Pumas checks that the provider scored every document exactly once with a
+finite score. Scores are on the model's own scale and comparable only within
+one model. Document count and query-document length are runtime limits: a
+pair longer than the session's micro-batch is refused with the runtime's
+reason. The same served reranker answers the Jina/Cohere-style
+`POST /v1/rerank` route (`model`, `query`, `documents`, optional `top_n`),
+which is proxied unchanged.
+
 A finite success has `contract_version`, the original `request_id`, and a
 tagged `result`: `text` with `text` and `finish_reason`; `embeddings` with finite
-float32 `vectors`; `image` with `png_base64` and `seed`; or `decisions` as above. Only recognized text
+float32 `vectors`; `image` with `png_base64` and `seed`; `decisions` as above; or `relevance_scores` as above. Only recognized text
 finish reasons (`stop`, `length`, `content_filter`) are accepted. The projection
 checks a single text choice, embedding count/index/dimension coherence, and
 rejects incoherent provider results. Provider envelopes and internal errors are

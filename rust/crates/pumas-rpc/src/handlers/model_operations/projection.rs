@@ -103,6 +103,31 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             }
         }
         (
+            Capability::Rerank,
+            OperationInput::Rerank { query, documents },
+            OperationOptions::Rerank { top_n },
+            OutputFormat::RelevanceScores,
+        ) => {
+            if query.trim().is_empty() {
+                return Err(Rejection::invalid("input.query must not be blank"));
+            }
+            if documents.is_empty() {
+                return Err(Rejection::invalid("input.documents must not be empty"));
+            }
+            if let Some(index) = documents.iter().position(|d| d.trim().is_empty()) {
+                return Err(Rejection::invalid(format!(
+                    "input.documents[{index}] must not be blank"
+                )));
+            }
+            if *top_n == Some(0) {
+                return Err(Rejection::invalid("options.top_n must be at least 1"));
+            }
+            body["query"] = json!(query);
+            body["documents"] = json!(documents);
+            // Always ask for every score; `top_n` is applied to the checked result.
+            body["top_n"] = json!(documents.len());
+        }
+        (
             Capability::MultimodalEmbedding,
             OperationInput::Image { .. } | OperationInput::ContentBatch { .. },
             OperationOptions::Embeddings { dimensions },
@@ -296,6 +321,7 @@ fn input_kind(input: &OperationInput) -> &'static str {
         OperationInput::Audio { .. } => "audio",
         OperationInput::ContentBatch { .. } => "content_batch",
         OperationInput::Decision { .. } => "decision",
+        OperationInput::Rerank { .. } => "rerank",
     }
 }
 fn options_kind(options: &OperationOptions) -> &'static str {
@@ -305,6 +331,7 @@ fn options_kind(options: &OperationOptions) -> &'static str {
         OperationOptions::ImageGeneration { .. } => "image_generation",
         OperationOptions::Audio { .. } => "audio",
         OperationOptions::Decision { .. } => "decision",
+        OperationOptions::Rerank { .. } => "rerank",
     }
 }
 pub fn valid_model(value: &str) -> bool {
@@ -398,6 +425,52 @@ fn decision_result(request: &OperationRequest, value: &Value) -> Option<Operatio
     Some(OperationResult::Decisions {
         answers: typed,
         input_tokens: value.pointer("/usage/input_tokens").and_then(Value::as_u64),
+    })
+}
+
+/// Validate a `/v1/rerank` response: one finite score for every document,
+/// each document exactly once. Results are ordered most relevant first and
+/// cut to `top_n`; provider extras such as document text are not forwarded.
+fn rerank_result(request: &OperationRequest, value: &Value) -> Option<OperationResult> {
+    let (OperationInput::Rerank { documents, .. }, OperationOptions::Rerank { top_n }) =
+        (&request.input, &request.options)
+    else {
+        return None;
+    };
+    let rows = value.get("results")?.as_array()?;
+    if rows.len() != documents.len() {
+        return None;
+    }
+    let mut seen = vec![false; documents.len()];
+    let mut results = Vec::with_capacity(rows.len());
+    for row in rows {
+        let index = usize::try_from(row.get("index")?.as_u64()?).ok()?;
+        if std::mem::replace(seen.get_mut(index)?, true) {
+            return None;
+        }
+        let relevance_score = row
+            .get("relevance_score")?
+            .as_f64()
+            .filter(|score| score.is_finite())?;
+        results.push(RelevanceScore {
+            index,
+            relevance_score,
+        });
+    }
+    // Stable: equal scores keep document order.
+    results.sort_by(|a, b| {
+        b.relevance_score
+            .total_cmp(&a.relevance_score)
+            .then(a.index.cmp(&b.index))
+    });
+    if let Some(top_n) = top_n {
+        results.truncate(*top_n);
+    }
+    Some(OperationResult::RelevanceScores {
+        results,
+        input_tokens: value
+            .pointer("/usage/prompt_tokens")
+            .and_then(Value::as_u64),
     })
 }
 
@@ -517,6 +590,7 @@ pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResul
             Ok(OperationResult::Embeddings { vectors })
         }
         Capability::Decision => decision_result(request, &value).ok_or(invalid),
+        Capability::Rerank => rerank_result(request, &value).ok_or(invalid),
         Capability::ImageGeneration => {
             let data = value.get("data").and_then(Value::as_array).ok_or(invalid)?;
             if data.len() != 1 {

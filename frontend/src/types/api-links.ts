@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { LinkHealthOutcome } from '../generated/desktop-contract';
+import type { LinkHealthOutcome } from '@pumas/desktop-contract';
 
 // ============================================================================
 // Link Registry Types (Phase 1B)

@@ -29,7 +29,7 @@ vi.mock('../api/adapter', () => ({
 }));
 
 import type { ModelDownloadUpdateNotification } from '../types/api';
-import type { DownloadProgressOutcome } from '../generated/desktop-contract';
+import type { DownloadProgressOutcome } from '@pumas/desktop-contract';
 import { useModelDownloads } from './useModelDownloads';
 import { buildDownloadingModels, mergeLocalModelGroups } from '../components/ModelManagerUtils';
 

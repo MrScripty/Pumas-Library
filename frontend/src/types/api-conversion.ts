@@ -10,8 +10,8 @@ import type {
   SupportedQuantTypesOutcome,
   BackendStatusOutcome,
   SuccessOutcome,
-} from '../generated/desktop-contract';
-export type { QuantBackend } from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
+export type { QuantBackend } from '@pumas/desktop-contract';
 
 // ============================================================================
 // Model Conversion Types

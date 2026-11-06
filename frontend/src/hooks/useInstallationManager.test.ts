@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APIError } from '../errors';
-import type { InstallVersionOutcome, RuntimeInstallationProgress } from '../generated/desktop-contract';
+import type { InstallVersionOutcome, RuntimeInstallationProgress } from '@pumas/desktop-contract';
 import type { InstallationProgress, VersionRelease } from '../types/versions';
 
 const {

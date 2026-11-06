@@ -6,4 +6,4 @@ export type {
   LauncherRootReadyState as LibraryUpgradeReadyState,
   LibraryUpgradeConfirmation,
   LibraryUpgradeResult,
-} from './generated/desktop-contract';
+} from './desktop-contract';

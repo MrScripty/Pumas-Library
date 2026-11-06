@@ -23,7 +23,7 @@ import { useInstallationManager } from '../src/hooks/useInstallationManager';
 import { useOllamaProcess } from '../src/hooks/useOllamaProcess';
 import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
-import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
+import { decodeHfDownloadDetailsOutcome } from '@pumas/desktop-contract';
 
 const fixturePath = process.env['PUMAS_DESKTOP_CONTRACT_FIXTURES'];
 if (!fixturePath) throw new ValidationError('Actual desktop producer fixtures are required; run test:desktop-contract.', 'producer-fixtures');

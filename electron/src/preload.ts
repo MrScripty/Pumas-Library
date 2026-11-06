@@ -132,7 +132,7 @@ import {
   type ServingStatusUpdateFeed,
   type StatusTelemetryUpdateNotification,
   type RuntimeLaunchOutcome,
-} from './generated/desktop-contract';
+} from './desktop-contract';
 
 const launcherRootPresentationTimeoutListeners = new Set<() => void>();
 let launcherRootPresentationTimeoutLatched = false;

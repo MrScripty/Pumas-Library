@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelLibraryUpdateNotification } from '../types/api';
-import type { CatalogModel } from '../generated/desktop-contract';
+import type { CatalogModel } from '@pumas/desktop-contract';
 import type { DownloadStatus } from '../hooks/modelDownloadState';
 import { useModels } from '../hooks/useModels';
 import { ModelManager } from './ModelManager';

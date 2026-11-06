@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeDownloadListOutcome, type DownloadProgressOutcome } from '../generated/desktop-contract';
+import { decodeDownloadListOutcome, type DownloadProgressOutcome } from '@pumas/desktop-contract';
 import { projectDownloadProgress } from './downloadProgressProjection';
 
 describe('RPC progress to pushed-snapshot presentation adapter', () => {

@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { RuntimeLaunchOutcome, RuntimeStopOutcome } from '../generated/desktop-contract';
+import type { RuntimeLaunchOutcome, RuntimeStopOutcome } from '@pumas/desktop-contract';
 
 // ============================================================================
 

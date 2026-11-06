@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { importAPI } from '../api/import';
-import { decodeS3TransferRetryParams, decodeS3BundleImportParams, decodeS3AuthenticatedBundleImportParams, type S3PinnedFileParams, type S3BundleProgressWire, decodeS3ImportParams, decodeS3AuthenticatedImportParams, type S3CredentialParams, type S3ImportOutcome, type S3ImportParams } from '../generated/desktop-contract';
+import { decodeS3TransferRetryParams, decodeS3BundleImportParams, decodeS3AuthenticatedBundleImportParams, type S3PinnedFileParams, type S3BundleProgressWire, decodeS3ImportParams, decodeS3AuthenticatedImportParams, type S3CredentialParams, type S3ImportOutcome, type S3ImportParams } from '@pumas/desktop-contract';
 
 type Observation = { id?: string; token: object };
 export type S3ImportDraft = Record<keyof Omit<Extract<S3ImportParams, {version_id: string}>, 'operation_id' | 'read_mode'>, string>;

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { S3TransferRetryPanel } from './S3TransferRetryPanel';
-import type { S3TransferRetryState, S3ImportOutcome } from '../generated/desktop-contract';
+import type { S3TransferRetryState, S3ImportOutcome } from '@pumas/desktop-contract';
 const {read} = vi.hoisted(() => ({read:vi.fn<() => Promise<S3TransferRetryState>>()}));
 vi.mock('../api/import', () => ({importAPI:{getS3TransferRetry:read}}));
 const id='c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';

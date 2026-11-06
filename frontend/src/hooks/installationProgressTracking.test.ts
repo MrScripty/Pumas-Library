@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RuntimeInstallationProgress } from '../generated/desktop-contract';
+import type { RuntimeInstallationProgress } from '@pumas/desktop-contract';
 import { createNetworkStatusState } from '../utils/networkStatusMonitor';
 import { normalizeInstallationProgress, projectInstallationProgress } from './installationProgressTracking';
 

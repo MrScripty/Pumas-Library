@@ -5,7 +5,7 @@ import type {
   RuntimeProfileUpdateFeed,
   ServingStatusUpdateFeed,
   StatusTelemetryUpdateNotification,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 
 /**
  * Receives why an update could not be delivered: a payload that failed its

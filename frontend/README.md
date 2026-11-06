@@ -27,7 +27,7 @@ Framer Motion, React Aria interactions, and Vitest with Testing Library/jsdom.
 
 - Values from Electron, the backend or browser persistence are untrusted until
   decoded. Requests and responses use the generated desktop contract
-  (`src/generated/desktop-contract*`, produced from the Rust export; see
+  (`@pumas/desktop-contract`, produced from the Rust export; see
   [Electron](../electron/README.md#generated-catalog-and-download-contract)).
   TypeScript types alone are not validation.
 - A malformed or failed read leaves the last valid state in place and reports

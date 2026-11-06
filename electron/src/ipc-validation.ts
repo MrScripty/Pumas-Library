@@ -35,7 +35,7 @@ import {
   decodeUpdateModelNotesParams,
   decodeStartConversionSetupParams,
   type DecodeOutcome,
-} from './generated/desktop-contract';
+} from './desktop-contract';
 import {
   getRpcParamsValidationPolicy,
   getRpcRequestSchema,

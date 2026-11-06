@@ -10,7 +10,7 @@ import { isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import { importAPI } from '../api/import';
 import type { ModelCategory } from '../types/apps';
-import type { CatalogModel } from '../generated/desktop-contract';
+import type { CatalogModel } from '@pumas/desktop-contract';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 import { groupCatalogModels } from '../utils/libraryModels';

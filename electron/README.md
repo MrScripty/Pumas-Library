@@ -114,10 +114,17 @@ snapshot (`RuntimeProfilesSnapshotResponse`), serving status
 with their exported Rust declarations too.
 
 `pnpm --dir electron run generate:desktop-contract` rebuilds that exporter and
-generates identical `src/generated/desktop-contract*` artifacts in Electron
-and frontend. `check:desktop-contract` regenerates from current Rust source
-and rejects any stale artifact; CI runs that command. Normal UI builds do not
-invoke Cargo or fetch generator dependencies.
+writes the one checked-in copy of the generated contract to
+`packages/desktop-contract/generated/` (the `@pumas/desktop-contract`
+workspace package): decoders as JavaScript with TypeScript declarations, and
+the standalone validators they call. `check:desktop-contract` regenerates from
+current Rust source and rejects any stale or extra artifact; CI runs that
+command. Normal UI builds do not invoke Cargo or fetch generator dependencies.
+
+The frontend imports the package directly. Electron imports it through
+`src/desktop-contract.ts`; `scripts/bundle-preload.mjs` replaces that module's
+tsc output with a self-contained CommonJS bundle and bundles it into preload,
+so the packaged app ships no workspace package.
 
 Payloads that Electron owns (the launcher-root startup state, selection and
 library-upgrade payloads, the model-import selection and update-stream errors)

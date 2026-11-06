@@ -4,7 +4,7 @@ import type {
   LibraryModelMetadataOutcome,
   LibraryStatusResponse as DesktopLibraryStatusResponse,
   NetworkStatusResponse as DesktopNetworkStatusResponse,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 
 // ============================================================================
 // Model Library Types (Phase 1A - Part 6)

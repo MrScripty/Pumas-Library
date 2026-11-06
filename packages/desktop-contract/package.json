@@ -1,0 +1,20 @@
+{
+  "name": "@pumas/desktop-contract",
+  "version": "0.8.0",
+  "private": true,
+  "description": "Generated desktop wire contract types and decoders shared by the Pumas Electron shell and frontend",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./generated/desktop-contract.js",
+  "types": "./generated/desktop-contract.d.ts",
+  "exports": {
+    ".": {
+      "types": "./generated/desktop-contract.d.ts",
+      "default": "./generated/desktop-contract.js"
+    }
+  },
+  "files": [
+    "generated"
+  ]
+}

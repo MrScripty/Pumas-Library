@@ -1,13 +1,17 @@
 import { build } from 'esbuild';
 
-// tsc emits the generated TypeScript wrapper but not its JavaScript input.
-// Supply its Node-side module in the shell's CommonJS output cohort as well.
+// tsc compiles src/desktop-contract.ts to a require of the shared workspace
+// package. Replace that output with the package bundled into the shell's
+// CommonJS output cohort, decoders and validators together, so packaged
+// builds do not depend on workspace node_modules.
 await build({
-  entryPoints: ['src/generated/desktop-contract.validators.js'],
-  outfile: 'dist/generated/desktop-contract.validators.js',
+  entryPoints: ['src/desktop-contract.ts'],
+  outfile: 'dist/desktop-contract.js',
+  bundle: true,
   format: 'cjs',
   platform: 'node',
   target: 'node22',
+  sourcemap: true,
 });
 
 // Sandboxed Electron preload cannot require sibling Node modules. Keep the

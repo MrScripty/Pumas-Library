@@ -13,7 +13,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ValidationError } from '../src/errors';
 import { S3ModelImportDialog } from '../src/components/S3ModelImportDialog';
-import { decodeS3PersistedImportsWire } from '../src/generated/desktop-contract';
+import { decodeS3PersistedImportsWire } from '@pumas/desktop-contract';
 // Load the built privileged boundary, avoiding a second UI-side implementation.
 const require = createRequire(import.meta.url);
 const { validateApiCallPayload } = require(resolve('../electron/dist/ipc-validation.js')) as {

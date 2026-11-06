@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { S3TransferRetryParams, S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '../generated/desktop-contract';
+import type { S3TransferRetryParams, S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '@pumas/desktop-contract';
 import { useS3ModelImport, type S3ImportDraft } from './useS3ModelImport';
 
 const { startBundle, startAuthenticatedBundle, getBundle, start, startAuthenticated, get, cancel, retryTransfer } = vi.hoisted(() => ({

@@ -41,7 +41,7 @@ import { isIgnoredPackagedOverride, resolveBackendBinaryPath } from './backend-p
 import { PythonBridge } from './python-bridge';
 import { LibraryUpgradeCoordinator, runLibraryMetadataUpgrade } from './library-upgrade';
 import { isS3ImportMethod, receiveS3ImportRpc } from './s3-import-rpc';
-import { decodeRuntimeRunningOutcome } from './generated/desktop-contract';
+import { decodeRuntimeRunningOutcome } from './desktop-contract';
 import {
   LauncherRootRecoveryRequiredError,
   BackendInitializationRecoveryRequiredError,

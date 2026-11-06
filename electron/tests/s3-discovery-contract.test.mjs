@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {validateApiCallPayload} from '../dist/ipc-validation.js';
-import {decodeS3DiscoveryOutcome} from '../dist/generated/desktop-contract.js';
+import {decodeS3DiscoveryOutcome} from '../dist/desktop-contract.js';
 import {decodeS3ImportRpcResult,isS3ImportMethod} from '../dist/s3-import-rpc.js';
 const id='c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
 const source={operation_id:id,endpoint:'https://source.invalid',region:'fixture-region',bucket:'fixture-bucket',addressing:'path',prefix:'models/',timeout_ms:15000};

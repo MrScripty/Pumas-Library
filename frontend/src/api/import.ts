@@ -1,4 +1,4 @@
-import type { S3TransferRetryParams, S3TransferRetryState, S3PersistedImportsWire, S3DiscoveryParams, S3AuthenticatedDiscoveryParams, S3DiscoveryOutcome } from '../generated/desktop-contract';
+import type { S3TransferRetryParams, S3TransferRetryState, S3PersistedImportsWire, S3DiscoveryParams, S3AuthenticatedDiscoveryParams, S3DiscoveryOutcome } from '@pumas/desktop-contract';
 /**
  * Model Import API
  *
@@ -6,7 +6,7 @@ import type { S3TransferRetryParams, S3TransferRetryState, S3PersistedImportsWir
  * FTS5 search, network status monitoring, and HuggingFace metadata lookup.
  */
 
-import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportParams, S3AuthenticatedImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '../generated/desktop-contract';
+import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportParams, S3AuthenticatedImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '@pumas/desktop-contract';
 import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
 import type {

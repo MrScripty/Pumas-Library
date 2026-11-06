@@ -2,12 +2,12 @@ import type {
   ServingStatusEvent as DesktopServingStatusEvent,
   ServingStatusEventKind as DesktopServingStatusEventKind,
   ServingStatusUpdateFeed as DesktopServingStatusUpdateFeed,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 import type { BaseResponse } from './api-common';
 import type { RuntimeDeviceMode, RuntimeProviderId } from './api-runtime-profiles';
-import type { RouterProfileSyncStatus } from '../generated/desktop-contract';
+import type { RouterProfileSyncStatus } from '@pumas/desktop-contract';
 
-export type { RouterProfileSyncStatus } from '../generated/desktop-contract';
+export type { RouterProfileSyncStatus } from '@pumas/desktop-contract';
 
 export type ServingEndpointMode = 'not_configured' | 'provider_endpoint' | 'pumas_gateway';
 

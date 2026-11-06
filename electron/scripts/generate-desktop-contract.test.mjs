@@ -13,7 +13,7 @@ async function importGeneratedContract(files) {
   const directory = await mkdtemp(join(tmpdir(), 'pumas-contract-decoders-'));
   try {
     for (const [name, text] of Object.entries(files)) await writeFile(join(directory, name), text);
-    const bundled = await build({entryPoints:[join(directory, 'desktop-contract.ts')], bundle:true, format:'esm', platform:'browser', write:false});
+    const bundled = await build({entryPoints:[join(directory, 'desktop-contract.js')], bundle:true, format:'esm', platform:'browser', write:false});
     return await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
   } finally { await rm(directory, {recursive:true,force:true}); }
 }

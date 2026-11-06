@@ -5,7 +5,7 @@ import {
   decodeS3BundleImportObservation, type S3BundleImportObservation,
   decodeS3ImportOutcome, decodeS3ImportCancelOutcome,
   type S3ImportOutcome, type S3ImportCancelOutcome, type PublicError,
-} from './generated/desktop-contract';
+} from './desktop-contract';
 
 export const S3_RPC_FAILURE = 'S3 import RPC is unavailable. Observe the same operation without resubmitting.';
 export const S3_RPC_RESPONSE_LIMIT = 64 * 1024;

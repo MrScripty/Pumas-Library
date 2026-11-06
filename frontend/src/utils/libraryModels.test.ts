@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { groupCatalogModels, projectCatalogModel } from './libraryModels';
-import type { CatalogModel } from '../generated/desktop-contract';
+import type { CatalogModel } from '@pumas/desktop-contract';
 
 function catalog(overrides: Partial<CatalogModel> = {}): CatalogModel {
   return {

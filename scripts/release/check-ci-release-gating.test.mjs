@@ -357,11 +357,11 @@ test('pushes to main run every gate a pull request runs', () => {
   }
 });
 
-test('the two tracked desktop validator copies are byte-identical and checked against a fresh export', () => {
-  for (const name of ['desktop-contract.validators.js', 'desktop-contract.validators.d.ts']) {
-    const electron = fs.readFileSync(path.join(root, 'electron/src/generated', name));
-    const frontend = fs.readFileSync(path.join(root, 'frontend/src/generated', name));
-    assert.ok(electron.equals(frontend), `${name} copies differ`);
+test('the desktop contract has one tracked copy, checked against a fresh export', () => {
+  const generated = path.join(root, 'packages/desktop-contract/generated');
+  assert.deepEqual(fs.readdirSync(generated).sort(), ['desktop-contract.d.ts', 'desktop-contract.js', 'desktop-contract.validators.js']);
+  for (const consumer of ['electron', 'frontend']) {
+    assert.ok(!fs.existsSync(path.join(root, consumer, 'src/generated')), `${consumer} keeps its own generated contract copy`);
   }
   assert.match(job('build-frontend'), /^      - run: pnpm --dir electron check:desktop-contract$/m);
 });

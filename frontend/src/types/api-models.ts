@@ -1,7 +1,7 @@
 import type { BaseResponse } from './api-common';
 import type {
   DownloadListOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelDownloadSnapshotOutcome as DesktopModelDownloadSnapshotOutcome, ModelDownloadUpdateOutcome as DesktopModelDownloadUpdateOutcome, ModelsOutcome, PartialDownloadOutcome, UpdateInferenceSettingsOutcome, UpdateModelNotesOutcome, ModelCategoryOutcome,
-} from '../generated/desktop-contract';
+} from '@pumas/desktop-contract';
 
 // ============================================================================
 // Model Types

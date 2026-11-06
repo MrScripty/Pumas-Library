@@ -7,7 +7,7 @@
  * name and sort last.
  */
 
-import type { ModelCategoryOutcome } from '../generated/desktop-contract';
+import type { ModelCategoryOutcome } from '@pumas/desktop-contract';
 
 /** Categories a person can choose, in library display order. Checked against
  * the backend's generated category list; `unknown` cannot be chosen. */

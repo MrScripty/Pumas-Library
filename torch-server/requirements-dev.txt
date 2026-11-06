@@ -1,9 +1,9 @@
 # CI installs the hash lock generated from this file. After changing it, run:
 #   uv pip compile torch-server/requirements-dev.txt --universal --generate-hashes --python-version 3.12 --output-file torch-server/requirements-dev.lock --no-cache
-ruff==0.15.2
+ruff==0.17.3
 packaging==26.3
-pydantic>=2.0,<3
-numpy==2.3.5
+pydantic>=2.14.2,<3
+numpy==2.5.4
 # Installed-file import closure uses the existing managed runtime's exact versions.
 fastapi==0.128.0
 uvicorn==0.40.0

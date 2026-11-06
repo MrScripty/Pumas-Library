@@ -35,15 +35,15 @@
     },
     {
       "name": "anstream",
-      "version": "0.6.21"
+      "version": "1.0.0"
     },
     {
       "name": "anstyle",
-      "version": "1.0.13"
+      "version": "1.0.14"
     },
     {
       "name": "anstyle-parse",
-      "version": "0.2.7"
+      "version": "1.0.0"
     },
     {
       "name": "anstyle-query",
@@ -55,15 +55,11 @@
     },
     {
       "name": "anyhow",
-      "version": "1.0.103"
+      "version": "1.0.104"
     },
     {
       "name": "arc-swap",
       "version": "1.9.2"
-    },
-    {
-      "name": "arrayref",
-      "version": "0.3.9"
     },
     {
       "name": "arrayvec",
@@ -71,7 +67,7 @@
     },
     {
       "name": "async-trait",
-      "version": "0.1.89"
+      "version": "0.1.92"
     },
     {
       "name": "atomic-waker",
@@ -166,6 +162,10 @@
       "version": "0.22.1"
     },
     {
+      "name": "base64",
+      "version": "0.23.1"
+    },
+    {
       "name": "base64-simd",
       "version": "0.8.0"
     },
@@ -175,11 +175,11 @@
     },
     {
       "name": "bitflags",
-      "version": "2.10.0"
+      "version": "2.13.2"
     },
     {
       "name": "blake3",
-      "version": "1.8.3"
+      "version": "1.8.7"
     },
     {
       "name": "block-buffer",
@@ -243,23 +243,23 @@
     },
     {
       "name": "chrono",
-      "version": "0.4.43"
+      "version": "0.4.45"
     },
     {
       "name": "clap",
-      "version": "4.5.54"
+      "version": "4.6.7"
     },
     {
       "name": "clap_builder",
-      "version": "4.5.54"
+      "version": "4.6.7"
     },
     {
       "name": "clap_derive",
-      "version": "4.5.49"
+      "version": "4.6.7"
     },
     {
       "name": "clap_lex",
-      "version": "0.7.7"
+      "version": "1.1.1"
     },
     {
       "name": "cmake",
@@ -287,6 +287,10 @@
     },
     {
       "name": "core-foundation",
+      "version": "0.10.1"
+    },
+    {
+      "name": "core-foundation",
       "version": "0.9.4"
     },
     {
@@ -307,7 +311,7 @@
     },
     {
       "name": "crc32fast",
-      "version": "1.5.0"
+      "version": "1.5.4"
     },
     {
       "name": "crossbeam-channel",
@@ -335,7 +339,7 @@
     },
     {
       "name": "ctrlc",
-      "version": "3.5.1"
+      "version": "3.5.2"
     },
     {
       "name": "ctutils",
@@ -343,7 +347,7 @@
     },
     {
       "name": "daachorse",
-      "version": "1.0.1"
+      "version": "3.0.3"
     },
     {
       "name": "darling",
@@ -459,7 +463,7 @@
     },
     {
       "name": "flate2",
-      "version": "1.1.8"
+      "version": "1.1.10"
     },
     {
       "name": "fnv",
@@ -495,35 +499,35 @@
     },
     {
       "name": "futures",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-channel",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-core",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-executor",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-io",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-macro",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-sink",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-task",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "futures-timer",
@@ -531,7 +535,7 @@
     },
     {
       "name": "futures-util",
-      "version": "0.3.31"
+      "version": "0.3.34"
     },
     {
       "name": "gcd",
@@ -574,8 +578,12 @@
       "version": "0.16.1"
     },
     {
+      "name": "hashbrown",
+      "version": "0.17.1"
+    },
+    {
       "name": "hashlink",
-      "version": "0.9.1"
+      "version": "0.12.2"
     },
     {
       "name": "heck",
@@ -595,7 +603,7 @@
     },
     {
       "name": "http",
-      "version": "1.4.0"
+      "version": "1.5.0"
     },
     {
       "name": "http-body",
@@ -603,11 +611,11 @@
     },
     {
       "name": "http-body",
-      "version": "1.0.1"
+      "version": "1.1.0"
     },
     {
       "name": "http-body-util",
-      "version": "0.1.3"
+      "version": "0.1.5"
     },
     {
       "name": "httparse",
@@ -623,7 +631,7 @@
     },
     {
       "name": "hyper",
-      "version": "1.8.1"
+      "version": "1.12.0"
     },
     {
       "name": "hyper-tls",
@@ -631,7 +639,7 @@
     },
     {
       "name": "hyper-util",
-      "version": "0.1.19"
+      "version": "0.1.21"
     },
     {
       "name": "iana-time-zone",
@@ -751,11 +759,11 @@
     },
     {
       "name": "libsqlite3-sys",
-      "version": "0.30.1"
+      "version": "0.39.1"
     },
     {
       "name": "linux-raw-sys",
-      "version": "0.11.0"
+      "version": "0.12.1"
     },
     {
       "name": "litemap",
@@ -830,6 +838,10 @@
       "version": "0.8.9"
     },
     {
+      "name": "miniz_oxide",
+      "version": "0.9.1"
+    },
+    {
       "name": "mio",
       "version": "1.2.4"
     },
@@ -847,19 +859,11 @@
     },
     {
       "name": "native-tls",
-      "version": "0.2.14"
+      "version": "0.2.18"
     },
     {
       "name": "ndarray",
       "version": "0.17.2"
-    },
-    {
-      "name": "nix",
-      "version": "0.29.0"
-    },
-    {
-      "name": "nix",
-      "version": "0.30.1"
     },
     {
       "name": "nix",
@@ -943,7 +947,7 @@
     },
     {
       "name": "openssl-probe",
-      "version": "0.1.6"
+      "version": "0.2.2"
     },
     {
       "name": "openssl-sys",
@@ -1083,7 +1087,7 @@
     },
     {
       "name": "regex",
-      "version": "1.12.2"
+      "version": "1.12.3"
     },
     {
       "name": "regex-automata",
@@ -1103,11 +1107,11 @@
     },
     {
       "name": "roxmltree",
-      "version": "0.21.1"
+      "version": "0.21.2"
     },
     {
       "name": "rusqlite",
-      "version": "0.32.1"
+      "version": "0.41.1"
     },
     {
       "name": "rustc_version",
@@ -1115,7 +1119,7 @@
     },
     {
       "name": "rustix",
-      "version": "1.1.3"
+      "version": "1.1.6"
     },
     {
       "name": "rustix-linux-procfs",
@@ -1147,31 +1151,31 @@
     },
     {
       "name": "security-framework",
-      "version": "2.11.1"
+      "version": "3.7.0"
     },
     {
       "name": "security-framework-sys",
-      "version": "2.15.0"
+      "version": "2.17.0"
     },
     {
       "name": "semver",
-      "version": "1.0.27"
+      "version": "1.0.28"
     },
     {
       "name": "serde",
-      "version": "1.0.228"
+      "version": "1.0.229"
     },
     {
       "name": "serde_core",
-      "version": "1.0.228"
+      "version": "1.0.229"
     },
     {
       "name": "serde_derive",
-      "version": "1.0.228"
+      "version": "1.0.229"
     },
     {
       "name": "serde_json",
-      "version": "1.0.149"
+      "version": "1.0.154"
     },
     {
       "name": "serde_path_to_error",
@@ -1267,7 +1271,7 @@
     },
     {
       "name": "system-configuration",
-      "version": "0.6.1"
+      "version": "0.7.0"
     },
     {
       "name": "system-configuration-sys",
@@ -1283,7 +1287,7 @@
     },
     {
       "name": "tempfile",
-      "version": "3.24.0"
+      "version": "3.25.0"
     },
     {
       "name": "thiserror",
@@ -1291,7 +1295,7 @@
     },
     {
       "name": "thiserror",
-      "version": "2.0.18"
+      "version": "2.0.21"
     },
     {
       "name": "thiserror-impl",
@@ -1299,7 +1303,7 @@
     },
     {
       "name": "thiserror-impl",
-      "version": "2.0.18"
+      "version": "2.0.21"
     },
     {
       "name": "thread_local",
@@ -1327,7 +1331,7 @@
     },
     {
       "name": "tokenizers",
-      "version": "0.23.1"
+      "version": "0.23.2"
     },
     {
       "name": "tokio",
@@ -1379,7 +1383,7 @@
     },
     {
       "name": "tracing-subscriber",
-      "version": "0.3.22"
+      "version": "0.3.23"
     },
     {
       "name": "triomphe",
@@ -1411,7 +1415,7 @@
     },
     {
       "name": "unicode-normalization",
-      "version": "0.1.25"
+      "version": "0.1.26"
     },
     {
       "name": "unicode-normalization-alignments",
@@ -1443,7 +1447,7 @@
     },
     {
       "name": "uuid",
-      "version": "1.19.0"
+      "version": "1.29.0"
     },
     {
       "name": "vcpkg",
@@ -1463,7 +1467,7 @@
     },
     {
       "name": "want",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     {
       "name": "winapi",
@@ -1734,9 +1738,9 @@
     },
     {
       "name": "anstream",
-      "version": "0.6.21",
+      "version": "1.0.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/anstream/0.6.21/download",
+      "source": "https://crates.io/api/v1/crates/anstream/1.0.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -1751,9 +1755,9 @@
     },
     {
       "name": "anstyle",
-      "version": "1.0.13",
+      "version": "1.0.14",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/anstyle/1.0.13/download",
+      "source": "https://crates.io/api/v1/crates/anstyle/1.0.14/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -1768,9 +1772,9 @@
     },
     {
       "name": "anstyle-parse",
-      "version": "0.2.7",
+      "version": "1.0.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/anstyle-parse/0.2.7/download",
+      "source": "https://crates.io/api/v1/crates/anstyle-parse/1.0.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -1819,9 +1823,9 @@
     },
     {
       "name": "anyhow",
-      "version": "1.0.103",
+      "version": "1.0.104",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/anyhow/1.0.103/download",
+      "source": "https://crates.io/api/v1/crates/anyhow/1.0.104/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -1852,19 +1856,6 @@
       ]
     },
     {
-      "name": "arrayref",
-      "version": "0.3.9",
-      "license_declared": "BSD-2-Clause",
-      "source": "https://crates.io/api/v1/crates/arrayref/0.3.9/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "LICENSE",
-          "sha256": "1bc7e6f475b3ec99b7e2643411950ae2368c250dd4c5c325f80f9811362a94a1"
-        }
-      ]
-    },
-    {
       "name": "arrayvec",
       "version": "0.7.6",
       "license_declared": "MIT OR Apache-2.0",
@@ -1883,9 +1874,9 @@
     },
     {
       "name": "async-trait",
-      "version": "0.1.89",
+      "version": "0.1.92",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/async-trait/0.1.89/download",
+      "source": "https://crates.io/api/v1/crates/async-trait/0.1.92/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -2222,6 +2213,23 @@
       ]
     },
     {
+      "name": "base64",
+      "version": "0.23.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/base64/0.23.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "ab499c75a0f0da8e0fe83bf9ba3a27e5c39705310f07107c6c66b69958d2401c"
+        }
+      ]
+    },
+    {
       "name": "base64-simd",
       "version": "0.8.0",
       "license_declared": "MIT",
@@ -2253,9 +2261,9 @@
     },
     {
       "name": "bitflags",
-      "version": "2.10.0",
+      "version": "2.13.2",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/bitflags/2.10.0/download",
+      "source": "https://crates.io/api/v1/crates/bitflags/2.13.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -2270,9 +2278,9 @@
     },
     {
       "name": "blake3",
-      "version": "1.8.3",
+      "version": "1.8.7",
       "license_declared": "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception",
-      "source": "https://crates.io/api/v1/crates/blake3/1.8.3/download",
+      "source": "https://crates.io/api/v1/crates/blake3/1.8.7/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -2550,9 +2558,9 @@
     },
     {
       "name": "chrono",
-      "version": "0.4.43",
+      "version": "0.4.45",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/chrono/0.4.43/download",
+      "source": "https://crates.io/api/v1/crates/chrono/0.4.45/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -2563,14 +2571,14 @@
     },
     {
       "name": "clap",
-      "version": "4.5.54",
+      "version": "4.6.7",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/clap/4.5.54/download",
+      "source": "https://crates.io/api/v1/crates/clap/4.6.7/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE-APACHE",
-          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe"
         },
         {
           "path": "LICENSE-MIT",
@@ -2580,14 +2588,14 @@
     },
     {
       "name": "clap_builder",
-      "version": "4.5.54",
+      "version": "4.6.7",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/clap_builder/4.5.54/download",
+      "source": "https://crates.io/api/v1/crates/clap_builder/4.6.7/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE-APACHE",
-          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe"
         },
         {
           "path": "LICENSE-MIT",
@@ -2597,14 +2605,14 @@
     },
     {
       "name": "clap_derive",
-      "version": "4.5.49",
+      "version": "4.6.7",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/clap_derive/4.5.49/download",
+      "source": "https://crates.io/api/v1/crates/clap_derive/4.6.7/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE-APACHE",
-          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe"
         },
         {
           "path": "LICENSE-MIT",
@@ -2614,14 +2622,14 @@
     },
     {
       "name": "clap_lex",
-      "version": "0.7.7",
+      "version": "1.1.1",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/clap_lex/0.7.7/download",
+      "source": "https://crates.io/api/v1/crates/clap_lex/1.1.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE-APACHE",
-          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe"
         },
         {
           "path": "LICENSE-MIT",
@@ -2733,6 +2741,23 @@
     },
     {
       "name": "core-foundation",
+      "version": "0.10.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/core-foundation/0.10.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3"
+        }
+      ]
+    },
+    {
+      "name": "core-foundation",
       "version": "0.9.4",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/core-foundation/0.9.4/download",
@@ -2818,9 +2843,9 @@
     },
     {
       "name": "crc32fast",
-      "version": "1.5.0",
+      "version": "1.5.4",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/crc32fast/1.5.0/download",
+      "source": "https://crates.io/api/v1/crates/crc32fast/1.5.4/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -2941,9 +2966,9 @@
     },
     {
       "name": "ctrlc",
-      "version": "3.5.1",
+      "version": "3.5.2",
       "license_declared": "MIT/Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/ctrlc/3.5.1/download",
+      "source": "https://crates.io/api/v1/crates/ctrlc/3.5.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -2975,9 +3000,9 @@
     },
     {
       "name": "daachorse",
-      "version": "1.0.1",
+      "version": "3.0.3",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/daachorse/1.0.1/download",
+      "source": "https://crates.io/api/v1/crates/daachorse/3.0.3/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3444,9 +3469,9 @@
     },
     {
       "name": "flate2",
-      "version": "1.1.8",
+      "version": "1.1.10",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/flate2/1.1.8/download",
+      "source": "https://crates.io/api/v1/crates/flate2/1.1.10/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3455,7 +3480,7 @@
         },
         {
           "path": "LICENSE-MIT",
-          "sha256": "75d3bf11a47fed60aee0a6cc56a97b896b470ee8fb52d6cd553bd8348337f422"
+          "sha256": "025436edff4cfcdde17a5811fdea78892d8482efd1abdec5a17872d07a4f2112"
         }
       ]
     },
@@ -3597,9 +3622,9 @@
     },
     {
       "name": "futures",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3614,9 +3639,9 @@
     },
     {
       "name": "futures-channel",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-channel/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-channel/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3631,9 +3656,9 @@
     },
     {
       "name": "futures-core",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-core/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-core/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3648,9 +3673,9 @@
     },
     {
       "name": "futures-executor",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-executor/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-executor/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3665,9 +3690,9 @@
     },
     {
       "name": "futures-io",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-io/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-io/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3682,9 +3707,9 @@
     },
     {
       "name": "futures-macro",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-macro/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-macro/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3699,9 +3724,9 @@
     },
     {
       "name": "futures-sink",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-sink/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-sink/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3716,9 +3741,9 @@
     },
     {
       "name": "futures-task",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-task/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-task/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3750,9 +3775,9 @@
     },
     {
       "name": "futures-util",
-      "version": "0.3.31",
+      "version": "0.3.34",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/futures-util/0.3.31/download",
+      "source": "https://crates.io/api/v1/crates/futures-util/0.3.34/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3924,10 +3949,27 @@
       ]
     },
     {
-      "name": "hashlink",
-      "version": "0.9.1",
+      "name": "hashbrown",
+      "version": "0.17.1",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/hashlink/0.9.1/download",
+      "source": "https://crates.io/api/v1/crates/hashbrown/0.17.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2"
+        }
+      ]
+    },
+    {
+      "name": "hashlink",
+      "version": "0.12.2",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/hashlink/0.12.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -4010,9 +4052,9 @@
     },
     {
       "name": "http",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/http/1.4.0/download",
+      "source": "https://crates.io/api/v1/crates/http/1.5.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -4040,27 +4082,27 @@
     },
     {
       "name": "http-body",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/http-body/1.0.1/download",
+      "source": "https://crates.io/api/v1/crates/http-body/1.1.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "cddabf8adc6ccd6c3e68f5d71eac9fae3094116623cf23a46af0a5fd6b8ee813"
+          "sha256": "248378d0a3383c173fb925f17141b88e71580b3ba17ddc6ac3d2a344683232ab"
         }
       ]
     },
     {
       "name": "http-body-util",
-      "version": "0.1.3",
+      "version": "0.1.5",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/http-body-util/0.1.3/download",
+      "source": "https://crates.io/api/v1/crates/http-body-util/0.1.5/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "b843fb7430efdf9732c834b6814beda44fccf3f0ddf7c9e030b39da17f6b159c"
+          "sha256": "248378d0a3383c173fb925f17141b88e71580b3ba17ddc6ac3d2a344683232ab"
         }
       ]
     },
@@ -4117,14 +4159,14 @@
     },
     {
       "name": "hyper",
-      "version": "1.8.1",
+      "version": "1.12.0",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/hyper/1.8.1/download",
+      "source": "https://crates.io/api/v1/crates/hyper/1.12.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "8f2eee700f56dd8b381d92dc5b136befe09f90e186f2c1c8414a70c4c7534550"
+          "sha256": "2d01890414494742ba4a509fcec8efa40f6d8be22cbd72be7cff08d6fda4ec89"
         }
       ]
     },
@@ -4147,9 +4189,9 @@
     },
     {
       "name": "hyper-util",
-      "version": "0.1.19",
+      "version": "0.1.21",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/hyper-util/0.1.19/download",
+      "source": "https://crates.io/api/v1/crates/hyper-util/0.1.21/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -4625,26 +4667,22 @@
     },
     {
       "name": "libsqlite3-sys",
-      "version": "0.30.1",
+      "version": "0.39.1",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/libsqlite3-sys/0.30.1/download",
+      "source": "https://crates.io/api/v1/crates/libsqlite3-sys/0.39.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "f59ba65550f2a5adff98ec6478d783402c8e0a3eb515025c0b3438f3d30dc39e"
-        },
-        {
-          "path": "sqlcipher/LICENSE",
-          "sha256": "ea4fcb309f14a22065e1ea45362d494d320012249ed865fe9c7c0946db754131"
+          "sha256": "c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f"
         }
       ]
     },
     {
       "name": "linux-raw-sys",
-      "version": "0.11.0",
+      "version": "0.12.1",
       "license_declared": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/linux-raw-sys/0.11.0/download",
+      "source": "https://crates.io/api/v1/crates/linux-raw-sys/0.12.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -4996,6 +5034,31 @@
       ]
     },
     {
+      "name": "miniz_oxide",
+      "version": "0.9.1",
+      "license_declared": "MIT OR Zlib OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/miniz_oxide/0.9.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b"
+        },
+        {
+          "path": "LICENSE-APACHE.md",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "path": "LICENSE-MIT.md",
+          "sha256": "799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d"
+        },
+        {
+          "path": "LICENSE-ZLIB.md",
+          "sha256": "0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39"
+        }
+      ]
+    },
+    {
       "name": "mio",
       "version": "1.2.4",
       "license_declared": "MIT",
@@ -5061,9 +5124,9 @@
     },
     {
       "name": "native-tls",
-      "version": "0.2.14",
+      "version": "0.2.18",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/native-tls/0.2.14/download",
+      "source": "https://crates.io/api/v1/crates/native-tls/0.2.18/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5090,32 +5153,6 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "1fd6747d2c8e80f9fa766f57c5888864774621deb85cc2838ccaed727db32d45"
-        }
-      ]
-    },
-    {
-      "name": "nix",
-      "version": "0.29.0",
-      "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/nix/0.29.0/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "LICENSE",
-          "sha256": "66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70"
-        }
-      ]
-    },
-    {
-      "name": "nix",
-      "version": "0.30.1",
-      "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/nix/0.30.1/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "LICENSE",
-          "sha256": "66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70"
         }
       ]
     },
@@ -5425,9 +5462,9 @@
     },
     {
       "name": "openssl-probe",
-      "version": "0.1.6",
-      "license_declared": "MIT/Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/openssl-probe/0.1.6/download",
+      "version": "0.2.2",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/openssl-probe/0.2.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6028,9 +6065,9 @@
     },
     {
       "name": "regex",
-      "version": "1.12.2",
+      "version": "1.12.3",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/regex/1.12.2/download",
+      "source": "https://crates.io/api/v1/crates/regex/1.12.3/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6117,9 +6154,9 @@
     },
     {
       "name": "roxmltree",
-      "version": "0.21.1",
+      "version": "0.21.2",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/roxmltree/0.21.1/download",
+      "source": "https://crates.io/api/v1/crates/roxmltree/0.21.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6134,14 +6171,14 @@
     },
     {
       "name": "rusqlite",
-      "version": "0.32.1",
+      "version": "0.41.1",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/rusqlite/0.32.1/download",
+      "source": "https://crates.io/api/v1/crates/rusqlite/0.41.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "f59ba65550f2a5adff98ec6478d783402c8e0a3eb515025c0b3438f3d30dc39e"
+          "sha256": "c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f"
         }
       ]
     },
@@ -6164,9 +6201,9 @@
     },
     {
       "name": "rustix",
-      "version": "1.1.3",
+      "version": "1.1.6",
       "license_declared": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/rustix/1.1.3/download",
+      "source": "https://crates.io/api/v1/crates/rustix/1.1.6/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6316,9 +6353,9 @@
     },
     {
       "name": "security-framework",
-      "version": "2.11.1",
+      "version": "3.7.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/security-framework/2.11.1/download",
+      "source": "https://crates.io/api/v1/crates/security-framework/3.7.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6333,9 +6370,9 @@
     },
     {
       "name": "security-framework-sys",
-      "version": "2.15.0",
+      "version": "2.17.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/security-framework-sys/2.15.0/download",
+      "source": "https://crates.io/api/v1/crates/security-framework-sys/2.17.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6350,9 +6387,9 @@
     },
     {
       "name": "semver",
-      "version": "1.0.27",
+      "version": "1.0.28",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/semver/1.0.27/download",
+      "source": "https://crates.io/api/v1/crates/semver/1.0.28/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6367,9 +6404,9 @@
     },
     {
       "name": "serde",
-      "version": "1.0.228",
+      "version": "1.0.229",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/serde/1.0.228/download",
+      "source": "https://crates.io/api/v1/crates/serde/1.0.229/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6384,9 +6421,9 @@
     },
     {
       "name": "serde_core",
-      "version": "1.0.228",
+      "version": "1.0.229",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/serde_core/1.0.228/download",
+      "source": "https://crates.io/api/v1/crates/serde_core/1.0.229/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6401,9 +6438,9 @@
     },
     {
       "name": "serde_derive",
-      "version": "1.0.228",
+      "version": "1.0.229",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/serde_derive/1.0.228/download",
+      "source": "https://crates.io/api/v1/crates/serde_derive/1.0.229/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6418,9 +6455,9 @@
     },
     {
       "name": "serde_json",
-      "version": "1.0.149",
+      "version": "1.0.154",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/serde_json/1.0.149/download",
+      "source": "https://crates.io/api/v1/crates/serde_json/1.0.154/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6790,9 +6827,9 @@
     },
     {
       "name": "system-configuration",
-      "version": "0.6.1",
+      "version": "0.7.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/system-configuration/0.6.1/download",
+      "source": "https://crates.io/api/v1/crates/system-configuration/0.7.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6858,9 +6895,9 @@
     },
     {
       "name": "tempfile",
-      "version": "3.24.0",
+      "version": "3.25.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/tempfile/3.24.0/download",
+      "source": "https://crates.io/api/v1/crates/tempfile/3.25.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6892,9 +6929,9 @@
     },
     {
       "name": "thiserror",
-      "version": "2.0.18",
+      "version": "2.0.21",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/thiserror/2.0.18/download",
+      "source": "https://crates.io/api/v1/crates/thiserror/2.0.21/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6926,9 +6963,9 @@
     },
     {
       "name": "thiserror-impl",
-      "version": "2.0.18",
+      "version": "2.0.21",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/thiserror-impl/2.0.18/download",
+      "source": "https://crates.io/api/v1/crates/thiserror-impl/2.0.21/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7049,9 +7086,9 @@
     },
     {
       "name": "tokenizers",
-      "version": "0.23.1",
+      "version": "0.23.2",
       "license_declared": "Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/tokenizers/0.23.1/download",
+      "source": "https://crates.io/api/v1/crates/tokenizers/0.23.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7222,9 +7259,9 @@
     },
     {
       "name": "tracing-subscriber",
-      "version": "0.3.22",
+      "version": "0.3.23",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/tracing-subscriber/0.3.22/download",
+      "source": "https://crates.io/api/v1/crates/tracing-subscriber/0.3.23/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7366,9 +7403,9 @@
     },
     {
       "name": "unicode-normalization",
-      "version": "0.1.25",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/unicode-normalization/0.1.25/download",
+      "version": "0.1.26",
+      "license_declared": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "source": "https://crates.io/api/v1/crates/unicode-normalization/0.1.26/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7382,6 +7419,10 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0"
+        },
+        {
+          "path": "LICENSE-UNICODE",
+          "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1"
         }
       ]
     },
@@ -7514,9 +7555,9 @@
     },
     {
       "name": "uuid",
-      "version": "1.19.0",
+      "version": "1.29.0",
       "license_declared": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/uuid/1.19.0/download",
+      "source": "https://crates.io/api/v1/crates/uuid/1.29.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7599,9 +7640,9 @@
     },
     {
       "name": "want",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/want/0.3.1/download",
+      "source": "https://crates.io/api/v1/crates/want/0.3.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -8412,22 +8453,22 @@
     },
     {
       "name": "lucide-react",
-      "version": "0.561.0",
+      "version": "1.70.0",
       "license_declared": "ISC",
-      "source": "https://www.npmjs.com/package/lucide-react/v/0.561.0",
+      "source": "https://www.npmjs.com/package/lucide-react/v/1.70.0",
       "scope": "JavaScript production dependency closure; includes tree-shaken code",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "3c57143f22dac950efebf84002e360bba5458c7b90fe583b0667aaaef1a7256e"
+          "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57"
         },
         {
-          "path": "dist/esm/icons/copyright.js",
-          "sha256": "0c74923563a07b8404fc14d77f339dbee05b929d0bf1d57da61330ce5f2588bf"
+          "path": "dist/esm/icons/copyright.mjs",
+          "sha256": "7bf025ccbcc913a8bf8d2c76766ec9b55132e17060c1d714a234f45848167294"
         },
         {
-          "path": "dist/esm/icons/copyright.js.map",
-          "sha256": "4bcdc996eb4435dbc7aeef5c4dec94961c32f2db9c2cb01fd3a8f8bbb7db27b7"
+          "path": "dist/esm/icons/copyright.mjs.map",
+          "sha256": "3c510ff8c410b65ddad8795a805fde08cfd86d5c3b0c1935e59ca6aef28d9c72"
         }
       ]
     },
@@ -8459,9 +8500,9 @@
     },
     {
       "name": "react",
-      "version": "19.3.0",
+      "version": "19.3.1",
       "license_declared": "MIT",
-      "source": "https://www.npmjs.com/package/react/v/19.3.0",
+      "source": "https://www.npmjs.com/package/react/v/19.3.1",
       "scope": "JavaScript production dependency closure; includes tree-shaken code",
       "texts": [
         {
@@ -8485,9 +8526,9 @@
     },
     {
       "name": "react-dom",
-      "version": "19.3.0",
+      "version": "19.3.1",
       "license_declared": "MIT",
-      "source": "https://www.npmjs.com/package/react-dom/v/19.3.0",
+      "source": "https://www.npmjs.com/package/react-dom/v/19.3.1",
       "scope": "JavaScript production dependency closure; includes tree-shaken code",
       "texts": [
         {
@@ -9365,15 +9406,15 @@
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json": "d8b9826efc0aa5fedd0353f5227b1001cfe6bda96287ff3136b81b513c71e104",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json": "a280a955f040983398474af0c34f92e9172fc3c69ef22f7422ac990ed0554e26",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json": "3e2f6e67e3a4492c01232778191871e9f39543f02996349f055272f2d19fbb89",
-    "electron/package.json": "ddd4d64189f5c7540d05b61937da5fc59730053e66b757bd2ea7ebdb187d5beb",
-    "frontend/package.json": "a9d0bb73a804659e9c301754a5fdbfb180ef1bdbf11eb2c6139d4214b524a42e",
-    "pnpm-lock.yaml": "0f25d007f6ae3475700651c82c6dfc281b4bfdeb6b3b5c14ce87397fa428f82e",
-    "rust/Cargo.lock": "e7b8afbae2d73dc71047aec9b667467fc51fa7bb111193f6c8fa6a28b15be3ef",
-    "rust/Cargo.toml": "9bb326e811b909788989701c39342fdf2fe714d6eaaf91cca98f3b729d4c7534",
+    "electron/package.json": "2f4adb4ab9c2fc5724959197a7b22ace87e7d403940ffd0d278d00ce162418f0",
+    "frontend/package.json": "d7578fd4567b52cf02e901d322612b93091fadc1a0b2e54e7abd6f374306da7d",
+    "pnpm-lock.yaml": "ef54d3843397742c655fc7843eb8c16031bb242b4924fa4e8e89e0db17490268",
+    "rust/Cargo.lock": "098bce7d6b6820ebbccd24817105d41e9aab184fc4735cde039eb8a9a7d7cba3",
+    "rust/Cargo.toml": "5ac4729864ac1ee314db5319c80e809dc3ba702788cc123d81366be8cce86b7e",
     "rust/crates/pumas-app-manager/Cargo.toml": "f344b89815164c0acc2f6758ad8313a2b8cccba1004354046d542ca5a3d22a73",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "c990968b92e6e8218b69f90601ddb80cfc6bcfdf39360279af3e181fbbc4d901",
-    "rust/crates/pumas-core/Cargo.toml": "c224f64df6dc29da2a25c988d463776e9187a80cef501528ff2d14a05cd84dc9",
-    "rust/crates/pumas-rpc/Cargo.toml": "25268a66ec5d50f2fa5fef6734c2b5e3e2db1282e3cd046fd31fce809b03bb6c",
+    "rust/crates/pumas-core/Cargo.toml": "b488c9be2ce38b4ad41a4422c41a1625e774ac5510fd7cf9f8384ab02e5da7b9",
+    "rust/crates/pumas-rpc/Cargo.toml": "2a5c01cc72dcd3fc4d58e650430cb8f0d6c63771eaf06f8064c6611fd23e8fd1",
     "scripts/release/artifact-plan.json": "66348a507f00ffdc74741fc7d70eab02f4a0eed4d3655354784cea2971662064",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
     "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
@@ -9382,5 +9423,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "4883d1079a1f8f726962f80652a227d9372ccd07913047e08a3de7e24e4d44e6"
+  "notices_sha256": "48334eadcf1d9e8273169179709c3b5684d73b40d1b3c7cf72561aa5d04eeb16"
 }

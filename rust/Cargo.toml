@@ -31,7 +31,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 
 # Database (bundled SQLite includes FTS5 by default)
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -81,7 +81,7 @@ async-trait = "0.1"
 # ONNX Runtime and tokenizer execution
 half = "2.7.1"
 # Native ONNX Runtime is provisioned separately. Cargo must never download it.
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "api-24", "half"] }
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "api-24", "half"] }
 tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
 
 # URL and path handling
@@ -118,9 +118,9 @@ uniffi = "0.28"
 rustler = "0.34"
 
 # Platform-specific process management (used conditionally in crates)
-nix = { version = "0.29", features = ["signal", "process"] }
+nix = { version = "0.31", features = ["signal", "process"] }
 libc = "0.2"
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",

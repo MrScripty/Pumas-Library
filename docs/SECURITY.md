@@ -152,7 +152,8 @@ opts into a record's versions. The one exact pin is the Cohere audio candidate
 recipe (`rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json`):
 the confined audio read boundary admits only the files that recipe describes.
 `torch-server/requirements.txt` is an unpinned direct-development input, not a
-shipped dependency set.
+shipped dependency set. Its lower bounds sit past the known advisories, because
+scanners such as Scorecard read each bound as the installed version.
 
 ### Dependency scans
 

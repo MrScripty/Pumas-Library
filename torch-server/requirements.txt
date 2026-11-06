@@ -1,10 +1,10 @@
 # Direct development only: unpinned runtime packages for running serve.py
 # from a source checkout. It is not shipped and managed installs never read
 # it. CI installs the hash lock requirements-dev.lock instead; see README.md.
-torch>=2.1.0
-transformers>=4.36.0
+torch>=2.13.0
+transformers>=4.55.0
 safetensors>=0.4.0
-fastapi>=0.104.0
+fastapi>=0.109.1
 uvicorn[standard]>=0.24.0
-accelerate>=0.25.0
+accelerate>=1.15.0
 psutil>=5.9.0

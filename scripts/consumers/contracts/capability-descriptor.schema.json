@@ -65,6 +65,11 @@
           "const": "decision",
           "description": "Typed questions about a state answered with probabilities by a native\ndecision model (llama.cpp `/v1/systemone`, e.g. Kev, OpenJev).",
           "type": "string"
+        },
+        {
+          "const": "rerank",
+          "description": "Relevance of each document to a query, scored by a reranker\n(llama.cpp `/v1/rerank`).",
+          "type": "string"
         }
       ]
     },
@@ -79,7 +84,8 @@
         "pcm_s16le",
         "pcm_f32le",
         "content_batch",
-        "decision"
+        "decision",
+        "rerank"
       ],
       "type": "string"
     },
@@ -143,6 +149,11 @@
           "const": "input_tokens",
           "description": "Tokens per input, including special tokens, from the served model's\nown positional limit.",
           "type": "string"
+        },
+        {
+          "const": "top_n",
+          "description": "Documents returned by a `rerank` operation.",
+          "type": "string"
         }
       ]
     },
@@ -152,7 +163,8 @@
         "embeddings_float32",
         "png_base64",
         "labels",
-        "decisions"
+        "decisions",
+        "relevance_scores"
       ],
       "type": "string"
     },
@@ -166,7 +178,8 @@
         "audio_classification",
         "image_to_text",
         "multimodal_embedding",
-        "decision"
+        "decision",
+        "rerank"
       ],
       "type": "string"
     }

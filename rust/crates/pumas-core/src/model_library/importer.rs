@@ -2588,7 +2588,9 @@ mod tests {
             )
             .unwrap();
         scope.install_gated(prepared).unwrap().start();
-        tokio::time::timeout(std::time::Duration::from_secs(5), result)
+        // Liveness bound only: the worker performs several real durable-store
+        // and metadata writes, which can exceed 5s on Windows CI file systems.
+        tokio::time::timeout(std::time::Duration::from_secs(30), result)
             .await
             .unwrap()
             .unwrap()

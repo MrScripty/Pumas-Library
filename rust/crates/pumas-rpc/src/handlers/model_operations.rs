@@ -1,8 +1,9 @@
 //! Additive selected-model capabilities and closed typed operations.
 mod decision;
-mod image_input;
+mod parts;
 mod modality;
 mod projection;
+mod runtime_modalities;
 mod stream;
 #[cfg(test)]
 mod tests;
@@ -100,6 +101,7 @@ pub async fn handle_capabilities(
         Ok(model) => model,
         Err(rejection) => return reject(None, rejection),
     };
+    let (modalities, capabilities) = describe(&state, &served).await;
     Json(CapabilitiesResponse {
         supported_contract_versions: vec![CONTRACT_VERSION],
         model: query.model,
@@ -108,7 +110,8 @@ pub async fn handle_capabilities(
         max_response_bytes: MAX_BYTES,
         max_stream_event_bytes: MAX_EVENT_BYTES,
         context_tokens: served.context_size,
-        capabilities: descriptors(&state, &served).await,
+        modalities,
+        capabilities,
     })
     .into_response()
 }
@@ -142,12 +145,12 @@ pub async fn handle_served_models(State(state): State<Arc<AppState>>) -> Respons
             .entry(served_alias(model).to_owned())
             .or_default() += 1;
     }
-    let capabilities =
-        futures::future::join_all(served.iter().map(|model| descriptors(&state, model))).await;
+    let described =
+        futures::future::join_all(served.iter().map(|model| describe(&state, model))).await;
     let models = served
         .iter()
-        .zip(capabilities)
-        .map(|(model, capabilities)| ServedModelEntry {
+        .zip(described)
+        .map(|(model, (modalities, capabilities))| ServedModelEntry {
             model: served_alias(model).to_owned(),
             profile: model.profile_id.as_str().to_owned(),
             model_id: model.model_id.clone(),
@@ -155,6 +158,7 @@ pub async fn handle_served_models(State(state): State<Arc<AppState>>) -> Respons
             load_state: enum_name(&model.load_state),
             context_tokens: model.context_size,
             profile_required: alias_count[served_alias(model)] > 1,
+            modalities,
             capabilities,
         })
         .collect();
@@ -309,7 +313,7 @@ pub async fn handle_model_operations(
             if matches!(
                 request.capability,
                 Capability::ImageToText | Capability::MultimodalEmbedding
-            ) =>
+            ) || media_chat(&request) =>
         {
             body
         }
@@ -334,13 +338,11 @@ pub async fn handle_model_operations(
         marker: &admitted,
         expected: &served,
         cancellation: &cancellation,
-        vision: match &request.input {
-            OperationInput::Decision { images, .. } => !images.is_empty(),
-            _ => matches!(
-                request.capability,
-                Capability::ImageToText | Capability::MultimodalEmbedding
-            ),
-        },
+        // Non-text parts must be live in the session that receives them.
+        media: modality::input_modalities(&request.input)
+            .into_iter()
+            .filter(|modality| *modality != Modality::Text)
+            .collect(),
     };
     let provider_bytes = serde_json::to_vec(&body).expect("closed request is serializable");
     let path = OriginalUri(
@@ -464,7 +466,8 @@ async fn prepare_provider_request(
     if !matches!(
         request.capability,
         Capability::ImageToText | Capability::MultimodalEmbedding | Capability::Decision
-    ) {
+    ) && !media_chat(request)
+    {
         return projection::provider_request(request);
     }
     use std::sync::OnceLock;
@@ -492,6 +495,12 @@ async fn prepare_provider_request(
         () = async { match disconnect { Some(Extension(signal)) => signal.clone().disconnected().await, None => std::future::pending().await } } => Err(ErrorCode::TransportLost.into()),
         result = decode => result.map_err(|_| Rejection::invalid("image decoding failed"))?,
     }
+}
+
+/// Chat over messages with image or audio parts.
+fn media_chat(request: &OperationRequest) -> bool {
+    request.capability == Capability::ChatGeneration
+        && matches!(request.input, OperationInput::ImageMessages { .. })
 }
 
 async fn operation_descriptors(
@@ -588,7 +597,33 @@ async fn dispatch_audio(
     }
 }
 
+/// Modalities a capability's protocol can carry and those it produces. A
+/// descriptor accepts the intersection with what the served model declares.
+fn protocol_modalities(capability: Capability) -> (&'static [Modality], &'static [Modality]) {
+    use Modality::*;
+    match capability {
+        Capability::ChatGeneration => (&[Text, Image, Audio], &[Text]),
+        Capability::TextGeneration => (&[Text], &[Text]),
+        Capability::ImageToText => (&[Text, Image], &[Text]),
+        Capability::TextEmbedding => (&[Text], &[Vector]),
+        Capability::MultimodalEmbedding => (&[Text, Image, Audio], &[Vector]),
+        Capability::ImageGeneration => (&[Text], &[Image]),
+        Capability::AudioTranscription => (&[Audio], &[Text]),
+        Capability::AudioClassification => (&[Audio], &[Json]),
+        Capability::Decision => (&[Text, Image, Audio], &[Json]),
+        Capability::Rerank => (&[Text], &[Json]),
+    }
+}
+
 async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<CapabilityDescriptor> {
+    describe(state, served).await.1
+}
+
+/// The served model's runtime-declared modalities and its capabilities.
+async fn describe(
+    state: &AppState,
+    served: &ServedModelStatus,
+) -> (ModalitySet, Vec<CapabilityDescriptor>) {
     // Package evidence supplies semantics; an installed loader or matching modalities does not.
     let record = state
         .api
@@ -601,6 +636,29 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         .as_ref()
         .and_then(|r| semantic_task_evidence(&r.metadata));
     let model_type = record.as_ref().map(|r| r.model_type.as_str());
+    // llama.cpp derives non-text input from a projector beside the weights,
+    // so a text-only package is never probed.
+    let projector = served.provider == RuntimeProviderId::LlamaCpp && {
+        let library = state.api.model_library().clone();
+        let model_id = served.model_id.clone();
+        tokio::task::spawn_blocking(move || {
+            library
+                .get_primary_model_file(&model_id)
+                .is_some_and(|path| {
+                    pumas_library::runtime_profiles::llama_cpp_model_has_projector(&path)
+                })
+        })
+        .await
+        .unwrap_or(false)
+    };
+    let hints = runtime_modalities::Hints {
+        model_type,
+        projector,
+        media_task: semantic_match(Capability::ImageToText, task, model_type, served.provider)
+            == Some(true)
+            || matches!(task, Some("audio-text-to-text" | "any-to-any")),
+        decision: decision::candidate_task(task) || model_type == Some("decision"),
+    };
     let onnx_session =
         match served.provider {
             RuntimeProviderId::OnnxRuntime => state
@@ -636,24 +694,32 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
             provider.supports_serving_task(pumas_library::ServingTask::ImageToText)
         })
         && vision::supported_profile(state, served).await;
+    // A llama.cpp runtime is asked only through a current, enabled profile.
+    let observation = if served.provider == RuntimeProviderId::LlamaCpp
+        && !(runtime_ready && vision::supported_profile(state, served).await)
+    {
+        runtime_modalities::Observation::default()
+    } else {
+        runtime_modalities::observe(state, served, hints).await
+    };
     let vision_ready = image_adapter
         && runtime_ready
         && semantic_match(Capability::ImageToText, task, model_type, served.provider) == Some(true)
-        && vision::ready(state, served).await;
+        && observation.live(Modality::Image);
     // Native decision models are a runtime fact; they answer only `decision`.
-    let decision_model = decision::candidate_task(task)
-        && runtime_ready
-        && decision::is_decision_model(state, served).await;
-    // Image embeddings need a dedicated llama.cpp session with its projector loaded.
-    let embedding_vision_ready = runtime_ready
+    let decision_model = runtime_ready && observation.decisions;
+    // Non-text embeddings need a llama.cpp session with its projector loaded.
+    let embedding_media_ready = runtime_ready
+        && image_adapter
         && semantic_match(
             Capability::MultimodalEmbedding,
             task,
             model_type,
             served.provider,
         ) == Some(true)
-        && vision::ready(state, served).await;
-    [
+        && (observation.live(Modality::Image) || observation.live(Modality::Audio));
+    let declared_audio = observation.declares_input(Modality::Audio);
+    let capabilities = [
         Capability::ChatGeneration,
         Capability::TextGeneration,
         Capability::TextEmbedding,
@@ -671,10 +737,10 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
             match capability {
                 Capability::ChatGeneration => (
                     SemanticTask::ChatGeneration,
-                    vec![InputFormat::MessagesText],
+                    vec![InputFormat::MessagesText, InputFormat::MessagesMultimodal],
                     vec![OutputFormat::Text],
                     Some(OpenAiGatewayEndpoint::ChatCompletions),
-                    text_bounds(served.context_size),
+                    media_bounds(text_bounds(served.context_size), declared_audio),
                 ),
                 Capability::TextGeneration => (
                     SemanticTask::TextGeneration,
@@ -732,7 +798,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![InputFormat::Decision],
                     vec![OutputFormat::Decisions],
                     Some(OpenAiGatewayEndpoint::SystemOne),
-                    image_input::image_bounds(0, false),
+                    media_bounds(parts::image_bounds(0, false), declared_audio),
                 ),
                 // Document count and pair length are the runtime's limits; a
                 // pair longer than its micro-batch is refused with its reason.
@@ -752,9 +818,12 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     ],
                     vec![OutputFormat::EmbeddingsFloat32],
                     Some(OpenAiGatewayEndpoint::Embeddings),
-                    std::iter::once(bound(OptionName::Dimensions, 1., u32::MAX as f64))
-                        .chain(image_input::image_bounds(1, false))
-                        .collect(),
+                    media_bounds(
+                        std::iter::once(bound(OptionName::Dimensions, 1., u32::MAX as f64))
+                            .chain(parts::image_bounds(1, false))
+                            .collect(),
+                        declared_audio,
+                    ),
                 ),
                 Capability::ImageToText => (
                     SemanticTask::ImageToText,
@@ -775,7 +844,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                         bound(OptionName::TopP, 0., 1.),
                     ]
                     .into_iter()
-                    .chain(image_input::image_bounds(1, true))
+                    .chain(parts::image_bounds(1, true))
                     .collect(),
                 ),
             };
@@ -812,17 +881,31 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
             Some(AvailabilityReason::UnknownModelTask)
         } else if !runtime_ready
             || (capability == Capability::ImageToText && !vision_ready)
-            || (capability == Capability::MultimodalEmbedding && !embedding_vision_ready)
+            || (capability == Capability::MultimodalEmbedding && !embedding_media_ready)
         {
             Some(AvailabilityReason::RuntimeUnavailable)
         } else {
             None
+        };
+        let (accepts, produces) = protocol_modalities(capability);
+        let input_modalities = if observation.observed {
+            accepts
+                .iter()
+                .copied()
+                .filter(|modality| observation.declares_input(*modality))
+                .collect()
+        } else {
+            // Undeclared runtime: the capability is unavailable for that
+            // reason, and the protocol's modalities are reported unnarrowed.
+            accepts.to_vec()
         };
         CapabilityDescriptor {
             capability,
             semantic_task,
             input_formats,
             output_formats,
+            input_modalities,
+            output_modalities: produces.to_vec(),
             streaming: capability.text_generation() && adapter && reason.is_none(),
             availability: reason.map_or(Availability::Available, |reason| {
                 Availability::Unavailable { reason }
@@ -830,7 +913,15 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
             option_bounds,
         }
     })
-    .collect()
+    .collect();
+    (observation.declared, capabilities)
+}
+/// Audio bounds join a descriptor's bounds when the model declares audio.
+fn media_bounds(mut bounds: Vec<OptionBound>, audio: bool) -> Vec<OptionBound> {
+    if audio {
+        bounds.extend(parts::audio_bounds());
+    }
+    bounds
 }
 fn semantic_task_evidence(metadata: &serde_json::Value) -> Option<&str> {
     // A canonical modality signature loses distinctions such as classification.

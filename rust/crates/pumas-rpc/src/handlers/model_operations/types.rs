@@ -99,6 +99,9 @@ pub enum OperationInput {
         /// Optional images, for decision models with a loaded projector.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         images: Vec<DecisionImage>,
+        /// Optional audio clips, for decision models that declare audio input.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        audio: Vec<AudioClip>,
     },
     /// A query and the documents a reranker scores against it.
     Rerank {
@@ -139,7 +142,7 @@ pub struct DecisionImage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentItem {
-    pub parts: Vec<ImagePart>,
+    pub parts: Vec<ContentPart>,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,12 +156,12 @@ pub enum ImageEncoding {
 #[serde(deny_unknown_fields)]
 pub struct ImageMessage {
     pub role: Role,
-    pub content: Vec<ImagePart>,
+    pub content: Vec<ContentPart>,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ImagePart {
+pub enum ContentPart {
     Text {
         text: String,
     },
@@ -166,6 +169,57 @@ pub enum ImagePart {
         encoding: ImageEncoding,
         data_base64: String,
     },
+    /// The audio primitive: raw PCM with its declared format.
+    Audio {
+        encoding: AudioEncoding,
+        sample_rate_hz: u32,
+        channels: u16,
+        sample_count: u64,
+        data_base64: String,
+    },
+}
+impl ContentPart {
+    pub fn modality(&self) -> Modality {
+        match self {
+            Self::Text { .. } => Modality::Text,
+            Self::Image { .. } => Modality::Image,
+            Self::Audio { .. } => Modality::Audio,
+        }
+    }
+}
+/// A modality primitive: one kind of data, the same whether it is a model's
+/// input or its output. `json` and `vector` are output-only result kinds.
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Modality {
+    Text,
+    Image,
+    Audio,
+    Video,
+    /// Structured data checked against the capability's schema
+    /// (decision answers, relevance scores).
+    Json,
+    /// Embedding vectors.
+    Vector,
+}
+/// What a served model accepts and produces, as its runtime declares it.
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ModalitySet {
+    pub input: Vec<Modality>,
+    pub output: Vec<Modality>,
+}
+/// An audio clip for inputs that list clips instead of message parts.
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioClip {
+    pub encoding: AudioEncoding,
+    pub sample_rate_hz: u32,
+    pub channels: u16,
+    pub sample_count: u64,
+    pub data_base64: String,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -501,6 +555,8 @@ pub struct CapabilitiesResponse {
     /// Context window configured for this serving, when the runtime reports it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u32>,
+    /// Modalities the served model accepts and produces, from its runtime.
+    pub modalities: ModalitySet,
     pub capabilities: Vec<CapabilityDescriptor>,
 }
 /// `GET /v1/served-models`: every served (model, profile) pair exactly once.
@@ -531,6 +587,8 @@ pub struct ServedModelEntry {
     pub context_tokens: Option<u32>,
     /// True when the alias is also served by another profile; callers must send `profile`.
     pub profile_required: bool,
+    /// Modalities the served model accepts and produces, from its runtime.
+    pub modalities: ModalitySet,
     pub capabilities: Vec<CapabilityDescriptor>,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -540,6 +598,10 @@ pub struct CapabilityDescriptor {
     pub semantic_task: SemanticTask,
     pub input_formats: Vec<InputFormat>,
     pub output_formats: Vec<OutputFormat>,
+    /// Content modalities this capability accepts for this served model.
+    pub input_modalities: Vec<Modality>,
+    /// Modalities this capability produces.
+    pub output_modalities: Vec<Modality>,
     pub streaming: bool,
     pub availability: Availability,
     pub option_bounds: Vec<OptionBound>,
@@ -574,6 +636,8 @@ pub enum InputFormat {
     ContentBatch,
     Decision,
     Rerank,
+    /// Messages whose parts include audio.
+    MessagesMultimodal,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
@@ -659,6 +723,14 @@ pub enum OptionName {
     InputTokens,
     /// Documents returned by a `rerank` operation.
     TopN,
+    /// Audio clips in one request.
+    AudioCount,
+    /// Decoded PCM bytes of all audio in one request.
+    TotalAudioBytes,
+    /// Seconds per audio clip.
+    AudioSeconds,
+    /// Sample rate of an audio clip, in Hz.
+    SampleRate,
 }
 
 #[cfg(test)]

@@ -1,105 +1,74 @@
-//! Read-only feature readiness for the existing llama.cpp vision chat adapter.
-//! This is backend declaration checking, not model-byte or semantic attestation.
+//! Read-only readiness of a llama.cpp session for non-text input (images,
+//! audio). This is backend declaration checking, not model-byte or semantic
+//! attestation.
 use super::super::openai_gateway;
 use crate::server::AppState;
 use pumas_library::models::{RuntimeProviderId, RuntimeProviderMode, ServedModelStatus};
-use serde_json::Value;
-use std::{sync::OnceLock, time::Duration};
-
-const MAX_PROPS_BYTES: usize = 64 * 1024;
+use super::types::Modality;
 
 pub(in crate::handlers) async fn supported_profile(
     state: &AppState,
     served: &ServedModelStatus,
 ) -> bool {
-    if served.provider != RuntimeProviderId::LlamaCpp {
-        return false;
-    }
-    state
-        .api
-        .get_runtime_profiles_snapshot()
-        .await
-        .is_ok_and(|snapshot| {
-            snapshot.snapshot.profiles.iter().any(|profile| {
-                profile.profile_id == served.profile_id
-                    && profile.provider == RuntimeProviderId::LlamaCpp
-                    && profile.provider_mode == RuntimeProviderMode::LlamaCppDedicated
-                    && profile.enabled
-            })
-        })
+    supported_mode(state, served).await.is_some()
 }
 
-pub(in crate::handlers) async fn ready(state: &AppState, served: &ServedModelStatus) -> bool {
-    if !supported_profile(state, served).await
-        || openai_gateway::generation_session_stop(state, served)
-            .await
-            .is_err()
-    {
-        return false;
+/// The enabled llama.cpp profile's mode. Router and dedicated sessions both
+/// load the projector and both report its modalities per model, so either
+/// serves non-text input.
+async fn supported_mode(
+    state: &AppState,
+    served: &ServedModelStatus,
+) -> Option<RuntimeProviderMode> {
+    if served.provider != RuntimeProviderId::LlamaCpp {
+        return None;
     }
-    let Some(endpoint) = served.endpoint_url.as_ref() else {
-        return false;
-    };
-    // The existing provider transport appends API paths to the endpoint base.
-    // A query/fragment cannot safely participate in that same path contract.
-    let Ok(base) = reqwest::Url::parse(endpoint.as_str()) else {
-        return false;
-    };
-    if base.query().is_some() || base.fragment().is_some() {
-        return false;
-    }
-    static CLIENT: OnceLock<crate::provider_clients::ProviderHttp> = OnceLock::new();
-    let client = CLIENT
-        .get_or_init(|| {
-            crate::provider_clients::ProviderHttp::build(|builder| {
-                builder
-                    .connect_timeout(Duration::from_secs(2))
-                    .retry(reqwest::retry::never())
-            })
-            .expect("vision declaration client")
+    let snapshot = state.api.get_runtime_profiles_snapshot().await.ok()?;
+    snapshot
+        .snapshot
+        .profiles
+        .iter()
+        .find(|profile| {
+            profile.profile_id == served.profile_id
+                && profile.provider == RuntimeProviderId::LlamaCpp
+                && matches!(
+                    profile.provider_mode,
+                    RuntimeProviderMode::LlamaCppDedicated | RuntimeProviderMode::LlamaCppRouter
+                )
+                && profile.enabled
         })
-        .for_url(endpoint.as_str());
-    // Initial scope is dedicated sessions. The explicit flag also prevents a
-    // compatible backend from loading a model during this read-only query.
-    let read = async {
-        let mut response = client
-            .get(format!("{}/props", endpoint.as_str().trim_end_matches('/')))
-            .query(&[("model", served.model_id.as_str()), ("autoload", "false")])
-            .send()
+        .map(|profile| profile.provider_mode)
+}
+
+/// The selected llama.cpp session is current and reports every non-text
+/// input in `media` ready now.
+pub(in crate::handlers) async fn media_ready(
+    state: &AppState,
+    served: &ServedModelStatus,
+    media: &[Modality],
+) -> bool {
+    let current = || async {
+        let mode = supported_mode(state, served).await?;
+        openai_gateway::generation_session_stop(state, served)
             .await
-            .ok()?;
-        if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|n| n > MAX_PROPS_BYTES as u64)
-        {
-            return None;
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.ok()? {
-            if bytes
-                .len()
-                .checked_add(chunk.len())
-                .is_none_or(|n| n > MAX_PROPS_BYTES)
-            {
-                return None;
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        serde_json::from_slice::<Value>(&bytes).ok()
+            .ok()
+            .map(|_| mode)
     };
-    match tokio::time::timeout(Duration::from_secs(5), read).await {
-        Ok(Some(value)) => {
-            value["modalities"]["vision"].as_bool() == Some(true)
-                && value["is_sleeping"].as_bool() == Some(false)
-                && value["build_info"]
-                    .as_str()
-                    .is_some_and(|v| !v.is_empty() && v.len() <= 256)
-                && supported_profile(state, served).await
-                && openai_gateway::generation_session_stop(state, served)
-                    .await
-                    .is_ok()
-        }
-        _ => false,
-    }
+    let Some(mode) = current().await else {
+        return false;
+    };
+    let observation = super::runtime_modalities::observe(
+        state,
+        served,
+        super::runtime_modalities::Hints {
+            // The request carries non-text input, so the session is asked.
+            media_task: !media.is_empty(),
+            ..Default::default()
+        },
+    )
+    .await;
+    // Profile changes and session replacement are checked again after the
+    // probe, which can await a slow response; a mode change makes the
+    // observation stale.
+    media.iter().all(|modality| observation.live(*modality)) && current().await == Some(mode)
 }

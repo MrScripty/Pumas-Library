@@ -241,7 +241,7 @@ async fn finite_named_and_facade_image_and_mixed_http_preserve_canonical_project
 }
 
 #[tokio::test]
-async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_live_props() {
+async fn image_descriptor_requires_selected_semantics_supported_profile_and_live_props() {
     for case in [
         "available",
         "unknown",
@@ -309,8 +309,9 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
             json!(["png_base64", "jpeg_base64", "messages_image"])
         );
         assert_eq!(descriptor["output_formats"], json!(["text"]));
-        if case == "available" {
-            assert_eq!(descriptor["availability"]["state"], "available");
+        // Router and dedicated sessions both report per-model modalities.
+        if matches!(case, "available" | "router") {
+            assert_eq!(descriptor["availability"]["state"], "available", "{case}");
             assert_eq!(calls.lock().unwrap().len(), 1);
         } else {
             let reason = match case {
@@ -642,6 +643,10 @@ async fn image_embeddings_pass_the_vision_guard_on_the_embeddings_route() {
         .unwrap();
     record.model_type = "embedding".into();
     state.api.model_library().index().upsert(&record).unwrap();
+    // llama.cpp derives image input from the projector beside the weights.
+    let model_root = std::path::Path::new(&record.path);
+    std::fs::write(model_root.join("llama.gguf"), b"weights").unwrap();
+    std::fs::write(model_root.join("mmproj-llama.gguf"), b"projector").unwrap();
 
     let declared = caps(state.clone()).await;
     let multimodal = declared["capabilities"]

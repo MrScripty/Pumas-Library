@@ -1,9 +1,14 @@
-//! Bounded still-image validation and projection; no URL/path acquisition.
+//! Content primitives (ADR 0005): bounded validation of text, image and audio
+//! parts, and their encoding for each llama.cpp protocol (chat, embeddings,
+//! systemone). No URL or path acquisition.
 //!
-//! Dimensions/pixel/source limits are checked before raster decode. The codec's
-//! 64 MiB allocation limit is best effort, not process/OS memory containment.
+//! Image dimensions/pixel/source limits are checked before raster decode. The
+//! codec's 64 MiB allocation limit is best effort, not process/OS memory
+//! containment. Audio is caller PCM whose declared format must match its
+//! bytes exactly; Pumas adds a WAV header and never parses a container.
 use super::types::{
-    ErrorCode, ImageEncoding, ImagePart, OperationInput, Rejection, Role, MAX_BYTES,
+    AudioClip, AudioEncoding, ContentPart, ErrorCode, ImageEncoding, OperationInput, Rejection,
+    Role, MAX_BYTES,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{codecs::png::PngDecoder, DynamicImage, ImageDecoder, Limits};
@@ -21,6 +26,11 @@ const MAX_DIMENSION: u32 = 4096;
 const MAX_PIXELS: u64 = 4_194_304;
 const MAX_ALLOC: u64 = 64 * 1024 * 1024;
 const PNG_MAGIC: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+const MAX_AUDIO_CLIPS: usize = 4;
+const MAX_AUDIO_SECONDS: u64 = 30;
+const MAX_TOTAL_AUDIO_BYTES: usize = 16 * 1024 * 1024;
+const MIN_SAMPLE_RATE: u32 = 8_000;
+const MAX_SAMPLE_RATE: u32 = 192_000;
 
 #[derive(Default)]
 struct Budget {
@@ -29,6 +39,8 @@ struct Budget {
     source: usize,
     parts: usize,
     text: usize,
+    audio_clips: usize,
+    audio_bytes: usize,
 }
 /// A `request_limit` rejection that names the limit and the request's value.
 fn limit(message: String) -> Rejection {
@@ -61,6 +73,27 @@ pub(super) fn image_bounds(min_images: usize, messages: bool) -> Vec<super::type
         bounds.push(super::bound(OptionName::ContentParts, 1., MAX_PARTS as f64));
     }
     bounds
+}
+
+/// The audio bounds this module enforces, advertised by every capability
+/// that accepts audio parts. A model's own audio length limit is enforced by
+/// its provider.
+pub(super) fn audio_bounds() -> Vec<super::types::OptionBound> {
+    use super::types::OptionName;
+    vec![
+        super::bound(OptionName::AudioCount, 0., MAX_AUDIO_CLIPS as f64),
+        super::bound(
+            OptionName::TotalAudioBytes,
+            1.,
+            MAX_TOTAL_AUDIO_BYTES as f64,
+        ),
+        super::bound(OptionName::AudioSeconds, 0., MAX_AUDIO_SECONDS as f64),
+        super::bound(
+            OptionName::SampleRate,
+            f64::from(MIN_SAMPLE_RATE),
+            f64::from(MAX_SAMPLE_RATE),
+        ),
+    ]
 }
 
 impl Budget {
@@ -147,7 +180,7 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, Rejecti
                 )));
             }
             let mut output = Vec::with_capacity(messages.len());
-            let mut user_image = false;
+            let mut user_media = false;
             for message in messages {
                 if message.content.is_empty() {
                     return Err(ErrorCode::InvalidRequest.into());
@@ -162,19 +195,41 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, Rejecti
                 for part in &message.content {
                     budget.part()?;
                     content.push(match part {
-                        ImagePart::Text { text } => {
+                        ContentPart::Text { text } => {
                             budget.text(text)?;
                             json!({"type":"text", "text":text})
                         }
-                        ImagePart::Image {
+                        ContentPart::Image {
                             encoding,
                             data_base64,
                         } => {
                             if !matches!(message.role, Role::User) {
                                 return Err(ErrorCode::InvalidRequest.into());
                             }
-                            user_image = true;
+                            user_media = true;
                             image_part(*encoding, data_base64, &mut budget)?
+                        }
+                        ContentPart::Audio {
+                            encoding,
+                            sample_rate_hz,
+                            channels,
+                            sample_count,
+                            data_base64,
+                        } => {
+                            if !matches!(message.role, Role::User) {
+                                return Err(Rejection::invalid(
+                                    "audio parts are accepted in user messages only",
+                                ));
+                            }
+                            user_media = true;
+                            let clip = AudioClip {
+                                encoding: *encoding,
+                                sample_rate_hz: *sample_rate_hz,
+                                channels: *channels,
+                                sample_count: *sample_count,
+                                data_base64: data_base64.clone(),
+                            };
+                            input_audio_part(&clip, &mut budget)?
                         }
                     });
                 }
@@ -185,7 +240,7 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, Rejecti
                 };
                 output.push(json!({"role":role, "content":content}));
             }
-            if !user_image {
+            if !user_media {
                 return Err(ErrorCode::InvalidRequest.into());
             }
             Ok(Value::Array(output))
@@ -198,7 +253,7 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, Rejecti
 /// per vector. Images pass the same bounded validation as vision chat.
 pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, Rejection> {
     let mut budget = Budget::default();
-    let items: Vec<&[ImagePart]> = match input {
+    let items: Vec<&[ContentPart]> = match input {
         OperationInput::Image {
             encoding,
             data_base64,
@@ -222,14 +277,30 @@ pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, Rejection
         let mut content = Vec::with_capacity(parts.len());
         for part in parts {
             content.push(match part {
-                ImagePart::Text { text } => {
+                ContentPart::Text { text } => {
                     budget.text(text)?;
                     json!({"type":"text", "text":text})
                 }
-                ImagePart::Image {
+                ContentPart::Image {
                     encoding,
                     data_base64,
                 } => image_part(*encoding, data_base64, &mut budget)?,
+                ContentPart::Audio {
+                    encoding,
+                    sample_rate_hz,
+                    channels,
+                    sample_count,
+                    data_base64,
+                } => input_audio_part(
+                    &AudioClip {
+                        encoding: *encoding,
+                        sample_rate_hz: *sample_rate_hz,
+                        channels: *channels,
+                        sample_count: *sample_count,
+                        data_base64: data_base64.clone(),
+                    },
+                    &mut budget,
+                )?,
             });
         }
         output.push(json!({ "content": content }));
@@ -252,6 +323,106 @@ pub(super) fn decision_images(
                 .ok_or_else(|| ErrorCode::InvalidRequest.into())
         })
         .collect()
+}
+
+/// Data URLs for decision-model audio clips (`files` in `/v1/systemone`).
+pub(super) fn decision_files(clips: &[AudioClip]) -> Result<Vec<String>, Rejection> {
+    let mut budget = Budget::default();
+    clips
+        .iter()
+        .map(|clip| Ok(format!("data:audio/wav;base64,{}", wav_base64(clip, &mut budget)?)))
+        .collect()
+}
+
+/// A chat or embedding content part: llama.cpp's `input_audio`.
+fn input_audio_part(clip: &AudioClip, budget: &mut Budget) -> Result<Value, Rejection> {
+    Ok(json!({"type":"input_audio", "input_audio":{"data": wav_base64(clip, budget)?, "format":"wav"}}))
+}
+
+/// Validate a PCM clip against its declared format and wrap it as WAV.
+fn wav_base64(clip: &AudioClip, budget: &mut Budget) -> Result<String, Rejection> {
+    let (format_tag, bits): (u16, u16) = match clip.encoding {
+        AudioEncoding::PcmS16le => (1, 16),
+        AudioEncoding::PcmF32le => (3, 32),
+    };
+    if !(MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE).contains(&clip.sample_rate_hz) {
+        return Err(Rejection::invalid(format!(
+            "audio sample_rate_hz is {}; it must be {MIN_SAMPLE_RATE} to {MAX_SAMPLE_RATE}",
+            clip.sample_rate_hz
+        )));
+    }
+    if !matches!(clip.channels, 1 | 2) {
+        return Err(Rejection::invalid(format!(
+            "audio channels is {}; it must be 1 or 2",
+            clip.channels
+        )));
+    }
+    let seconds_limit = u64::from(clip.sample_rate_hz) * MAX_AUDIO_SECONDS;
+    if clip.sample_count == 0 || clip.sample_count > seconds_limit {
+        return Err(limit(format!(
+            "an audio clip has {} samples at {} Hz; the limit is {MAX_AUDIO_SECONDS} seconds ({seconds_limit} samples)",
+            clip.sample_count, clip.sample_rate_hz
+        )));
+    }
+    budget.audio_clips += 1;
+    if budget.audio_clips > MAX_AUDIO_CLIPS {
+        return Err(limit(format!(
+            "the request has more than {MAX_AUDIO_CLIPS} audio clips; the limit is {MAX_AUDIO_CLIPS}"
+        )));
+    }
+    let declared = clip
+        .sample_count
+        .checked_mul(u64::from(clip.channels) * u64::from(bits / 8))
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| Rejection::invalid("audio sample_count overflows its byte length"))?;
+    if clip.data_base64.len() > declared.div_ceil(3) * 4 {
+        return Err(Rejection::invalid(
+            "audio data_base64 is longer than its declared samples",
+        ));
+    }
+    let pcm = STANDARD
+        .decode(&clip.data_base64)
+        .map_err(|_| Rejection::invalid("audio data_base64 must be standard padded base64"))?;
+    if STANDARD.encode(&pcm) != clip.data_base64 {
+        return Err(Rejection::invalid(
+            "audio data_base64 must be canonical standard padded base64",
+        ));
+    }
+    if pcm.len() != declared {
+        return Err(Rejection::invalid(format!(
+            "audio data is {} bytes; sample_count x channels x sample size declares {declared}",
+            pcm.len()
+        )));
+    }
+    budget.audio_bytes += pcm.len();
+    if budget.audio_bytes > MAX_TOTAL_AUDIO_BYTES {
+        return Err(limit(format!(
+            "the audio totals {} bytes; the limit is {MAX_TOTAL_AUDIO_BYTES} bytes",
+            budget.audio_bytes
+        )));
+    }
+    Ok(STANDARD.encode(wav(&pcm, clip.sample_rate_hz, clip.channels, format_tag, bits)))
+}
+
+/// A canonical 44-byte RIFF/WAVE header over PCM samples.
+fn wav(pcm: &[u8], sample_rate: u32, channels: u16, format_tag: u16, bits: u16) -> Vec<u8> {
+    let block = channels * (bits / 8);
+    let data_len = u32::try_from(pcm.len()).expect("audio is bounded below 4 GiB");
+    let mut out = Vec::with_capacity(44 + pcm.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16_u32.to_le_bytes());
+    out.extend_from_slice(&format_tag.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&sample_rate.to_le_bytes());
+    out.extend_from_slice(&(sample_rate * u32::from(block)).to_le_bytes());
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(&bits.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    out.extend_from_slice(pcm);
+    out
 }
 
 fn image_part(
@@ -526,8 +697,8 @@ mod tests {
             data_base64: STANDARD.encode(bytes),
         }
     }
-    fn image(encoding: ImageEncoding, bytes: &[u8]) -> ImagePart {
-        ImagePart::Image {
+    fn image(encoding: ImageEncoding, bytes: &[u8]) -> ContentPart {
+        ContentPart::Image {
             encoding,
             data_base64: STANDARD.encode(bytes),
         }
@@ -564,18 +735,18 @@ mod tests {
         let messages = vec![
             ImageMessage {
                 role: Role::System,
-                content: vec![ImagePart::Text {
+                content: vec![ContentPart::Text {
                     text: "Answer briefly.".into(),
                 }],
             },
             ImageMessage {
                 role: Role::User,
                 content: vec![
-                    ImagePart::Text {
+                    ContentPart::Text {
                         text: "Compare: ".into(),
                     },
                     image(ImageEncoding::Png, PNG),
-                    ImagePart::Text {
+                    ContentPart::Text {
                         text: " then ".into(),
                     },
                     image(ImageEncoding::Jpeg, JPEG),
@@ -583,7 +754,7 @@ mod tests {
             },
             ImageMessage {
                 role: Role::Assistant,
-                content: vec![ImagePart::Text {
+                content: vec![ContentPart::Text {
                     text: "Earlier answer".into(),
                 }],
             },
@@ -690,7 +861,7 @@ mod tests {
             provider_messages(&OperationInput::ImageMessages {
                 messages: vec![ImageMessage {
                     role: Role::User,
-                    content: vec![ImagePart::Text {
+                    content: vec![ContentPart::Text {
                         text: "No image".into()
                     }]
                 }]
@@ -713,7 +884,7 @@ mod tests {
                 .map_err(|r| r.code),
             Err(ErrorCode::RequestLimit)
         );
-        let mut content = vec![ImagePart::Text { text: "a".into() }; 128];
+        let mut content = vec![ContentPart::Text { text: "a".into() }; 128];
         content.push(image(ImageEncoding::Png, PNG));
         assert_eq!(
             provider_messages(&request(content)).map_err(|r| r.code),
@@ -795,7 +966,7 @@ mod tests {
     fn message_and_total_part_limits_include_text_only_messages() {
         let text = || ImageMessage {
             role: Role::System,
-            content: vec![ImagePart::Text { text: "a".into() }],
+            content: vec![ContentPart::Text { text: "a".into() }],
         };
         let mut messages = vec![text(); 127];
         messages.push(ImageMessage {
@@ -814,12 +985,12 @@ mod tests {
         let messages = vec![
             ImageMessage {
                 role: Role::System,
-                content: vec![ImagePart::Text { text: "a".into() }; 64],
+                content: vec![ContentPart::Text { text: "a".into() }; 64],
             },
             ImageMessage {
                 role: Role::User,
                 content: {
-                    let mut content = vec![ImagePart::Text { text: "a".into() }; 64];
+                    let mut content = vec![ContentPart::Text { text: "a".into() }; 64];
                     content.push(image(ImageEncoding::Png, PNG));
                     content
                 },

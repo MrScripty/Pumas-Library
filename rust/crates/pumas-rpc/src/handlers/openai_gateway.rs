@@ -238,8 +238,9 @@ pub(super) struct OperationAdmission<'a> {
     pub marker: &'a AtomicBool,
     pub expected: &'a ServedModelStatus,
     pub cancellation: &'a Mutex<Option<GenerationCancellation>>,
-    /// Only the finite selected-model vision lane requires live image support.
-    pub vision: bool,
+    /// Non-text input modalities the request carries; each must be live in
+    /// the selected session (ADR 0005).
+    pub media: Vec<super::model_operations::types::Modality>,
 }
 
 /// OpenAI-compatible proxy for served models.
@@ -343,7 +344,7 @@ pub(super) async fn dispatch_openai(
 
     if admission.is_some_and(|context| {
         !same_selection(&served, context.expected)
-            || (context.vision && served.loaded_at != context.expected.loaded_at)
+            || (!context.media.is_empty() && served.loaded_at != context.expected.loaded_at)
     }) {
         return openai_public_error_response(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -431,9 +432,12 @@ pub(super) async fn dispatch_openai(
             .lock()
             .expect("request-local cancellation mutex") = Some(lifetime.cancellation());
     }
-    if admission.is_some_and(|context| context.vision) {
+    if let Some(media) = admission
+        .map(|context| context.media.as_slice())
+        .filter(|media| !media.is_empty())
+    {
         let guard = async {
-            if !super::model_operations::vision::ready(&state, &served).await {
+            if !super::model_operations::vision::media_ready(&state, &served, media).await {
                 return false;
             }
             // Profile changes and fresh selection are checked after the probe,
@@ -458,12 +462,17 @@ pub(super) async fn dispatch_openai(
             None => guard.await,
         };
         if !ready {
+            let names = media
+                .iter()
+                .filter_map(|m| serde_json::to_value(m).ok()?.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+                .join(" and ");
             return openai_public_error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
                 PublicError {
-                    message: std::borrow::Cow::Borrowed(
-                        "Image input for the selected model is not ready: it needs an enabled dedicated llama.cpp profile with the model's projector loaded.",
-                    ),
+                    message: std::borrow::Cow::Owned(format!(
+                        "{names} input for the selected model is not ready: it needs an enabled llama.cpp profile with the model's projector loaded."
+                    )),
                     ..PublicError::unavailable()
                 },
             );

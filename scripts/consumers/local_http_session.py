@@ -21,7 +21,7 @@ import urllib.parse
 MAX_DESCRIPTION = 64 * 1024
 MAX_RPC = 1024 * 1024
 MAX_OPERATION = 32 * 1024 * 1024
-DESCRIPTOR_SCHEMA_SHA256 = "2048200fc0e60018aa75d8163dcb05924e8830f7d9b64b0d99f5a2999c0d49db"
+DESCRIPTOR_SCHEMA_SHA256 = "253250229dc04ff12ff32c8d068d5439552b1e8a1c78f71df5ea9fcfa45ab953"
 
 # Concrete representations from the pinned producer contract, not model or
 # capability names. A pair describes formats to choose, never payload admission.
@@ -131,6 +131,10 @@ def _descriptor_value(value, schema):
         _require(type(value[field]) is list, "descriptor formats must be arrays")
         for item in value[field]:
             enum(item, name)
+    for field in ("input_modalities", "output_modalities"):
+        _require(type(value[field]) is list, "descriptor modalities must be arrays")
+        for item in value[field]:
+            enum(item, "Modality")
     _require(type(value["streaming"]) is bool, "descriptor streaming must be Boolean")
     availability = value["availability"]
     object_fields(availability, ["state"])

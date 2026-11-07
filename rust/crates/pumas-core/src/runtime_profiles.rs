@@ -256,6 +256,12 @@ fn executable_artifact_for_record(
     Some((format, model_path))
 }
 
+/// The model's weights have one local multimodal projector beside them, the
+/// file llama.cpp derives image, audio and video input from.
+pub fn llama_cpp_model_has_projector(model_path: &Path) -> bool {
+    matches!(mmproj::resolve_sibling_mmproj(model_path), Ok(Some(_)))
+}
+
 /// How llama.cpp must serve a model, derived from its library model type and
 /// GGUF facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

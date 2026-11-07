@@ -241,7 +241,7 @@ async fn finite_named_and_facade_image_and_mixed_http_preserve_canonical_project
 }
 
 #[tokio::test]
-async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_live_props() {
+async fn image_descriptor_requires_selected_semantics_supported_profile_and_live_props() {
     for case in [
         "available",
         "unknown",
@@ -309,8 +309,9 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
             json!(["png_base64", "jpeg_base64", "messages_image"])
         );
         assert_eq!(descriptor["output_formats"], json!(["text"]));
-        if case == "available" {
-            assert_eq!(descriptor["availability"]["state"], "available");
+        // Router and dedicated sessions both report per-model modalities.
+        if matches!(case, "available" | "router") {
+            assert_eq!(descriptor["availability"]["state"], "available", "{case}");
             assert_eq!(calls.lock().unwrap().len(), 1);
         } else {
             let reason = match case {
@@ -642,6 +643,10 @@ async fn image_embeddings_pass_the_vision_guard_on_the_embeddings_route() {
         .unwrap();
     record.model_type = "embedding".into();
     state.api.model_library().index().upsert(&record).unwrap();
+    // llama.cpp derives image input from the projector beside the weights.
+    let model_root = std::path::Path::new(&record.path);
+    std::fs::write(model_root.join("llama.gguf"), b"weights").unwrap();
+    std::fs::write(model_root.join("mmproj-llama.gguf"), b"projector").unwrap();
 
     let declared = caps(state.clone()).await;
     let multimodal = declared["capabilities"]
@@ -681,4 +686,260 @@ async fn image_embeddings_pass_the_vision_guard_on_the_embeddings_route() {
     server.await.unwrap().unwrap();
     backend.abort();
     let _ = backend.await;
+}
+
+/// A synthetic llama.cpp server for one model whose runtime declares
+/// `inputs`/`outputs` and reports `live` modalities loaded.
+async fn declaring_backend(
+    inputs: Value,
+    outputs: Value,
+    live: Value,
+    reply: Value,
+) -> (String, Calls, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+    let (models_calls, props_calls, post_calls) = (calls.clone(), calls.clone(), calls.clone());
+    let models = json!({"object":"list","data":[{"id":"models/llama","object":"model",
+        "architecture":{"input_modalities":inputs,"output_modalities":outputs}}]});
+    let app = Router::new()
+        .route(
+            "/v1/models",
+            get(move || {
+                let calls = models_calls.clone();
+                let models = models.clone();
+                async move {
+                    calls.lock().unwrap().push(("/v1/models".into(), Value::Null));
+                    Json(models)
+                }
+            }),
+        )
+        .route(
+            "/props",
+            get(move |uri: Uri| {
+                let calls = props_calls.clone();
+                let live = live.clone();
+                async move {
+                    calls.lock().unwrap().push((uri.to_string(), Value::Null));
+                    Json(json!({"modalities":live,"is_sleeping":false,"build_info":"controlled-synthetic-backend"}))
+                }
+            }),
+        )
+        .route(
+            "/v1/chat/completions",
+            post({
+                let calls = post_calls.clone();
+                let reply = reply.clone();
+                move |Json(body): Json<Value>| {
+                    let calls = calls.clone();
+                    let reply = reply.clone();
+                    async move {
+                        calls.lock().unwrap().push(("/v1/chat/completions".into(), body));
+                        Json(reply)
+                    }
+                }
+            }),
+        )
+        .route(
+            "/v1/systemone",
+            post(move |Json(body): Json<Value>| {
+                let calls = post_calls.clone();
+                async move {
+                    calls.lock().unwrap().push(("/v1/systemone".into(), body));
+                    Json(json!({"model":"d1","answers":{"speaking":{"type":"noul","noul":0.9}},
+                        "usage":{"input_tokens":40,"output_tokens":0}}))
+                }
+            }),
+        );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (endpoint, calls, task)
+}
+
+/// Gives the fixture model a category and weights with a projector beside them.
+async fn with_projector(state: &AppState, model_type: &str) {
+    let index = state.api.model_library().index();
+    let mut record = index.get("models/llama").unwrap().unwrap();
+    record.model_type = model_type.into();
+    index.upsert(&record).unwrap();
+    let root = std::path::Path::new(&record.path);
+    std::fs::write(root.join("llama.gguf"), b"weights").unwrap();
+    std::fs::write(root.join("mmproj-llama.gguf"), b"projector").unwrap();
+}
+
+fn speech(samples: usize) -> Value {
+    json!({"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,
+        "sample_count":samples,"data_base64":STANDARD.encode(vec![0u8; samples * 2])})
+}
+
+#[tokio::test]
+async fn a_model_without_a_task_is_described_by_its_runtime_and_takes_audio_in_chat() {
+    let (endpoint, calls, backend) = declaring_backend(
+        json!(["text", "audio"]),
+        json!(["text", "audio"]),
+        json!({"vision":false,"audio":true}),
+        reply(),
+    )
+    .await;
+    let (_root, state) = fixture(&endpoint, Some("unknown")).await;
+    with_projector(&state, "audio").await;
+
+    let value = caps(state.clone()).await;
+    assert_eq!(
+        value["modalities"],
+        json!({"input":["text","audio"],"output":["text","audio"]}),
+        "{value}"
+    );
+    let capability = |name: &str| {
+        value["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["capability"] == name)
+            .unwrap()
+            .clone()
+    };
+    let chat = capability("chat_generation");
+    assert_eq!(chat["availability"]["state"], "available", "{chat}");
+    assert_eq!(chat["input_modalities"], json!(["text", "audio"]));
+    assert!(chat["option_bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|bound| bound["option"] == "audio_seconds"));
+    // No image is declared, so image description stays unavailable.
+    assert_ne!(
+        capability("image_to_text")["availability"]["state"],
+        "available"
+    );
+    assert_eq!(
+        capability("decision")["availability"]["reason"],
+        "model_task_mismatch"
+    );
+
+    calls.lock().unwrap().clear();
+    let response = operation(
+        state.clone(),
+        json!({"contract_version":1,"request_id":"audio-chat-1","model":"llama","output":"text",
+            "input":{"kind":"messages","messages":[{"role":"user","content":[
+                {"kind":"text","text":"What is said?"},speech(1600)]}]}}),
+    )
+    .await;
+    let status = response.status();
+    let body = json_body(response).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["result"]["text"], "Two colored pixels.", "{body}");
+    let calls = calls.lock().unwrap().clone();
+    let (_, sent) = calls
+        .iter()
+        .find(|(path, _)| path == "/v1/chat/completions")
+        .expect("chat posted");
+    let content = &sent["messages"][0]["content"];
+    assert_eq!(content[0]["text"], "What is said?");
+    assert_eq!(content[1]["type"], "input_audio");
+    assert_eq!(content[1]["input_audio"]["format"], "wav");
+    let wav = STANDARD
+        .decode(content[1]["input_audio"]["data"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(wav.len(), 44 + 3200);
+    assert_eq!(&wav[..4], b"RIFF");
+    assert_eq!(&wav[8..16], b"WAVEfmt ");
+    assert_eq!(u16::from_le_bytes([wav[20], wav[21]]), 1, "PCM format tag");
+    assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 16000);
+    backend.abort();
+}
+
+#[tokio::test]
+async fn undeclared_audio_is_refused_naming_what_the_model_accepts() {
+    let (endpoint, calls, backend) = declaring_backend(
+        json!(["text", "image"]),
+        json!(["text"]),
+        json!({"vision":true}),
+        reply(),
+    )
+    .await;
+    let (_root, state) = fixture(&endpoint, Some("image-text-to-text")).await;
+    with_projector(&state, "vlm").await;
+    calls.lock().unwrap().clear();
+    let response = operation(
+        state,
+        json!({"contract_version":1,"request_id":"audio-chat-2","model":"llama","output":"text",
+            "input":{"kind":"messages","messages":[{"role":"user","content":[speech(160)]}]}}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json_body(response).await;
+    assert_eq!(body["error"]["code"], "unsupported_modality", "{body}");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("chat_generation accepts text, image"),
+        "{message}"
+    );
+    assert!(calls
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|(path, _)| !path.starts_with("/v1/chat")));
+    backend.abort();
+}
+
+#[tokio::test]
+async fn decision_audio_is_sent_as_wav_files_to_a_declared_decision_model() {
+    let (endpoint, calls, backend) = declaring_backend(
+        json!(["text", "image", "audio"]),
+        json!(["decisions"]),
+        json!({"vision":true,"audio":true}),
+        reply(),
+    )
+    .await;
+    let (_root, state) = fixture(&endpoint, Some("any-to-any")).await;
+    with_projector(&state, "decision").await;
+    let value = caps(state.clone()).await;
+    let decision = value["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["capability"] == "decision")
+        .unwrap()
+        .clone();
+    assert_eq!(decision["availability"]["state"], "available", "{decision}");
+    assert_eq!(
+        decision["input_modalities"],
+        json!(["text", "image", "audio"])
+    );
+    assert_eq!(decision["output_modalities"], json!(["json"]));
+    assert_eq!(value["modalities"]["output"], json!(["json"]));
+
+    let mut clip = speech(800);
+    clip.as_object_mut().unwrap().remove("kind");
+    calls.lock().unwrap().clear();
+    let body = json_body(
+        operation(
+            state,
+            json!({"contract_version":1,"request_id":"decide-audio","model":"llama","output":"decisions",
+                "input":{"kind":"decision","state":{},"audio":[clip],
+                    "questions":{"speaking":{"type":"noul","instructions":"Is someone speaking?"}}}}),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(body["result"]["answers"]["speaking"]["noul"], 0.9, "{body}");
+    let calls = calls.lock().unwrap().clone();
+    let (_, sent) = calls
+        .iter()
+        .find(|(path, _)| path == "/v1/systemone")
+        .expect("decision posted");
+    let files = sent["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    let url = files[0].as_str().unwrap();
+    let wav = STANDARD
+        .decode(
+            url.strip_prefix("data:audio/wav;base64,")
+                .expect("WAV data URL"),
+        )
+        .unwrap();
+    assert_eq!(wav.len(), 44 + 1600);
+    assert!(sent.get("images").is_none());
+    backend.abort();
 }

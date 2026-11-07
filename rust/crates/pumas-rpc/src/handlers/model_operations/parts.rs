@@ -330,13 +330,20 @@ pub(super) fn decision_files(clips: &[AudioClip]) -> Result<Vec<String>, Rejecti
     let mut budget = Budget::default();
     clips
         .iter()
-        .map(|clip| Ok(format!("data:audio/wav;base64,{}", wav_base64(clip, &mut budget)?)))
+        .map(|clip| {
+            Ok(format!(
+                "data:audio/wav;base64,{}",
+                wav_base64(clip, &mut budget)?
+            ))
+        })
         .collect()
 }
 
 /// A chat or embedding content part: llama.cpp's `input_audio`.
 fn input_audio_part(clip: &AudioClip, budget: &mut Budget) -> Result<Value, Rejection> {
-    Ok(json!({"type":"input_audio", "input_audio":{"data": wav_base64(clip, budget)?, "format":"wav"}}))
+    Ok(
+        json!({"type":"input_audio", "input_audio":{"data": wav_base64(clip, budget)?, "format":"wav"}}),
+    )
 }
 
 /// Validate a PCM clip against its declared format and wrap it as WAV.
@@ -411,7 +418,13 @@ fn wav_base64(clip: &AudioClip, budget: &mut Budget) -> Result<String, Rejection
             budget.audio_bytes
         )));
     }
-    Ok(STANDARD.encode(wav(&pcm, clip.sample_rate_hz, clip.channels, format_tag, bits)))
+    Ok(STANDARD.encode(wav(
+        &pcm,
+        clip.sample_rate_hz,
+        clip.channels,
+        format_tag,
+        bits,
+    )))
 }
 
 /// A canonical 44-byte RIFF/WAVE header over PCM samples.
@@ -1038,7 +1051,13 @@ mod tests {
         );
         assert_eq!(dimensions(4096, 1024), Ok(()));
     }
-    fn clip(encoding: AudioEncoding, rate: u32, channels: u16, samples: u64, bytes: usize) -> AudioClip {
+    fn clip(
+        encoding: AudioEncoding,
+        rate: u32,
+        channels: u16,
+        samples: u64,
+        bytes: usize,
+    ) -> AudioClip {
         AudioClip {
             encoding,
             sample_rate_hz: rate,
@@ -1060,7 +1079,10 @@ mod tests {
                 .unwrap();
             assert_eq!(wav.len(), 44 + bytes);
             assert_eq!(&wav[..4], b"RIFF");
-            assert_eq!(u32::from_le_bytes(wav[4..8].try_into().unwrap()) as usize, 36 + bytes);
+            assert_eq!(
+                u32::from_le_bytes(wav[4..8].try_into().unwrap()) as usize,
+                36 + bytes
+            );
             assert_eq!(u16::from_le_bytes([wav[20], wav[21]]), tag);
             assert_eq!(u16::from_le_bytes([wav[22], wav[23]]), channels);
             assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 22050);
@@ -1076,7 +1098,10 @@ mod tests {
         not_canonical.data_base64 = "BwcHBw".into();
         for (bad, says) in [
             (clip(S16, 16000, 1, 10, 19), "declares 20"),
-            (clip(S16, 16000, 1, 10, 30), "longer than its declared samples"),
+            (
+                clip(S16, 16000, 1, 10, 30),
+                "longer than its declared samples",
+            ),
             (clip(S16, 4000, 1, 10, 20), "sample_rate_hz is 4000"),
             (clip(S16, 16000, 3, 10, 60), "channels is 3"),
             (clip(S16, 16000, 1, 0, 0), "samples at 16000 Hz"),
@@ -1089,12 +1114,19 @@ mod tests {
         for sample in [f32::NAN, f32::INFINITY, 1.5, -1.01] {
             let mut loud = clip(AudioEncoding::PcmF32le, 16000, 1, 1, 4);
             loud.data_base64 = STANDARD.encode(sample.to_le_bytes());
-            assert!(decision_files(&[loud]).unwrap_err().message.contains("within [-1, 1]"));
+            assert!(decision_files(&[loud])
+                .unwrap_err()
+                .message
+                .contains("within [-1, 1]"));
         }
         let mut quiet = clip(AudioEncoding::PcmF32le, 16000, 1, 2, 8);
-        quiet.data_base64 = STANDARD.encode([(-1.0f32).to_le_bytes(), 1.0f32.to_le_bytes()].concat());
+        quiet.data_base64 =
+            STANDARD.encode([(-1.0f32).to_le_bytes(), 1.0f32.to_le_bytes()].concat());
         assert!(decision_files(&[quiet]).is_ok());
         let five: Vec<_> = (0..5).map(|_| clip(S16, 16000, 1, 1, 2)).collect();
-        assert!(decision_files(&five).unwrap_err().message.contains("more than 4 audio clips"));
+        assert!(decision_files(&five)
+            .unwrap_err()
+            .message
+            .contains("more than 4 audio clips"));
     }
 }

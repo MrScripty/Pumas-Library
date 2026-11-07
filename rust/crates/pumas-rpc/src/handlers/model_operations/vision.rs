@@ -2,9 +2,9 @@
 //! audio). This is backend declaration checking, not model-byte or semantic
 //! attestation.
 use super::super::openai_gateway;
+use super::types::Modality;
 use crate::server::AppState;
 use pumas_library::models::{RuntimeProviderId, RuntimeProviderMode, ServedModelStatus};
-use super::types::Modality;
 
 pub(in crate::handlers) async fn supported_profile(
     state: &AppState,

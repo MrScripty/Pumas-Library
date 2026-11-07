@@ -809,7 +809,10 @@ async fn a_model_without_a_task_is_described_by_its_runtime_and_takes_audio_in_c
         .iter()
         .any(|bound| bound["option"] == "audio_seconds"));
     // No image is declared, so image description stays unavailable.
-    assert_ne!(capability("image_to_text")["availability"]["state"], "available");
+    assert_ne!(
+        capability("image_to_text")["availability"]["state"],
+        "available"
+    );
     assert_eq!(
         capability("decision")["availability"]["reason"],
         "model_task_mismatch"
@@ -869,7 +872,10 @@ async fn undeclared_audio_is_refused_naming_what_the_model_accepts() {
     let body = json_body(response).await;
     assert_eq!(body["error"]["code"], "unsupported_modality", "{body}");
     let message = body["error"]["message"].as_str().unwrap();
-    assert!(message.contains("chat_generation accepts text, image"), "{message}");
+    assert!(
+        message.contains("chat_generation accepts text, image"),
+        "{message}"
+    );
     assert!(calls
         .lock()
         .unwrap()
@@ -898,7 +904,10 @@ async fn decision_audio_is_sent_as_wav_files_to_a_declared_decision_model() {
         .unwrap()
         .clone();
     assert_eq!(decision["availability"]["state"], "available", "{decision}");
-    assert_eq!(decision["input_modalities"], json!(["text", "image", "audio"]));
+    assert_eq!(
+        decision["input_modalities"],
+        json!(["text", "image", "audio"])
+    );
     assert_eq!(decision["output_modalities"], json!(["json"]));
     assert_eq!(value["modalities"]["output"], json!(["json"]));
 
@@ -925,7 +934,10 @@ async fn decision_audio_is_sent_as_wav_files_to_a_declared_decision_model() {
     assert_eq!(files.len(), 1);
     let url = files[0].as_str().unwrap();
     let wav = STANDARD
-        .decode(url.strip_prefix("data:audio/wav;base64,").expect("WAV data URL"))
+        .decode(
+            url.strip_prefix("data:audio/wav;base64,")
+                .expect("WAV data URL"),
+        )
         .unwrap();
     assert_eq!(wav.len(), 44 + 1600);
     assert!(sent.get("images").is_none());

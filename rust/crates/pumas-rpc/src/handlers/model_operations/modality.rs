@@ -383,7 +383,12 @@ impl ModalityRequest {
         let chat = self.input.has_audio_part()
             || self.capability == Some(Capability::ChatGeneration)
             || self.semantic_task == Some(SemanticTask::ChatGeneration);
-        if chat && matches!(self.input, Input::Messages { .. } | Input::ImageMessages { .. }) {
+        if chat
+            && matches!(
+                self.input,
+                Input::Messages { .. } | Input::ImageMessages { .. }
+            )
+        {
             return self.chat_preflight().map(Some);
         }
         if !matches!(self.output, Output::Text) {
@@ -463,8 +468,12 @@ impl ModalityRequest {
                 temperature: None,
                 top_p: None,
             });
-        let operation =
-            self.operation(Capability::ChatGeneration, input, OutputFormat::Text, options);
+        let operation = self.operation(
+            Capability::ChatGeneration,
+            input,
+            OutputFormat::Text,
+            options,
+        );
         projection::validate_image_to_text_request(&operation)?;
         Ok(operation)
     }
@@ -581,11 +590,14 @@ impl ModalityRequest {
         let shaped: Vec<_> = selected
             .iter()
             .filter(|descriptor| {
-                descriptor.output_formats.contains(&output) && accepts(descriptor, &input, explicit_chat)
+                descriptor.output_formats.contains(&output)
+                    && accepts(descriptor, &input, explicit_chat)
             })
             .collect();
         let covers = |descriptor: &CapabilityDescriptor| {
-            needs.iter().all(|m| descriptor.input_modalities.contains(m))
+            needs
+                .iter()
+                .all(|m| descriptor.input_modalities.contains(m))
         };
         // A part in a modality the served model does not declare is refused
         // here, naming what it does accept. An unavailable capability keeps
@@ -828,7 +840,9 @@ impl ModalityRequest {
                         .iter()
                         .map(|message| {
                             let content = match &message.content {
-                                Content::Text(text) => vec![ContentPart::Text { text: text.clone() }],
+                                Content::Text(text) => {
+                                    vec![ContentPart::Text { text: text.clone() }]
+                                }
                                 Content::Parts(parts) => parts
                                     .iter()
                                     .map(|part| match part {

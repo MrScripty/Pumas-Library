@@ -73,7 +73,10 @@ pub(super) async fn observe(
             fixed([Modality::Audio], [Modality::Text])
         }
         RuntimeProviderId::Torch => fixed([Modality::Text], [Modality::Image]),
-        _ => fixed([Modality::Text], [pooled_output(model_type, Modality::Text)]),
+        _ => fixed(
+            [Modality::Text],
+            [pooled_output(model_type, Modality::Text)],
+        ),
     }
 }
 
@@ -119,7 +122,10 @@ async fn llama_cpp(state: &AppState, served: &ServedModelStatus, hints: Hints<'_
     let read_models = hints.projector || hints.decision;
     if !read_props && !read_models {
         // No projector and no decision head: text in, text (or vector) out.
-        return fixed([Modality::Text], [pooled_output(model_type, Modality::Text)]);
+        return fixed(
+            [Modality::Text],
+            [pooled_output(model_type, Modality::Text)],
+        );
     }
     let Some(base) = endpoint_base(served) else {
         return Observation::default();
@@ -170,7 +176,10 @@ async fn llama_cpp(state: &AppState, served: &ServedModelStatus, hints: Hints<'_
         .unwrap_or_default();
     // A router lists every model; a dedicated server lists its one model.
     let entry = models.as_ref().and_then(|models| {
-        let entries = models["data"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let entries = models["data"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         entries
             .iter()
             .find(|entry| entry["id"].as_str() == Some(provider_id.as_str()))

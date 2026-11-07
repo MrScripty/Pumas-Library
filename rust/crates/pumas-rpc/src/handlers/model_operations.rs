@@ -1,7 +1,7 @@
 //! Additive selected-model capabilities and closed typed operations.
 mod decision;
-mod parts;
 mod modality;
+mod parts;
 mod projection;
 mod runtime_modalities;
 mod stream;

@@ -74,20 +74,53 @@
       ]
     },
     "InputFormat": {
-      "enum": [
-        "messages_text",
-        "png_base64",
-        "jpeg_base64",
-        "messages_image",
-        "text",
-        "text_batch",
-        "pcm_s16le",
-        "pcm_f32le",
-        "content_batch",
-        "decision",
-        "rerank"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "messages_text",
+            "png_base64",
+            "jpeg_base64",
+            "messages_image",
+            "text",
+            "text_batch",
+            "pcm_s16le",
+            "pcm_f32le",
+            "content_batch",
+            "decision",
+            "rerank"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "messages_multimodal",
+          "description": "Messages whose parts include audio.",
+          "type": "string"
+        }
+      ]
+    },
+    "Modality": {
+      "description": "A modality primitive: one kind of data, the same whether it is a model's\ninput or its output. `json` and `vector` are output-only result kinds.",
+      "oneOf": [
+        {
+          "enum": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "json",
+          "description": "Structured data checked against the capability's schema\n(decision answers, relevance scores).",
+          "type": "string"
+        },
+        {
+          "const": "vector",
+          "description": "Embedding vectors.",
+          "type": "string"
+        }
+      ]
     },
     "OptionBound": {
       "properties": {
@@ -154,6 +187,26 @@
           "const": "top_n",
           "description": "Documents returned by a `rerank` operation.",
           "type": "string"
+        },
+        {
+          "const": "audio_count",
+          "description": "Audio clips in one request.",
+          "type": "string"
+        },
+        {
+          "const": "total_audio_bytes",
+          "description": "Decoded PCM bytes of all audio in one request.",
+          "type": "string"
+        },
+        {
+          "const": "audio_seconds",
+          "description": "Seconds per audio clip.",
+          "type": "string"
+        },
+        {
+          "const": "sample_rate",
+          "description": "Sample rate of an audio clip, in Hz.",
+          "type": "string"
         }
       ]
     },
@@ -198,6 +251,13 @@
       },
       "type": "array"
     },
+    "input_modalities": {
+      "description": "Content modalities this capability accepts for this served model.",
+      "items": {
+        "$ref": "#/$defs/Modality"
+      },
+      "type": "array"
+    },
     "option_bounds": {
       "items": {
         "$ref": "#/$defs/OptionBound"
@@ -207,6 +267,13 @@
     "output_formats": {
       "items": {
         "$ref": "#/$defs/OutputFormat"
+      },
+      "type": "array"
+    },
+    "output_modalities": {
+      "description": "Modalities this capability produces.",
+      "items": {
+        "$ref": "#/$defs/Modality"
       },
       "type": "array"
     },
@@ -222,6 +289,8 @@
     "semantic_task",
     "input_formats",
     "output_formats",
+    "input_modalities",
+    "output_modalities",
     "streaming",
     "availability",
     "option_bounds"

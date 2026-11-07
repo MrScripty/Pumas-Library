@@ -702,9 +702,29 @@ async fn describe(
     } else {
         runtime_modalities::observe(state, served, hints).await
     };
+    // Without a recorded task, the runtime's own declaration of a generation
+    // model decides what it can do (ADR 0005); it only ever adds a match.
+    let task_known = task.is_some_and(|task| !matches!(task, "unknown" | ""));
+    let declared_text_out = observation.declared.output.contains(&Modality::Text);
+    let semantics_of = |capability: Capability| {
+        let by_runtime = !task_known
+            && observation.runtime_declared
+            && !observation.decisions
+            && declared_text_out
+            && match capability {
+                Capability::ChatGeneration | Capability::TextGeneration => true,
+                Capability::ImageToText => observation.declares_input(Modality::Image),
+                _ => false,
+            };
+        if by_runtime {
+            Some(true)
+        } else {
+            semantic_match(capability, task, model_type, served.provider)
+        }
+    };
     let vision_ready = image_adapter
         && runtime_ready
-        && semantic_match(Capability::ImageToText, task, model_type, served.provider) == Some(true)
+        && semantics_of(Capability::ImageToText) == Some(true)
         && observation.live(Modality::Image);
     // Native decision models are a runtime fact; they answer only `decision`.
     let decision_model = runtime_ready && observation.decisions;
@@ -859,7 +879,7 @@ async fn describe(
             Capability::Decision if decision::candidate_task(task) && !runtime_ready => Some(true),
             Capability::Decision => Some(decision_model),
             _ if decision_model => Some(false),
-            _ => semantic_match(capability, task, model_type, served.provider),
+            _ => semantics_of(capability),
         };
         let reason = if capability == Capability::AudioClassification {
             Some(AvailabilityReason::UnsupportedAdapter)

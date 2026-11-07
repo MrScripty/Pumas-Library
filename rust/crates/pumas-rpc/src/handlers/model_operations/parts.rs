@@ -1028,4 +1028,55 @@ mod tests {
         );
         assert_eq!(dimensions(4096, 1024), Ok(()));
     }
+    fn clip(encoding: AudioEncoding, rate: u32, channels: u16, samples: u64, bytes: usize) -> AudioClip {
+        AudioClip {
+            encoding,
+            sample_rate_hz: rate,
+            channels,
+            sample_count: samples,
+            data_base64: STANDARD.encode(vec![7u8; bytes]),
+        }
+    }
+    #[test]
+    fn pcm_is_wrapped_as_wav_with_its_declared_format() {
+        for (encoding, tag, bits, channels) in [
+            (AudioEncoding::PcmS16le, 1u16, 16u16, 1u16),
+            (AudioEncoding::PcmF32le, 3, 32, 2),
+        ] {
+            let bytes = 100 * usize::from(channels) * usize::from(bits / 8);
+            let url = &decision_files(&[clip(encoding, 22050, channels, 100, bytes)]).unwrap()[0];
+            let wav = STANDARD
+                .decode(url.strip_prefix("data:audio/wav;base64,").unwrap())
+                .unwrap();
+            assert_eq!(wav.len(), 44 + bytes);
+            assert_eq!(&wav[..4], b"RIFF");
+            assert_eq!(u32::from_le_bytes(wav[4..8].try_into().unwrap()) as usize, 36 + bytes);
+            assert_eq!(u16::from_le_bytes([wav[20], wav[21]]), tag);
+            assert_eq!(u16::from_le_bytes([wav[22], wav[23]]), channels);
+            assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 22050);
+            assert_eq!(u16::from_le_bytes([wav[34], wav[35]]), bits);
+            assert_eq!(&wav[36..40], b"data");
+            assert!(wav[44..].iter().all(|b| *b == 7), "samples are unchanged");
+        }
+    }
+    #[test]
+    fn pcm_that_disagrees_with_its_declaration_is_refused_with_a_reason() {
+        use AudioEncoding::PcmS16le as S16;
+        let mut not_canonical = clip(S16, 16000, 1, 2, 4);
+        not_canonical.data_base64 = "BwcHBw".into();
+        for (bad, says) in [
+            (clip(S16, 16000, 1, 10, 19), "declares 20"),
+            (clip(S16, 16000, 1, 10, 30), "longer than its declared samples"),
+            (clip(S16, 4000, 1, 10, 20), "sample_rate_hz is 4000"),
+            (clip(S16, 16000, 3, 10, 60), "channels is 3"),
+            (clip(S16, 16000, 1, 0, 0), "samples at 16000 Hz"),
+            (clip(S16, 16000, 1, 16000 * 31, 0), "30 seconds"),
+            (not_canonical, "base64"),
+        ] {
+            let rejection = decision_files(&[bad]).unwrap_err();
+            assert!(rejection.message.contains(says), "{}", rejection.message);
+        }
+        let five: Vec<_> = (0..5).map(|_| clip(S16, 16000, 1, 1, 2)).collect();
+        assert!(decision_files(&five).unwrap_err().message.contains("more than 4 audio clips"));
+    }
 }

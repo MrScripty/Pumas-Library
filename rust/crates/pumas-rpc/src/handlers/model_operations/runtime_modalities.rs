@@ -28,6 +28,9 @@ pub(super) struct Observation {
     pub decisions: bool,
     /// The runtime answered; `false` means its declaration is unknown.
     pub observed: bool,
+    /// The runtime published the model's own declaration (llama.cpp
+    /// `/v1/models` architecture), not a fixed provider default.
+    pub runtime_declared: bool,
 }
 
 impl Observation {
@@ -86,6 +89,7 @@ fn fixed<const I: usize, const O: usize>(
         live: input.into_iter().filter(|m| *m != Modality::Text).collect(),
         decisions: false,
         observed: true,
+        runtime_declared: false,
     }
 }
 
@@ -190,6 +194,7 @@ async fn llama_cpp(state: &AppState, served: &ServedModelStatus, hints: Hints<'_
             live,
             decisions: false,
             observed,
+            runtime_declared: false,
         };
     };
     let names = |key: &str| -> Vec<String> {
@@ -234,6 +239,7 @@ async fn llama_cpp(state: &AppState, served: &ServedModelStatus, hints: Hints<'_
         live,
         decisions,
         observed: true,
+        runtime_declared: true,
     }
 }
 

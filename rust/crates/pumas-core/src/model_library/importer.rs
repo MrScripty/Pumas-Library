@@ -1035,7 +1035,8 @@ impl ModelImporter {
             lookup_attempts: Some(0),
             last_lookup_attempt: None,
             conversion_source: None,
-            repo_id: None,        // Set by caller (import_in_place) after creation
+            // The caller's upstream claim; the online lookup can confirm it.
+            repo_id: spec.repo_id.clone(),
             expected_files: None, // Set by caller (import_in_place) after creation
             pipeline_tag: None,   // Set by caller (import_in_place) after creation
             task_type_primary: Some("unknown".to_string()),
@@ -3256,6 +3257,51 @@ mod tests {
         let result = importer.import(&spec).await.unwrap();
         assert!(result.success);
         assert!(result.model_path.is_some());
+    }
+
+    #[tokio::test]
+    async fn import_keeps_the_callers_repo_id_for_a_gguf() {
+        // A local GGUF import that names its Hugging Face source must keep it,
+        // so the pending online lookup can target that repository.
+        let (temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let source_dir = temp_dir.path().join("source");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let mut content = b"GGUF".to_vec();
+        content.extend_from_slice(&3_u32.to_le_bytes());
+        content.extend_from_slice(&0_u64.to_le_bytes());
+        content.extend_from_slice(&1_u64.to_le_bytes());
+        let (key, value) = ("general.architecture", "qwen3");
+        content.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        content.extend_from_slice(key.as_bytes());
+        content.extend_from_slice(&8_u32.to_le_bytes());
+        content.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        content.extend_from_slice(value.as_bytes());
+        content.extend_from_slice(&[0u8; 512]);
+        let source_file = create_test_file(&source_dir, "reranker-q8_0.gguf", &content);
+
+        let spec = ModelImportSpec {
+            path: source_file.display().to_string(),
+            family: "qwen3".to_string(),
+            official_name: "Qwen3 Reranker".to_string(),
+            repo_id: Some("ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF".to_string()),
+            model_type: None,
+            subtype: None,
+            tags: None,
+            security_acknowledged: Some(true),
+        };
+        let result = importer.import(&spec).await.unwrap();
+        assert!(result.success, "{:?}", result.error);
+        let model_id = result.model_path.unwrap();
+        let metadata = library
+            .load_metadata(&library.library_root().join(&model_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            metadata.repo_id.as_deref(),
+            Some("ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF")
+        );
+        assert_eq!(metadata.pending_online_lookup, Some(true));
     }
 
     #[tokio::test]

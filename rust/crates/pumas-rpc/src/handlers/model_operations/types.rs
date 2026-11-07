@@ -803,22 +803,25 @@ mod image_to_text_schema_tests {
                 serde_json::to_value(schemars::schema_for!(ErrorResponse)).unwrap(),
             ),
         ];
-        let capability_schema = serde_json::to_value(schemars::schema_for!(Capability)).unwrap();
         // Documented variants are emitted as `oneOf` entries instead of `enum`.
-        let capabilities: Vec<Value> = match capability_schema["enum"].as_array() {
-            Some(values) => values.clone(),
-            None => capability_schema["oneOf"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .flat_map(|variant| {
-                    variant["enum"]
-                        .as_array()
-                        .cloned()
-                        .unwrap_or_else(|| vec![variant["const"].clone()])
-                })
-                .collect(),
+        let enum_values = |schema: Value| -> Vec<Value> {
+            match schema["enum"].as_array() {
+                Some(values) => values.clone(),
+                None => schema["oneOf"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .flat_map(|variant| {
+                        variant["enum"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_else(|| vec![variant["const"].clone()])
+                    })
+                    .collect(),
+            }
         };
+        let capabilities =
+            enum_values(serde_json::to_value(schemars::schema_for!(Capability)).unwrap());
         assert_eq!(
             &capabilities,
             &vec![
@@ -835,13 +838,14 @@ mod image_to_text_schema_tests {
             ],
             "new capabilities are appended; consumers ignore ones they do not use"
         );
-        let input_schema = serde_json::to_value(schemars::schema_for!(InputFormat)).unwrap();
-        let formats = input_schema["enum"].as_array().unwrap();
+        let formats =
+            enum_values(serde_json::to_value(schemars::schema_for!(InputFormat)).unwrap());
         for format in [
             "png_base64",
             "jpeg_base64",
             "messages_image",
             "messages_text",
+            "messages_multimodal",
         ] {
             assert!(formats.contains(&json!(format)));
         }

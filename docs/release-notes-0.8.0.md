@@ -124,6 +124,13 @@ headers (30 s).
 - **`multimodal_embedding`**: image and mixed text/image embeddings from
   llama.cpp embedding models with a projector, such as EmbeddingGemma 2. Needs
   llama.cpp **b11454** or newer.
+- **Audio input**: chat messages, embedding content items and `decision`
+  input accept audio parts (raw PCM, up to 30 seconds per clip) for models
+  whose runtime declares audio (verified with LFM3-Audio-2B on llama.cpp
+  b12099).
+  Every served model and capability now reports the modalities it accepts
+  and produces, so a consumer can compose a request for a model it has no
+  specific support for. See [Modalities](contracts/model-operations-v1.md#modalities).
 - **Image-to-text**: named image and image-bearing message inputs with bounded
   sizes and typed refusals. Vision-language models published as
   `image-text-to-text` (Gemma, Qwen VL) are available for chat and
@@ -187,6 +194,8 @@ schema versions rather than matching product versions.
   converted as a plain language model, is refused when served, with a reason,
   instead of returning meaningless scores. Use a GGUF converted for reranking,
   such as `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF`.
+- Image and audio input work through router profiles as well as dedicated
+  ones; the router loads each model's projector and reports its modalities.
 - Ollama embedding models load through `/api/embed`.
 
 ## Upgrading an existing library
@@ -230,6 +239,9 @@ accompany the release.
 - Installers are not code-signed or notarized. Windows SmartScreen and macOS
   Gatekeeper will warn on first launch.
 - Production audio-to-text (speech transcription) is not available yet.
+  Audio understanding through chat and decision models is available.
+- Speech output and video input are not available yet, even for models
+  whose runtime declares them.
 - An adapter with no task tag or base-model evidence (for example the LTX-2.3
   IC-LoRA) stays under image generation until you choose **Video generation**
   for it.

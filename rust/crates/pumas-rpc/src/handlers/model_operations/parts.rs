@@ -394,6 +394,16 @@ fn wav_base64(clip: &AudioClip, budget: &mut Budget) -> Result<String, Rejection
             pcm.len()
         )));
     }
+    if matches!(clip.encoding, AudioEncoding::PcmF32le)
+        && pcm.chunks_exact(4).any(|sample| {
+            let value = f32::from_le_bytes(sample.try_into().expect("four-byte sample"));
+            !(value.is_finite() && (-1.0..=1.0).contains(&value))
+        })
+    {
+        return Err(Rejection::invalid(
+            "pcm_f32le audio samples must be finite and within [-1, 1]",
+        ));
+    }
     budget.audio_bytes += pcm.len();
     if budget.audio_bytes > MAX_TOTAL_AUDIO_BYTES {
         return Err(limit(format!(
@@ -1076,6 +1086,14 @@ mod tests {
             let rejection = decision_files(&[bad]).unwrap_err();
             assert!(rejection.message.contains(says), "{}", rejection.message);
         }
+        for sample in [f32::NAN, f32::INFINITY, 1.5, -1.01] {
+            let mut loud = clip(AudioEncoding::PcmF32le, 16000, 1, 1, 4);
+            loud.data_base64 = STANDARD.encode(sample.to_le_bytes());
+            assert!(decision_files(&[loud]).unwrap_err().message.contains("within [-1, 1]"));
+        }
+        let mut quiet = clip(AudioEncoding::PcmF32le, 16000, 1, 2, 8);
+        quiet.data_base64 = STANDARD.encode([(-1.0f32).to_le_bytes(), 1.0f32.to_le_bytes()].concat());
+        assert!(decision_files(&[quiet]).is_ok());
         let five: Vec<_> = (0..5).map(|_| clip(S16, 16000, 1, 1, 2)).collect();
         assert!(decision_files(&five).unwrap_err().message.contains("more than 4 audio clips"));
     }

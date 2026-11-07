@@ -107,18 +107,20 @@ The HTTP status matches the code: `invalid_request`, `unsupported_contract` →
 served (model, profile) pair with `model` (the alias to send), `profile`,
 `model_id` (library identifier), `provider`, `load_state`, optional
 `context_tokens`, `profile_required` (the alias is served by more than one
-profile, so requests must name `profile`), and `capabilities` (the same
-descriptors as below). Consumers select models from this list instead of
+profile, so requests must name `profile`), `modalities` (see
+[Modalities](#modalities)), and `capabilities` (the same descriptors as
+below). Consumers select models from this list instead of
 configuring aliases or profiles by hand. `/v1/models` remains the
 OpenAI-compatible list: each ID appears once, with its `profiles`.
 
 `GET /v1/capabilities?model=<served-alias>&profile=<optional-exact-profile>`
 requires an explicitly selected serving identity. It returns
 `supported_contract_versions`, `model`, `profile`, `max_request_bytes`,
-`max_response_bytes`, `max_stream_event_bytes`, optional `context_tokens`, and
-`capabilities`. Each capability
-has `capability`, `semantic_task`, `input_formats`, `output_formats`, `streaming`,
-`availability`, and `option_bounds`. Availability is tagged as
+`max_response_bytes`, `max_stream_event_bytes`, optional `context_tokens`,
+`modalities`, and `capabilities`. Each capability
+has `capability`, `semantic_task`, `input_formats`, `output_formats`,
+`input_modalities`, `output_modalities`, `streaming`, `availability`, and
+`option_bounds`. Availability is tagged as
 `{"state":"available"}` or `{"state":"unavailable","reason":"..."}`.
 Explicit source-task evidence takes precedence over broad modality signatures.
 Availability requires both compatible semantics and the selected runtime's
@@ -128,8 +130,11 @@ the same serving identity again before handing work to a provider.
 The implemented capabilities are `chat_generation`, `text_generation`,
 `text_embedding`, `image_generation`, `image_to_text`, `multimodal_embedding`,
 `decision` and `rerank`. Vision-language models (`image-text-to-text`) offer chat,
-text generation and image-to-text. `multimodal_embedding` and image input to
-`decision` need a dedicated llama.cpp session with its projector loaded.
+text generation and image-to-text. Non-text input needs a llama.cpp session
+(dedicated or router) with the model's projector loaded. A model with no
+recorded task is described by its runtime: when llama.cpp publishes the
+model's architecture and it declares text output, the model offers chat and
+text generation, and image-to-text if it declares image input.
 `decision` is offered only when llama.cpp reports the model as a native
 decision model (`decisions` output modality); such models offer no text
 generation. `rerank` is offered for models recorded as rerankers
@@ -164,12 +169,12 @@ Capability inputs and outputs:
 
 | Capability | Input `kind` | Output | Options `kind` |
 | --- | --- | --- | --- |
-| `chat_generation` | `messages` (or `text`, sent as one user message) | `text` | `text_generation` |
+| `chat_generation` | `messages` (or `text`, sent as one user message), with image and audio parts where declared | `text` | `text_generation` |
 | `text_generation` | `text` | `text` | `text_generation` |
 | `text_embedding` | `text` or `text_batch` | `embeddings_float32` | `embeddings` |
-| `multimodal_embedding` | `image` or `content_batch` | `embeddings_float32` | `embeddings` |
+| `multimodal_embedding` | `image` or `content_batch` (text, image and declared audio parts) | `embeddings_float32` | `embeddings` |
 | `image_generation` | `text` | `png_base64` | `image_generation` |
-| `image_to_text` | `image`, `image_messages`, or `messages` with image parts | `text` | `text_generation` |
+| `image_to_text` | `image`, `image_messages`, or `messages` with image (not audio) parts | `text` | `text_generation` |
 | `decision` | `decision` | `decisions` | `decision` (optional) |
 | `rerank` | `rerank` | `relevance_scores` | `rerank` (optional) |
 
@@ -200,7 +205,8 @@ model's text embeddings. Task prefixes recommended by a model (for example
 EmbeddingGemma's `task: search result | query: `) are part of the caller's text.
 
 `decision` input is `{"kind":"decision","state":...,"questions":{...},
-"images":[...]}`. `state` is a string or any JSON value. Each question has
+"images":[...],"audio":[...]}`; `images` and `audio` are optional, and `audio`
+holds clips in the [audio part](#modalities) shape without `kind`. `state` is a string or any JSON value. Each question has
 `type` (`choice`, `score` or `noul`), `instructions`, and `criteria`: an
 object of option to description (or `null`) for `choice`, a list of level
 descriptions (lowest first) for `score`, and optional `true`/`false`
@@ -251,10 +257,49 @@ comments, and multiline data are handled within a 256 KiB event bound and the
 on each downstream body poll. A silent or hung provider has no invented idle or
 drain deadline; disposing the body closes the retained transport.
 
+## Modalities
+
+A modality is a primitive kind of content or result: `text`, `image`,
+`audio` and `video` for content, `json` for structured results (decisions,
+rankings) and `vector` for embeddings. Each served model's `modalities` is
+`{"input":[...],"output":[...]}` as its runtime declares it; for llama.cpp
+that is `/v1/models` `architecture` (from the GGUF and its projector), with
+embedders reported as producing `vector` and rerankers and decision models
+as producing `json`. Other providers report a fixed set. This is a runtime
+declaration, not attestation of model bytes or quality. An empty
+declaration means the runtime has not answered; the affected capabilities
+are unavailable for that reason.
+
+Each descriptor's `input_modalities` is what its protocol can carry
+intersected with the model's declared inputs, and `output_modalities` is what
+it produces. Requests compose parts freely within those sets. A part in a
+modality no available capability accepts is refused with
+`unsupported_modality`, naming what each capability accepts. An unavailable
+capability keeps its availability reason instead.
+
+Image parts are described above. An audio part is
+`{"kind":"audio","encoding":"pcm_s16le"|"pcm_f32le","sample_rate_hz":...,
+"channels":1|2,"sample_count":...,"data_base64":"..."}`: raw little-endian
+PCM, 8–192 kHz, one or two channels, at most 30 seconds, with `data_base64`
+exactly `sample_count × channels × sample size` bytes in canonical padded
+base64. Float samples must be finite and in [-1, 1]. A request holds at most
+4 clips and 16 MiB of audio; descriptors that declare audio advertise these
+as `audio_count`, `total_audio_bytes`, `audio_seconds` and `sample_rate`.
+Pumas never parses audio containers: it wraps the declared PCM in a WAV
+header for the runtime. Audio parts are accepted in user messages only.
+
+Messages that contain an audio part resolve to `chat_generation`, and so do
+image messages when the request names `chat_generation`. Image-only
+messages without that request still resolve to `image_to_text`, as in
+earlier releases. Speech output, video input and `vector` input are not
+available in this release; a model may still declare them.
+
 ## Reserved audio
 
 Audio transcription and audio classification are different capabilities even
 when both produce text. Both are reserved and unavailable in this release.
+Audio as a content part (see [Modalities](#modalities)) is a separate,
+available path.
 
 The audio declaration reserves `kind: "audio"`, `encoding` (`pcm_s16le` or
 `pcm_f32le`), `sample_rate_hz`, `channels`, `sample_count` (frames per channel),

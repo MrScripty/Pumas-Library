@@ -37,6 +37,14 @@ the 2026-11-02 audit
 - `rerank` capability and `POST /v1/rerank` gateway route: llama.cpp
   rerankers score documents against a query, most relevant first, with an
   optional `top_n`.
+- Modality primitives (ADR 0005): served models and capability descriptors
+  report the input and output modalities their runtime declares
+  (`modalities`, `input_modalities`, `output_modalities`). Audio parts (PCM,
+  sent to llama.cpp as WAV) are accepted in chat messages, `content_batch`
+  items and `decision` input wherever the model declares audio, and refused
+  with `unsupported_modality` where it does not. Router profiles serve image
+  and audio input as well as dedicated ones. Models without a recorded task
+  are described by their runtime's own declaration.
 - Models are grouped by what they are used for, with new **Decision and
   evaluation** and **Video generation** categories. Each row shows the inputs
   and outputs the model handles and marks LoRA/PEFT adapters. A "Used as"

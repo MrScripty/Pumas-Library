@@ -13,7 +13,7 @@ capability path per model and modality.
 (rerank, Laya). Runtime: llama.cpp b12099. The LFM3 and d1 cards need b11960
 or newer, and LFM3-VL needs b12088 or newer.
 
-**Current phase:** S1 (2026-11-06).
+**Current phase:** S4 (2026-11-07).
 
 ## Acceptance
 
@@ -39,10 +39,10 @@ or newer, and LFM3-VL needs b12088 or newer.
 
 | Slice | Content | Status |
 | --- | --- | --- |
-| S1 | Runtime modality facts: one bounded llama.cpp probe (`/props` modalities and `/v1/models` architecture) that the vision and decision checks share; static declarations for other providers; additive discovery fields | Next |
-| S2 | Primitive layer: shared text, image and audio validation and budget; chat, embeddings and systemone encoders. Image code moves unchanged; audio packs PCM as WAV | Planned |
-| S3 | Grammar and resolution: audio parts in messages and content items, decision `audio`; acceptance gated by declared modalities; image-only messages still resolve to `image_to_text` | Planned |
-| S4 | Live qualification of the five models, docs, release notes | Planned |
+| S1 | Runtime modality facts: one bounded llama.cpp probe (`/props` modalities and `/v1/models` architecture) that the vision and decision checks share; static declarations for other providers; additive discovery fields | Done |
+| S2 | Primitive layer: shared text, image and audio validation and budget; chat, embeddings and systemone encoders. Image code moves unchanged; audio packs PCM as WAV | Done |
+| S3 | Grammar and resolution: audio parts in messages and content items, decision `audio`; acceptance gated by declared modalities; image-only messages still resolve to `image_to_text` | Done |
+| S4 | Live qualification of the five models, docs, release notes | In progress: docs and release notes done; LFM3-Audio-2B verified (router, CPU); the other four need their files |
 | S5 | `json` output primitive: chat structured output against a caller schema; decisions and rankings expressed as `json` results | Planned |
 
 Later, outside 0.8.0: video input (llama.cpp needs `ffmpeg` for it), speech
@@ -55,8 +55,7 @@ output (realtime WebSocket transport), and `vector` input.
   draft support, a new audited dependency) or validating a documented subset
   (types, required properties, enums, arrays). This is needed before S5, not
   before S1–S4.
-- **D2, router-mode multimodal.** Image input currently requires a dedicated
-  llama.cpp profile, while the router preset already loads the projector. If
-  the router's `/props?model=` reports the same modalities, the restriction
-  can be lifted in S1. Otherwise serving LFM3-Omni keeps needing a dedicated
-  profile.
+- **D2, router-mode multimodal: resolved.** The router's `/props?model=`
+  reports the same modalities as a dedicated session, so the restriction was
+  lifted in S1. A profile mode change during the final probe refuses the
+  request.

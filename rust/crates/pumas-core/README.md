@@ -441,8 +441,7 @@ managed acquisition verification remain separate evidence.
 
 The synthetic producer tests exercise this handoff without loading model
 tensors. Consumers check their own admission rules against this public contract
-in their own repositories. Real Cohere processor-file completeness requires a
-separate pinned member-manifest audit, and runtime compatibility is not claimed.
+in their own repositories.
 
 See the native [local intent example](examples/intent_model.rs) and [managed
 acquisition example](examples/intent_acquire.rs) for the public call shapes.

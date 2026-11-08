@@ -4,12 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  SCANS, SUMMARY, checkVulnerabilityResults, loadExceptions, recipeRequirements, scanOutcome,
+  SCANS, SUMMARY, checkVulnerabilityResults, loadExceptions, scanOutcome,
   summarizeCargoDeny, summarizePipAudit, summarizePnpmAudit, verifiedRuntimeRequirements,
 } from './dependency-audit.mjs';
 import { checkReview } from './check-artifacts.mjs';
 
 const scan = id => SCANS.find(item => item.id === id);
+// Pumas pins no shipped Python closure, but a gating pip scan keeps its rules.
+const gatingPip = () => ({ ...scan('pip-dev-lock'), gating: true });
 const importers = new Map([['electron', '0.8.0'], ['frontend', '0.8.0']]);
 
 function pnpmReport(...advisories) {
@@ -52,15 +54,15 @@ test('accepted exceptions need a reason and suppress only their own finding', ()
   const result = summarizePipAudit(report, { exceptions });
   assert.equal(result.findings[0].accepted, 'decoder path is never reached');
   assert.equal(result.findings[1].accepted, undefined);
-  assert.equal(scanOutcome(scan('pip-audio-recipe'), result).status, 'findings');
+  assert.equal(scanOutcome(gatingPip(), result).status, 'findings');
   report.dependencies[0].vulns.pop();
-  assert.equal(scanOutcome(scan('pip-audio-recipe'), summarizePipAudit(report, { exceptions })).status, 'recorded');
+  assert.equal(scanOutcome(gatingPip(), summarizePipAudit(report, { exceptions })).status, 'recorded');
 });
 
 test('pip scans fail closed on unaudited packages only when gating', () => {
   const report = { dependencies: [{ name: 'nunchaku', version: '1.2.0', skip_reason: 'not on PyPI' }, { name: 'numpy', version: '2.5.3', vulns: [] }] };
   const result = summarizePipAudit(report, { exceptions: [] });
-  assert.equal(scanOutcome(scan('pip-audio-recipe'), result).status, 'incomplete');
+  assert.equal(scanOutcome(gatingPip(), result).status, 'incomplete');
   assert.equal(scanOutcome(scan('pip-verified-runtimes'), result).status, 'pass');
   assert.equal(scanOutcome(scan('pip-dev-lock'), summarizePipAudit({ dependencies: [
     { name: 'starlette', version: '0.50.0', vulns: [{ id: 'PYSEC-3' }, { id: 'PYSEC-3' }] }] }, { exceptions: [] })).status, 'recorded');
@@ -68,16 +70,12 @@ test('pip scans fail closed on unaudited packages only when gating', () => {
 });
 
 test('requirement inputs audit public versions and say so', () => {
-  const recipe = recipeRequirements({ artifacts: [{ name: 'torch', version: '2.10.0+cpu' }, { name: 'numpy', version: '2.5.3' }] });
-  assert.equal(recipe.text, 'torch==2.10.0\nnumpy==2.5.3\n');
-  assert.deepEqual(recipe.notes, ['torch 2.10.0+cpu audited as public version 2.10.0']);
-  assert.throws(() => recipeRequirements({ artifacts: [] }), /no artifacts/);
   const verified = verifiedRuntimeRequirements({ schema_version: 1, records: [
     { packages: { torch: '2.9.1+cu130', psutil: '7.2.1' } }, { packages: { psutil: '7.2.1' } }] });
   assert.equal(verified.text, 'psutil==7.2.1\ntorch==2.9.1\n');
-  // The real recipe and records are well formed.
+  assert.deepEqual(verified.notes, ['torch 2.9.1+cu130 audited as public version 2.9.1']);
+  // The real records are well formed.
   const root = new URL('../../', import.meta.url);
-  recipeRequirements(JSON.parse(fs.readFileSync(new URL('rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json', root))));
   verifiedRuntimeRequirements(JSON.parse(fs.readFileSync(new URL('torch-server/runtime/verified-runtimes.json', root))));
   loadExceptions(fs.readFileSync(new URL('scripts/release/dependency-audit-exceptions.json', root), 'utf8'));
 });

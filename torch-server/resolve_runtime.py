@@ -351,12 +351,13 @@ IMAGE = (
     "sentencepiece",
     "protobuf",
 )
-# Native dependency profile only; this does not qualify model execution.
+# Transformers' native Cohere ASR starts at 5.4.0. Other packages resolve
+# current releases like every adapter; these are floors, never pins.
 COHERE_ASR = (
-    "transformers==5.4.0",
+    "transformers>=5.4.0",
     "accelerate>=1.1.0",
-    "huggingface-hub>=1.5.0,<2.0",
-    "tokenizers>=0.22.0,<=0.23.0",
+    "huggingface-hub",
+    "tokenizers",
     "librosa",
     "soxr",
     "soundfile",
@@ -364,26 +365,20 @@ COHERE_ASR = (
     "protobuf",
     "numpy",
     "scipy",
-    "numba",
-    "llvmlite",
 )
 COHERE_ASR_PACKAGES = {re.match(r"[a-z0-9-]+", item).group() for item in COHERE_ASR}
 
 
 def validate_cohere_asr_versions(version: str, versions: dict[str, str]) -> None:
     if Version(version) < Version("2.4.0"):
-        raise ValueError("cohere-asr requires selected Torch >=2.4.0")
+        raise ValueError("cohere-asr requires Torch >=2.4.0")
     missing = COHERE_ASR_PACKAGES - versions.keys()
     if missing:
         raise ValueError(f"Resolution omitted requested packages: {', '.join(sorted(missing))}")
-    if versions["transformers"] != "5.4.0":
-        raise ValueError("cohere-asr requires native Transformers exactly 5.4.0")
+    if Version(versions["transformers"]).release < (5, 4, 0):
+        raise ValueError("cohere-asr requires Transformers >=5.4.0")
     if Version(versions["accelerate"]) < Version("1.1.0"):
         raise ValueError("cohere-asr requires Accelerate >=1.1.0")
-    if not Version("1.5.0") <= Version(versions["huggingface-hub"]) < Version("2.0"):
-        raise ValueError("cohere-asr requires huggingface-hub >=1.5.0,<2.0")
-    if not Version("0.22.0") <= Version(versions["tokenizers"]) <= Version("0.23.0"):
-        raise ValueError("cohere-asr requires tokenizers >=0.22.0,<=0.23.0")
 
 
 NUNCHAKU_URL = (

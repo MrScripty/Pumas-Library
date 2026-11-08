@@ -74,7 +74,7 @@ Refusals from the text, image and control routes carry
 written for the caller. Library error text, which can carry resolved paths,
 is written to the runtime log, and the response says only that loading or
 generation failed. Control codes: `slot_limit_reached`, `slot_limit_conflict`,
-`slot_loading`, `runtime_busy`, `owned_model`, `slot_not_found`,
+`slot_loading`, `runtime_busy`, `slot_not_found`,
 `model_rejected` (a sidecar refusal with its reason), `model_unloadable` (a
 library refusal), `out_of_memory`, `cancelled` and `internal_error`.
 

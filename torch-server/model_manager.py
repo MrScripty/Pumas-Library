@@ -11,19 +11,11 @@ from typing import Any, Optional
 import torch
 
 from device_manager import DeviceManager
-from speech_binding import (
-    ArtifactUseAuthority,
-    SpeechBindingError,
-    SpeechSlotRef,
-    UnavailableArtifactUseAuthority,
-    _BoundSpeechSlot,
-)
 
 logger = logging.getLogger(__name__)
 
 EXPECTED_LOAD_ERRORS = (OSError, RuntimeError, ValueError, KeyError)
 EXPECTED_UNLOAD_ERRORS = (OSError, RuntimeError, AttributeError)
-_MAX_LOAD_GENERATION = (1 << 128) - 1
 # Loader-detected types that are not causal text generators.
 NON_TEXT_MODEL_TYPES = frozenset({"cohere-asr", "nunchaku-z-image-turbo", "flux2-klein-9b-kv-fp8"})
 
@@ -66,9 +58,6 @@ class ModelSlot:
     ram_memory_bytes: Optional[int] = None
     model_type: Optional[str] = None
     _loaded: Optional[LoadedModel] = field(default=None, repr=False)
-    # Private identity; deliberately absent from existing public slot schemas.
-    load_generation: str = field(default_factory=lambda: str(uuid.uuid4()))
-    _owned_owner: Any = field(default=None, repr=False)
 
     def to_dict(self) -> dict:
         return {
@@ -90,23 +79,12 @@ class ModelManager:
         self,
         device_manager: DeviceManager,
         max_loaded_models: int = 4,
-        *,
-        _speech_artifact_authority: ArtifactUseAuthority | None = None,
     ):
         self.device_manager = device_manager
         self.max_loaded_models = max_loaded_models
         self.slots: dict[str, ModelSlot] = {}
         self._device_locks: dict[str, asyncio.Lock] = {}
         self._registry_lock = asyncio.Lock()
-        self._runtime_instance_id = str(uuid.uuid4())
-        self._last_load_generation = 0
-        self._speech_owner = None
-        self._owned_audio_actor = None
-        self._speech_artifact_authority = (
-            UnavailableArtifactUseAuthority()
-            if _speech_artifact_authority is None
-            else _speech_artifact_authority
-        )
 
     def _get_device_lock(self, device_str: str) -> asyncio.Lock:
         if device_str not in self._device_locks:
@@ -118,65 +96,6 @@ class ModelManager:
 
     def get_slot(self, slot_id: str) -> Optional[ModelSlot]:
         return self.slots.get(slot_id)
-
-    def _install_owned_audio_actor(self, actor) -> None:
-        if (
-            self._owned_audio_actor is not None
-            or self._speech_owner is not None
-            or type(self._speech_artifact_authority) is not UnavailableArtifactUseAuthority
-        ):
-            raise RuntimeError("Owned audio authority is already configured")
-        self._owned_audio_actor = actor
-        self._speech_artifact_authority = actor
-
-    def _reserve_owned_audio_slot(self, actor, model_id, device):
-        # These private hooks run in one owning loop turn without suspension.
-        # Refuse a held registry rather than bypassing another mutation.
-        if self._owned_audio_actor is not actor or self._registry_lock.locked():
-            raise RuntimeError("Owned audio registry is unavailable")
-        if self._active_slot_count() >= self.max_loaded_models:
-            raise RuntimeError("Maximum loaded models reached")
-        if self._last_load_generation >= _MAX_LOAD_GENERATION:
-            raise RuntimeError("Load generation space is exhausted")
-        slot_id = str(uuid.uuid4())[:8]
-        while slot_id in self.slots:
-            slot_id = str(uuid.uuid4())[:8]
-        self._last_load_generation += 1
-        slot = ModelSlot(
-            slot_id,
-            model_id,
-            "",
-            str(device),
-            state=SlotState.LOADING,
-            load_generation=str(uuid.UUID(int=self._last_load_generation)),
-            model_type="cohere-asr",
-            _owned_owner=actor,
-        )
-        self.slots[slot_id] = slot
-        return slot
-
-    def _publish_owned_audio_slot(self, actor, slot, loaded):
-        if (
-            self._owned_audio_actor is not actor
-            or self.slots.get(slot.slot_id) is not slot
-            or slot._owned_owner is not actor
-            or slot.state != SlotState.LOADING
-            or self._registry_lock.locked()
-        ):
-            raise RuntimeError("Owned audio slot changed")
-        slot._loaded = loaded
-        slot.state = SlotState.READY
-
-    def _retire_owned_audio_slot(self, actor, slot):
-        if (
-            self._owned_audio_actor is not actor
-            or self.slots.get(slot.slot_id) is not slot
-            or slot._owned_owner is not actor
-            or self._registry_lock.locked()
-        ):
-            raise RuntimeError("Owned audio slot changed")
-        slot._loaded = None
-        del self.slots[slot.slot_id]
 
     async def set_max_loaded_models(self, max_loaded_models: int) -> None:
         """Update slot limit without invalidating active or loading slots."""
@@ -219,17 +138,12 @@ class ModelManager:
             slot_id = str(uuid.uuid4())[:8]
             while slot_id in self.slots:
                 slot_id = str(uuid.uuid4())[:8]
-            if self._last_load_generation >= _MAX_LOAD_GENERATION:
-                raise RuntimeError("Load generation space is exhausted; recreate the runtime")
-            self._last_load_generation += 1
-            generation = str(uuid.UUID(int=self._last_load_generation))
             slot = ModelSlot(
                 slot_id=slot_id,
                 model_name=model_name,
                 model_path=model_path,
                 device=device_label,
                 state=SlotState.LOADING,
-                load_generation=generation,
                 model_type=model_type,
             )
             self.slots[slot_id] = slot
@@ -378,8 +292,6 @@ class ModelManager:
         slot = next((s for s in self.slots.values() if s.model_name == model_name), None)
         if slot is None or slot.state != SlotState.READY or slot._loaded is None:
             raise KeyError("Image model is unavailable")
-        if slot._owned_owner is not None:
-            raise ValueError("Owned model requires an exact operation borrow")
         if slot.model_type not in IMAGE_ADAPTERS:
             raise ValueError("Selected model does not support image generation")
         lock = self._get_device_lock(slot.device)
@@ -395,14 +307,7 @@ class ModelManager:
         Queued work is refused rather than waited for, matching image_lease.
         The caller keeps the lease until its generation worker has stopped.
         """
-        slot = next(
-            (
-                s
-                for s in self.slots.values()
-                if s.model_name == model_name and s._owned_owner is None
-            ),
-            None,
-        )
+        slot = next((s for s in self.slots.values() if s.model_name == model_name), None)
         if slot is None or slot.state != SlotState.READY or slot._loaded is None:
             raise KeyError(model_name)
         if slot.model_type in NON_TEXT_MODEL_TYPES or slot._loaded.tokenizer is None:
@@ -413,93 +318,25 @@ class ModelManager:
         async with lock:
             yield slot._loaded
 
-    @property
-    def runtime_instance_id(self) -> str:
-        return self._runtime_instance_id
+    @asynccontextmanager
+    async def audio_lease(self, model_name: str):
+        """Hold the slot's device lease for one transcription.
 
-    def _claim_speech_owner(self, owner) -> None:
-        # One owner for the manager's runtime, across every model and device.
-        # Closing admission does not allow another owner to bypass quarantine.
-        if self._speech_owner is not None:
-            raise RuntimeError("Speech runtime already has an operation owner")
-        self._speech_owner = owner
-
-    def speech_slot_ref(self, slot_id: str) -> SpeechSlotRef:
-        """Return private identity only, never speech availability or attestation."""
-        slot = self.slots[slot_id]
-        return SpeechSlotRef(self.runtime_instance_id, slot.slot_id, slot.load_generation)
-
-    def _resolve_speech_slot(self, ref: SpeechSlotRef) -> ModelSlot:
+        Queued work is refused rather than waited for, matching image_lease.
+        The caller keeps the lease until its transcription worker has stopped.
+        """
         from loaders.cohere_asr_loader import COHERE_ASR
 
-        if type(ref) is not SpeechSlotRef:
-            raise SpeechBindingError("invalid_slot_ref")
-        if ref.runtime_instance_id != self.runtime_instance_id:
-            raise SpeechBindingError("runtime_replaced")
-        slot = self.slots.get(ref.slot_id)
-        if slot is None or slot.load_generation != ref.load_generation:
-            raise SpeechBindingError("slot_replaced")
-        if slot.state != SlotState.READY or slot._loaded is None:
-            raise SpeechBindingError("model_unavailable")
+        slot = next((s for s in self.slots.values() if s.model_name == model_name), None)
+        if slot is None or slot.state != SlotState.READY or slot._loaded is None:
+            raise KeyError(model_name)
         if slot.model_type != COHERE_ASR:
-            raise SpeechBindingError("model_unsupported")
-        return slot
-
-    def prepare_speech(self, ref: SpeechSlotRef) -> _BoundSpeechSlot:
-        """Construct exact-slot state before any artifact custody can transfer."""
-        slot = self._resolve_speech_slot(ref)
-        return _BoundSpeechSlot(ref, self, slot, slot._loaded, slot.device)
-
-    def bind_speech(self, binding: _BoundSpeechSlot) -> None:
-        """Transfer a borrow directly into the caller's already-retained state.
-
-        All allocating construction precedes acquire. The prepared dataclass's
-        existing artifact_use field is the transfer destination, so no binding
-        or wrapper construction can strand a successfully acquired borrow.
-        """
-        if type(binding) is not _BoundSpeechSlot or binding.manager is not self:
-            raise SpeechBindingError("invalid_slot_ref")
-        if binding.artifact_use is not None or binding.released:
-            raise SpeechBindingError("invalid_slot_ref")
-        binding.artifact_use = self._speech_artifact_authority.acquire(binding.ref)
-        if binding.artifact_use is None:
-            raise SpeechBindingError("artifact_custody_unavailable")
-
-    @asynccontextmanager
-    async def speech_lease(self, binding: _BoundSpeechSlot):
-        """Recheck the admitted exact slot and authority under shared device custody.
-
-        The operation owner exits only after confirmed native/device cessation.
-        Successful exit releases the artifact borrow before the device. Any
-        exceptional exit retains unresolved custody for the owner's quarantine.
-        """
-        if type(binding) is not _BoundSpeechSlot or binding.manager is not self:
-            raise SpeechBindingError("invalid_slot_ref")
-        lock = self._get_device_lock(binding.device)
+            raise ValueError("Selected model does not support audio transcription")
+        lock = self._get_device_lock(slot.device)
         if lock.locked():
-            raise RuntimeError("Speech runtime is busy")
-        await lock.acquire()
-        try:
-            slot = self._resolve_speech_slot(binding.ref)
-            if (
-                slot is not binding.slot
-                or slot._loaded is not binding.loaded
-                or slot.device != binding.device
-                or binding.released
-                or binding.artifact_use is None
-            ):
-                raise SpeechBindingError("slot_replaced")
-            binding.artifact_use.validate(binding.ref)
-        except BaseException:
-            # No worker has acquired this lease, so non-start is established.
-            lock.release()
-            raise
-        # Deliberately no finally-release: cancellation, generator finalization,
-        # or an exceptional exit is not a native-cessation receipt. The operation
-        # owner quarantines an uncertain exit with this lock and borrow retained.
-        yield binding.loaded
-        binding.release()
-        lock.release()
+            raise SlotConflict("runtime_busy", "Audio runtime is busy")
+        async with lock:
+            yield slot._loaded
 
     def _load_sync(
         self, model_path: str, device: torch.device, model_type: Optional[str]
@@ -529,8 +366,6 @@ class ModelManager:
             slot = self.slots.get(slot_id)
             if slot is None:
                 raise KeyError(f"Slot not found: {slot_id}")
-            if slot._owned_owner is not None:
-                raise SlotConflict("owned_model", "Owned model requires exact owner unload")
             if slot.state == SlotState.LOADING:
                 raise SlotConflict("slot_loading", f"Cannot unload loading slot: {slot_id}")
             if self._get_device_lock(slot.device).locked():
@@ -565,29 +400,17 @@ class ModelManager:
     def get_model_for_inference(self, model_name: str) -> Optional[LoadedModel]:
         """Get a loaded model by name for inference."""
         for slot in self.slots.values():
-            if (
-                slot.model_name == model_name
-                and slot.state == SlotState.READY
-                and slot._loaded
-                and slot._owned_owner is None
-            ):
+            if slot.model_name == model_name and slot.state == SlotState.READY and slot._loaded:
                 return slot._loaded
         return None
 
     def list_model_names(self) -> list[str]:
         """List names of all ready models."""
-        return [
-            slot.model_name
-            for slot in self.slots.values()
-            if slot.state == SlotState.READY and slot._owned_owner is None
-        ]
+        return [slot.model_name for slot in self.slots.values() if slot.state == SlotState.READY]
 
     def _active_slot_count(self) -> int:
         return sum(
-            1
-            for slot in self.slots.values()
-            if slot.state in (SlotState.READY, SlotState.LOADING)
-            or getattr(slot, "_owned_owner", None) is not None
+            1 for slot in self.slots.values() if slot.state in (SlotState.READY, SlotState.LOADING)
         )
 
     async def _mark_slot_error(self, slot_id: str) -> None:

@@ -68,7 +68,7 @@ test('manual candidate dispatch is opt-in, source-pinned and cannot publish', ()
   assert.match(workflow, /permissions:\n  contents: read/);
   assert.doesNotMatch(workflow, /contents: write|gh release|git tag|git push|create-release|publish: always/);
   assert.match(job('release-candidate'), /write-release-metadata.py release-candidate --build-id/);
-  for (const name of ['review-inference-linux', 'review-audio-dependencies', 'torch-native-e2e']) {
+  for (const name of ['review-inference-linux', 'torch-native-e2e']) {
     assert.ok(job(name).includes("github.event_name == 'workflow_dispatch' && !inputs.build_candidates"));
   }
 });
@@ -253,41 +253,6 @@ test('release build commands never enable test-support or all-features', () => {
   assert.match(rpc, /^default = \["inference-plugins"\]$/m);
 });
 
-
-test('review audio dependency qualification requires bounded exact-source confinement', () => {
-  const audio = job('review-audio-dependencies');
-  assert.ok(audio.includes(reviewGuard));
-  assert.match(audio, /runs-on: ubuntu-24\.04/);
-  assert.match(audio, /timeout-minutes: 60/);
-  assert.match(audio, /persist-credentials: false/);
-  assert.ok(audio.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'));
-  assert.match(audio, /CARGO_BUILD_JOBS: '1'/);
-  assert.match(audio, /CARGO_PROFILE_DEV_DEBUG: '0'/);
-  assert.match(audio, /set -euo pipefail/);
-  assert.match(audio, /timeout --kill-after=30s 45m cargo run --locked/);
-  assert.match(audio, /--features test-support --example qualify_audio_dependencies -- "\$QUALIFICATION_ROOT"/);
-  assert.match(audio, /pretrained_model_acceptance/);
-  assert.match(audio, /if: always\(\)/);
-  const upload = audio.slice(audio.indexOf('uses: actions/upload-artifact'));
-  assert.doesNotMatch(upload, /review-audio-runtime|\*|rust\/target/);
-  assert.doesNotMatch(audio, /continue-on-error|secrets\.|permissions:|pull_request_target|sudo|--privileged/);
-});
-
-
-test('controlled session lifecycle reuses the installed managed interpreter without rehashing', () => {
-  const audio = job('review-audio-dependencies');
-  const controlled = audio.indexOf('Check controlled session lifecycle');
-  assert.ok(controlled > audio.indexOf('Qualify exact frozen dependencies'));
-  const step = audio.slice(controlled, audio.indexOf('Preserve confined dependency evidence only'));
-  assert.match(step, /runtime.json/);
-  // Installation verified the interpreter's hash once; later steps check its recorded path only.
-  assert.doesNotMatch(step, /hashlib|file_digest|sha256/);
-  assert.match(step, /is_relative_to\(root\)/);
-  assert.match(step, /timeout --kill-after=30s 20m cargo test --locked/);
-  assert.match(step, /runtime_profiles::audio_session::protocol_tests/);
-  assert.doesNotMatch(step, /pip install|curl |wget |continue-on-error/);
-  assert.match(audio, /controlled-session-protocol.log/);
-});
 
 test('dependency audit is advisory on reviews, blocking on candidates and feeds the release candidate', () => {
   const audit = job('dependency-audit');

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-11-06
+## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
 downloads and known limitations. This release also includes the fixes from
@@ -50,6 +50,11 @@ the 2026-11-02 audit
   and outputs the model handles and marks LoRA/PEFT adapters. A "Used as"
   choice in the model's metadata window overrides detection and survives
   re-scans (`set_model_category` RPC).
+- `audio_transcription` capability: Cohere ASR transcribes speech through the
+  Torch sidecar (`POST /api/audio/transcriptions`, advertised as the
+  `audio_transcription` sidecar capability). The `cohere-asr` Torch adapter
+  resolves current packages with a Transformers 5.4 floor, and `cohere_asr`
+  configs are classified as audio models.
 
 ### Changed
 
@@ -71,8 +76,6 @@ the 2026-11-02 audit
   stopped-reader/writer confirmation and an exact metadata-only backup.
 - Hugging Face detail resolution follows explicit model selection; cached
   discovery and live download authority remain distinguishable.
-- Installed speech has conditional custody and qualification plumbing;
-  production Audio-to-Text remains unavailable until its admission gates pass.
 - Typed operation errors always carry a human-readable `message`, echo the
   caller's `request_id` whenever it is readable, and use an HTTP status that
   matches the error code. Provider failure reasons reach the caller with
@@ -147,6 +150,8 @@ the 2026-11-02 audit
 
 ### Fixed
 
+- Local imports keep the Hugging Face `repo_id` the caller gives them;
+  copied imports other than Diffusers bundles had stored `repo_id: null`.
 - Vision-language models published as `image-text-to-text` (Gemma, Qwen VL)
   are available for chat and image-to-text instead of reporting a task mismatch.
 - A model directory's primary file is never its multimodal projector, which

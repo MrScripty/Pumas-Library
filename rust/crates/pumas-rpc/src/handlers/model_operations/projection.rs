@@ -216,11 +216,17 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
                     super::AUDIO_MAX_OUTPUT_TOKENS
                 )));
             }
-            // Byte decoding and normalization belong to the owned native bridge.
-            // Returning this closed shape grants no runtime or model authority.
-            let _declared_language = language;
-            return serde_json::to_value(request)
-                .map_err(|_| Rejection::invalid("audio request could not be encoded"));
+            // The Torch sidecar decodes, downmixes and resamples the PCM.
+            return Ok(json!({
+                "audio": {
+                    "encoding": encoding,
+                    "sample_rate_hz": sample_rate_hz,
+                    "channels": channels,
+                    "sample_count": sample_count,
+                    "data_base64": data_base64,
+                },
+                "language": language.map_or_else(|| json!("en"), |language| json!(language)),
+            }));
         }
         (Capability::TextGeneration, OperationInput::Text { .. }, _, OutputFormat::Text) => {
             return Err(Rejection::invalid("input.text must not be blank"));

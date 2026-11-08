@@ -595,6 +595,7 @@ impl ModelIndex {
               ('kandinsky', 'diffusion', 100, 'active', 'system'),
               ('pixart', 'diffusion', 100, 'active', 'system'),
               ('whisper', 'audio', 100, 'active', 'system'),
+              ('cohere_asr', 'audio', 100, 'active', 'system'),
               ('wav2vec2', 'audio', 100, 'active', 'system'),
               ('hubert', 'audio', 100, 'active', 'system'),
               ('wavlm', 'audio', 100, 'active', 'system'),

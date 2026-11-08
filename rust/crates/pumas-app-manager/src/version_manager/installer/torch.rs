@@ -1,7 +1,10 @@
 //! Managed upstream PyTorch installation; lifecycle and state remain in VersionManager.
 
 use super::*;
-use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
+use crate::torch_client::{
+    SUPPORTED_TORCH_PROTOCOL, TORCH_AUDIO_TRANSCRIPTION_CAPABILITY,
+    TORCH_IMAGE_GENERATION_CAPABILITY,
+};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -96,23 +99,6 @@ fn normalize_torch_lock_error(error: std::io::Error) -> std::io::Error {
 }
 
 impl TorchVersionsLock {
-    pub(crate) fn try_acquire_read(versions_dir: &Path) -> std::io::Result<Self> {
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
-        }
-        let file = options.open(versions_dir.join(".torch-versions.lock"))?;
-        if !file.metadata()?.is_file() {
-            return Err(std::io::Error::other("Torch lock is not regular"));
-        }
-        FileExt::try_lock_shared(&file).map_err(normalize_torch_lock_error)?;
-        Ok(Self {
-            _file: Arc::new(file),
-        })
-    }
     pub(crate) fn try_acquire(versions_dir: &Path) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -1159,36 +1145,12 @@ pub(crate) fn write_embedded_torch_sidecar(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/image_api.py"),
         ),
         (
+            "audio_api.py",
+            include_str!("../../../../../../torch-server/audio_api.py"),
+        ),
+        (
             "model_manager.py",
             include_str!("../../../../../../torch-server/model_manager.py"),
-        ),
-        (
-            "installed_cohere_source.py",
-            include_str!("../../../../../../torch-server/installed_cohere_source.py"),
-        ),
-        (
-            "owned_worker.py",
-            include_str!("../../../../../../torch-server/owned_worker.py"),
-        ),
-        (
-            "private_owned_channel.py",
-            include_str!("../../../../../../torch-server/private_owned_channel.py"),
-        ),
-        (
-            "owned_audio.py",
-            include_str!("../../../../../../torch-server/owned_audio.py"),
-        ),
-        (
-            "owned_model_operations.py",
-            include_str!("../../../../../../torch-server/owned_model_operations.py"),
-        ),
-        (
-            "speech_operations.py",
-            include_str!("../../../../../../torch-server/speech_operations.py"),
-        ),
-        (
-            "native_speech_result.py",
-            include_str!("../../../../../../torch-server/native_speech_result.py"),
         ),
         (
             "audio_input.py",
@@ -1201,14 +1163,6 @@ pub(crate) fn write_embedded_torch_sidecar(destination: &Path) -> Result<()> {
         (
             "loaders/cohere_asr_loader.py",
             include_str!("../../../../../../torch-server/loaders/cohere_asr_loader.py"),
-        ),
-        (
-            "loaders/owned_cohere_source.py",
-            include_str!("../../../../../../torch-server/loaders/owned_cohere_source.py"),
-        ),
-        (
-            "speech_binding.py",
-            include_str!("../../../../../../torch-server/speech_binding.py"),
         ),
         (
             "openai_api.py",
@@ -1616,14 +1570,6 @@ fn validate_direct_torch_report(
     if adapter == "cohere-asr" {
         super::super::cohere_asr_profile::validate(version, &resolution.artifacts)?;
     }
-    super::super::audio_runtime_recipe::validate_install_artifacts(
-        version,
-        build,
-        minor,
-        adapter,
-        &serde_json::to_value(&resolution.artifacts)?,
-    )
-    .map_err(|error| failed(error.to_string()))?;
     Ok(())
 }
 
@@ -2145,19 +2091,11 @@ impl VersionInstaller {
         // The resolver pins the Torch wheel by the URL and SHA-256 that the
         // official index publishes for this interpreter.
         let mut resolve = resolver_command(&[]);
-        let constraints = [
-            super::super::audio_runtime_recipe::install_constraints(
-                version,
-                build,
-                minor,
-                &selection.adapter,
-            )
-            .map_err(|error| failed(error.to_string()))?,
-            selection.verified_constraints.clone(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        let constraints = selection
+            .verified_constraints
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>();
         if !constraints.is_empty() {
             std::fs::create_dir_all(&resolver_output).map_err(PumasError::from)?;
             let path = resolver_output.join("install-constraints.txt");
@@ -2276,7 +2214,7 @@ impl VersionInstaller {
         let recipe = serde_json::json!({
             "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, selection.adapter),
             "protocol": SUPPORTED_TORCH_PROTOCOL,
-            "capabilities": if selection.adapter == "cohere-asr" { Vec::<&str>::new() } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
+            "capabilities": if selection.adapter == "cohere-asr" { vec![TORCH_AUDIO_TRANSCRIPTION_CAPABILITY] } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
             "qualification": "not verified by Pumas",
             "build": build,
             "python": format!("python{minor}"),
@@ -3003,87 +2941,6 @@ mod managed_python_provenance_tests {
         assert!(!target.exists());
     }
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
-    #[test]
-    fn candidate_install_refuses_consistently_reported_dependency_drift() {
-        let pin: serde_json::Value = serde_json::from_str(
-            pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE,
-        )
-        .unwrap();
-        let mut resolution = DirectTorchResolution {
-            release: "2.10.0".into(),
-            torch: "2.10.0+cpu".into(),
-            build: "cpu".into(),
-            python: "3.12".into(),
-            interpreter: "/staged/venv/python".into(),
-            implementation: "cpython".into(),
-            platform: "Linux-fixture".into(),
-            machine: "x86_64".into(),
-            adapter: "cohere-asr".into(),
-            artifacts: serde_json::from_value(pin["artifacts"].clone()).unwrap(),
-        };
-        let selection = DirectTorchSelection {
-            version: "2.10.0",
-            build: "cpu",
-            minor: "3.12",
-            adapter: "cohere-asr",
-            python: Path::new("/staged/venv/python"),
-        };
-        let check = |resolution: &DirectTorchResolution| {
-            let report = serde_json::json!({"install": resolution.artifacts.iter().map(|a|
-                serde_json::json!({"metadata": {"name": a.name, "version": a.version},
-                    "download_info": {"url": a.url, "archive_info": {"hashes": {"sha256": a.sha256}}}})
-            ).collect::<Vec<_>>()});
-            let lock = resolution
-                .artifacts
-                .iter()
-                .map(|a| format!("{} @ {} --hash=sha256:{}", a.name, a.url, a.sha256))
-                .collect::<Vec<_>>()
-                .join("\n");
-            validate_direct_torch_report(resolution, &report, &lock, &selection)
-        };
-        check(&resolution).unwrap();
-        let index = resolution
-            .artifacts
-            .iter()
-            .position(|a| a.name == "narwhals")
-            .unwrap();
-        for field in ["name", "version", "url", "sha256"] {
-            let original = resolution.artifacts[index].clone();
-            match field {
-                "name" => resolution.artifacts[index].name = "another-package".into(),
-                "version" => resolution.artifacts[index].version = "2.27.1".into(),
-                "url" => {
-                    resolution.artifacts[index].url =
-                        "https://files.pythonhosted.org/packages/changed.whl".into()
-                }
-                "sha256" => resolution.artifacts[index].sha256 = "0".repeat(64),
-                _ => unreachable!(),
-            }
-            let error = check(&resolution).expect_err(field);
-            assert!(
-                error
-                    .to_string()
-                    .contains("source-pinned audio candidate recipe"),
-                "{field}: {error}"
-            );
-            resolution.artifacts[index] = original;
-        }
-        let numpy = resolution
-            .artifacts
-            .iter_mut()
-            .find(|a| a.name == "numpy")
-            .unwrap();
-        numpy.version = "2.5.4".into();
-        let error = check(&resolution).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("source-pinned audio candidate recipe"),
-            "numpy drift: {error}"
-        );
-    }
-
     #[cfg(target_os = "linux")]
     #[test]
     fn cohere_asr_direct_report_refuses_bad_profile_before_staged_publication() {
@@ -3177,7 +3034,8 @@ mod managed_python_provenance_tests {
             .unwrap();
         std::fs::create_dir_all(venv_packages_dir(&runtime, "3.12")).unwrap();
         let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
-        for wrong in ["4.57.6", "5.4.1"] {
+        // Below the Transformers floor is refused before publication.
+        for wrong in ["4.57.6", "5.3.9"] {
             resolution.artifacts[index].version = wrong.into();
             let (report, lock) = records(&resolution);
             assert!(validate_and_move_direct_torch_packages(
@@ -3193,7 +3051,8 @@ mod managed_python_provenance_tests {
             assert!(target.join("selected.py").exists());
             assert!(std::fs::read_dir(&bootstrap.root).unwrap().next().is_none());
         }
-        resolution.artifacts[index].version = "5.4.0".into();
+        // Releases above the floor are current versions, not drift.
+        resolution.artifacts[index].version = "5.12.0".into();
         let (report, lock) = records(&resolution);
         validate_and_move_direct_torch_packages(
             &resolution,

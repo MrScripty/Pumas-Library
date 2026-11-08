@@ -131,6 +131,11 @@ headers (30 s).
   Every served model and capability now reports the modalities it accepts
   and produces, so a consumer can compose a request for a model it has no
   specific support for. See [Modalities](contracts/model-operations-v1.md#modalities).
+- **`audio_transcription`**: speech to text with Cohere ASR
+  (`CohereLabs/cohere-transcribe-03-2026`) served by Torch, in 14 languages and
+  up to 30 seconds per request. Install a Torch runtime with the `cohere-asr`
+  adapter; like the other adapters it resolves current package versions
+  (Transformers 5.4 or newer).
 - **Image-to-text**: named image and image-bearing message inputs with bounded
   sizes and typed refusals. Vision-language models published as
   `image-text-to-text` (Gemma, Qwen VL) are available for chat and
@@ -175,6 +180,8 @@ schema versions rather than matching product versions.
   and others) are not yet certified.
 - Hugging Face browsing and cache results stay separate from the download
   details resolved after you select a model.
+- An import keeps the Hugging Face repository you name for it (`repo_id`);
+  copied imports had dropped it.
 - A managed GGUF keeps its selected primary file and projector through library
   moves, and a directory's primary file is never its projector.
 - A credential-less `http://` source on a network host is fetched over HTTPS
@@ -238,8 +245,10 @@ accompany the release.
 
 - Installers are not code-signed or notarized. Windows SmartScreen and macOS
   Gatekeeper will warn on first launch.
-- Production audio-to-text (speech transcription) is not available yet.
-  Audio understanding through chat and decision models is available.
+- Audio transcription supports Cohere ASR through Torch only, one recording
+  of up to 30 seconds per request. Pumas CI exercises the sidecar and gateway
+  with test fixtures; the Cohere weights are gated, so the real model has not
+  been run in CI.
 - Speech output and video input are not available yet, even for models
   whose runtime declares them.
 - An adapter with no task tag or base-model evidence (for example the LTX-2.3
@@ -249,6 +258,9 @@ accompany the release.
   shows *image → video*; it also accepts text and produces audio, which its
   published metadata does not state.
 - S3 imports are not certified for specific providers.
+- An import made through the RPC API records its Hugging Face source only
+  when the caller names it (`repo_id`). Automatic identification of imported
+  files is planned for 0.8.x.
 - No UniFFI or Rustler host packages are published; the Python session helper
   is a reference example, not a supported SDK.
 

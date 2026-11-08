@@ -148,67 +148,51 @@ class AdapterImportProbeTests(TestCase):
         ).hexdigest()
         self.assertEqual(result["context"]["hardware_fingerprint"], expected_fingerprint)
 
-    def test_cohere_asr_probe_exact_native_classes_and_versions_are_only_import_evidence(self):
+    def test_cohere_asr_probe_checks_imports_and_floors_without_a_model(self):
         symbols = {
             name: object()
             for name in (
-                "CohereAsrFeatureExtractor",
-                "TokenizersBackend",
-                "CohereAsrProcessor",
+                "AutoProcessor",
                 "CohereAsrForConditionalGeneration",
                 "StoppingCriteria",
                 "StoppingCriteriaList",
             )
         }
-        versions = {
-            "torch": "2.10.0+cpu",
-            "transformers": "5.4.0",
-            "accelerate": "1.12.0",
-            "huggingface-hub": "1.5.0",
-            "tokenizers": "0.22.2",
-        }
-        with (
-            patch.object(
-                probe_runtime.importlib, "import_module", return_value=SimpleNamespace(**symbols)
-            ) as imported,
-            patch.object(
-                probe_runtime.importlib.metadata,
-                "version",
-                side_effect=lambda name: versions.get(name, "1.0.0"),
-            ),
-        ):
-            result = probe_runtime.cohere_asr_import_probe()
-        self.assertEqual(result["status"], "inconclusive")
-        self.assertIn("runtime closure unqualified", result["scope"])
-        self.assertEqual(result["profile"], "cohere-asr-transformers-5.4.0")
-        self.assertIn("librosa", [call.args[0] for call in imported.call_args_list])
-        for name, wrong in (
-            ("torch", "2.3.1+cpu"),
-            ("transformers", "4.57.6"),
-            ("transformers", "5.4.1"),
-            ("accelerate", "1.0.0"),
-            ("huggingface-hub", "2.0.0"),
-            ("tokenizers", "0.23.1"),
-        ):
+        versions = {"torch": "2.10.0+cpu", "transformers": "5.4.0", "accelerate": "1.12.0"}
+
+        def probe(overrides=None, available=symbols):
+            current = {**versions, **(overrides or {})}
             with (
-                self.subTest(name=name, wrong=wrong),
                 patch.object(
                     probe_runtime.importlib,
                     "import_module",
-                    return_value=SimpleNamespace(**symbols),
-                ),
+                    return_value=SimpleNamespace(**available),
+                ) as imported,
                 patch.object(
                     probe_runtime.importlib.metadata,
                     "version",
-                    side_effect=lambda key: wrong if key == name else versions.get(key, "1.0.0"),
+                    side_effect=lambda name: current.get(name, "1.0.0"),
                 ),
             ):
-                self.assertEqual(probe_runtime.cohere_asr_import_probe()["status"], "unavailable")
-        del symbols["TokenizersBackend"]
-        with patch.object(
-            probe_runtime.importlib, "import_module", return_value=SimpleNamespace(**symbols)
+                return probe_runtime.cohere_asr_import_probe(), imported
+
+        result, imported = probe()
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertEqual(result["profile"], "cohere-asr")
+        self.assertIn("no model loaded", result["scope"])
+        self.assertIn("librosa", [call.args[0] for call in imported.call_args_list])
+        for name, current in (("transformers", "5.12.0"), ("transformers", "6.0.0.dev0")):
+            with self.subTest(name=name, current=current):
+                self.assertEqual(probe({name: current})[0]["status"], "inconclusive")
+        for name, wrong in (
+            ("torch", "2.3.1+cpu"),
+            ("transformers", "4.57.6"),
+            ("accelerate", "1.0.0"),
         ):
-            self.assertEqual(probe_runtime.cohere_asr_import_probe()["status"], "unavailable")
+            with self.subTest(name=name, wrong=wrong):
+                self.assertEqual(probe({name: wrong})[0]["status"], "unavailable")
+        missing = {k: v for k, v in symbols.items() if k != "CohereAsrForConditionalGeneration"}
+        self.assertEqual(probe(available=missing)[0]["status"], "unavailable")
 
     def test_cohere_asr_selection_is_independent_of_image_device_and_image_imports(self):
         class Tensor:

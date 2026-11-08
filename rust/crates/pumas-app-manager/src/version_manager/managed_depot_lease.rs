@@ -1,5 +1,5 @@
 //! Cooperative lifetime exclusion for an existing managed CPython depot.
-//! The permanent lock inode is shared by read custody and provider mutation.
+//! Provider mutation holds the permanent lock inode exclusively.
 
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
@@ -13,14 +13,7 @@ pub(crate) struct ManagedDepotLease {
 }
 
 impl ManagedDepotLease {
-    pub(crate) fn read(depot: &Path) -> io::Result<Self> {
-        Self::acquire(depot, false)
-    }
     pub(crate) fn mutation(depot: &Path) -> io::Result<Self> {
-        Self::acquire(depot, true)
-    }
-
-    fn acquire(depot: &Path, mutation: bool) -> io::Result<Self> {
         let metadata = std::fs::symlink_metadata(depot)?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(io::Error::new(
@@ -42,11 +35,7 @@ impl ManagedDepotLease {
                 "managed depot lock is not regular",
             ));
         }
-        if mutation {
-            FileExt::try_lock_exclusive(&file)?;
-        } else {
-            FileExt::try_lock_shared(&file)?;
-        }
+        FileExt::try_lock_exclusive(&file)?;
         Ok(Self {
             file: Arc::new(file),
         })
@@ -65,20 +54,15 @@ impl Drop for ManagedDepotLease {
 mod tests {
     use super::*;
     #[test]
-    fn shared_readers_exclude_mutation_until_last_owner_leaves() {
+    fn mutation_is_exclusive_until_the_last_clone_leaves() {
         let depot = tempfile::tempdir().unwrap();
-        let first = ManagedDepotLease::read(depot.path()).unwrap();
-        let second = ManagedDepotLease::read(depot.path()).unwrap();
+        let first = ManagedDepotLease::mutation(depot.path()).unwrap();
         let retained = first.clone();
         assert!(ManagedDepotLease::mutation(depot.path()).is_err());
         drop(first);
-        drop(second);
         assert!(ManagedDepotLease::mutation(depot.path()).is_err());
         drop(retained);
-        let mutation = ManagedDepotLease::mutation(depot.path()).unwrap();
-        assert!(ManagedDepotLease::read(depot.path()).is_err());
-        drop(mutation);
-        ManagedDepotLease::read(depot.path()).unwrap();
+        ManagedDepotLease::mutation(depot.path()).unwrap();
         assert!(depot.path().join(".pumas-python-depot.lock").is_file());
     }
     #[cfg(unix)]
@@ -87,7 +71,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let other = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(other.path(), root.path().join("alias")).unwrap();
-        assert!(ManagedDepotLease::read(&root.path().join("alias")).is_err());
+        assert!(ManagedDepotLease::mutation(&root.path().join("alias")).is_err());
         let target = other.path().join("keep");
         std::fs::write(&target, b"untouched").unwrap();
         std::os::unix::fs::symlink(&target, root.path().join(".pumas-python-depot.lock")).unwrap();

@@ -389,7 +389,7 @@ optional; send them to bind requests to one owner generation.
 | `image` / `image_messages` / image-bearing `messages` → `text` | `image_to_text` (dedicated llama.cpp with projector) |
 | `decision` → `decisions` | `decision` (llama.cpp native decision models such as Kev, OpenJev and Laya) |
 | `rerank` → `relevance_scores` | `rerank` (llama.cpp rerankers such as Qwen3-Reranker) |
-| `audio` → `text` | `audio_transcription` (unavailable until the installed speech runtime is qualified) |
+| `audio` → `text` | `audio_transcription` (Torch audio models such as Cohere ASR) |
 
 Every error has `code`, `outcome` (`not_admitted` or `unknown`) and a
 human-readable `message`, and echoes the caller's `request_id` when the body

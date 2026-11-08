@@ -7,12 +7,14 @@ use super::serving::{
 use crate::server::AppState;
 use pumas_app_manager::torch_client::{
     ComputeDevice, ImageModelComponents, SlotState, TorchClient,
+    TORCH_AUDIO_TRANSCRIPTION_CAPABILITY, TORCH_IMAGE_GENERATION_CAPABILITY,
 };
 use pumas_library::models::{
-    AssetValidationState, ModelServeErrorCode, RuntimeProfileId, RuntimeProviderId,
-    ServeModelRequest, ServeModelResponse, ServedModelLoadState, ServedModelStatus,
-    UnserveModelRequest, UnserveModelResponse,
+    AssetValidationState, ModelServeErrorCode, RuntimeDeviceMode, RuntimeProfileId,
+    RuntimeProviderId, ServeModelRequest, ServeModelResponse, ServedModelLoadState,
+    ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
 };
+use pumas_library::runtime_profiles::OwnedRuntimeProfileObservation;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -46,7 +48,7 @@ pub(super) async fn serve_torch_model(
         .as_ref()
         .is_some_and(|record| record.model_type == "audio")
     {
-        return super::serving_audio::serve_audio_model(state, request, operation).await;
+        return serve_torch_audio_model(state, request, operation).await;
     }
     let repository = record
         .as_ref()
@@ -143,113 +145,10 @@ pub(super) async fn serve_torch_model(
     if !resources.success || gpu.memory_total.saturating_sub(gpu.memory) < 4 * 1024 * 1024 * 1024 {
         return non_critical_failure_response(state, fail(ModelServeErrorCode::InsufficientMemory, "Pumas telemetry reports less than 4 GiB free GPU memory for the offloaded image pipeline")).await;
     }
-    let Some(manager) = super::get_version_manager(state, "torch").await else {
-        return non_critical_failure_response(
-            state,
-            fail(
-                ModelServeErrorCode::MissingRuntime,
-                "Torch runtime manager is unavailable",
-            ),
-        )
-        .await;
+    let (owned, client) = match start_torch_runtime(state, &request).await? {
+        Ok(started) => started,
+        Err(refusal) => return Ok(refusal),
     };
-    let torch_lifecycle_lease = manager.torch_lifecycle_lease().await?;
-    let Some(tag) = manager.get_active_version().await? else {
-        return non_critical_failure_response(
-            state,
-            fail(
-                ModelServeErrorCode::MissingRuntime,
-                "Install and explicitly select a Torch runtime first",
-            ),
-        )
-        .await;
-    };
-    if let Err(error) = manager.verify_torch_identity(&tag).await {
-        tracing::warn!(%error, %tag, "Selected Torch runtime identity check failed");
-        return non_critical_failure_response(
-            state,
-            fail(
-                ModelServeErrorCode::MissingRuntime,
-                "Selected Torch runtime failed its installed identity check",
-            ),
-        )
-        .await;
-    }
-    let version_dir = manager.version_path(&tag)?;
-    let existing = state
-        .api
-        .observe_owned_runtime_profile(&request.config.profile_id)?;
-    let owned = match existing
-        .filter(|owned| owned.state == pumas_library::models::RuntimeLifecycleState::Running)
-    {
-        Some(owned) => owned,
-        None => {
-            let receipt = state
-                .api
-                .launch_runtime_profile_for_model_with_receipt(
-                    request.config.profile_id.clone(),
-                    &tag,
-                    &version_dir,
-                    None,
-                    None,
-                )
-                .await;
-            match receipt {
-                Ok(receipt) if receipt.response.success && receipt.observation.is_some() => {
-                    receipt.observation.unwrap()
-                }
-                result => {
-                    tracing::warn!(?result, "Managed Torch profile launch failed");
-                    return non_critical_failure_response(
-                        state,
-                        fail(
-                            ModelServeErrorCode::ProviderLoadFailed,
-                            "Managed Torch profile failed to start; inspect its runtime log",
-                        ),
-                    )
-                    .await;
-                }
-            }
-        }
-    };
-    drop(torch_lifecycle_lease);
-    let client = TorchClient::for_owned_sidecar(owned.endpoint_url.as_str());
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
-    loop {
-        if state
-            .api
-            .observe_owned_runtime_profile(&request.config.profile_id)?
-            .as_ref()
-            != Some(&owned)
-        {
-            return non_critical_failure_response(
-                state,
-                fail(
-                    ModelServeErrorCode::EndpointUnavailable,
-                    "Torch process ownership changed while waiting for startup",
-                ),
-            )
-            .await;
-        }
-        if state
-            .api
-            .owned_runtime_profile_has_listener(&request.config.profile_id, &owned)?
-            && client.health_check().await.unwrap_or(false)
-        {
-            break;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return non_critical_failure_response(
-                state,
-                fail(
-                    ModelServeErrorCode::EndpointUnavailable,
-                    "Managed Torch runtime did not become healthy within 60 seconds",
-                ),
-            )
-            .await;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
     // The handshake (protocol plus capability) must pass before any model
     // load or publication through this runtime.
     if let Err(error) = client.verify_image_runtime().await {
@@ -310,6 +209,294 @@ pub(super) async fn serve_torch_model(
             .await;
         }
     };
+    publish_torch_slot(
+        state,
+        &request,
+        operation,
+        &owned,
+        &client,
+        &slot,
+        TORCH_IMAGE_GENERATION_CAPABILITY,
+    )
+    .await
+}
+
+/// The Transformers config `model_type` of the Cohere ASR models Torch serves.
+const COHERE_ASR_CONFIG_TYPE: &str = "cohere_asr";
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+
+/// The package directory of a library audio model Torch can transcribe with,
+/// or the reason it cannot.
+async fn cohere_package(state: &AppState, model_id: &str) -> Result<PathBuf, String> {
+    let descriptor = state
+        .api
+        .resolve_model_execution_descriptor(model_id)
+        .await
+        .map_err(|error| format!("The audio model's files could not be resolved: {error}"))?;
+    let entry = PathBuf::from(descriptor.entry_path);
+    let root = match tokio::fs::metadata(&entry).await {
+        Ok(metadata) if metadata.is_dir() => entry,
+        Ok(_) => entry
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or("The audio model has no package directory")?,
+        Err(_) => return Err("The audio model's files are missing from the library".into()),
+    };
+    let config = root.join("config.json");
+    let declared = match tokio::fs::metadata(&config).await {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_CONFIG_BYTES => {
+            tokio::fs::read(&config)
+                .await
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                .and_then(|value| value["model_type"].as_str().map(str::to_owned))
+        }
+        _ => None,
+    };
+    match declared.as_deref() {
+        Some(COHERE_ASR_CONFIG_TYPE) => Ok(root),
+        Some(other) => Err(format!(
+            "Torch transcribes Cohere ASR models; this model's config.json declares model_type \"{other}\""
+        )),
+        None => Err("Torch transcribes Cohere ASR models; this audio model has no readable config.json".into()),
+    }
+}
+
+/// The device a managed Torch profile loads an audio model on. The profile
+/// owns device visibility, so CUDA device zero is its first visible device.
+fn audio_device(mode: RuntimeDeviceMode) -> ComputeDevice {
+    match mode {
+        RuntimeDeviceMode::Cpu => ComputeDevice::Cpu,
+        RuntimeDeviceMode::Auto => ComputeDevice::Auto,
+        RuntimeDeviceMode::Gpu | RuntimeDeviceMode::Hybrid | RuntimeDeviceMode::SpecificDevice => {
+            ComputeDevice::Cuda(0)
+        }
+    }
+}
+
+/// Serve a Cohere ASR library model through the managed Torch runtime.
+async fn serve_torch_audio_model(
+    state: &AppState,
+    request: ServeModelRequest,
+    operation: &pumas_library::serving::ServingLoadOperation,
+) -> pumas_library::Result<Value> {
+    let fail = |code, message: &str| serving_error(code, message, &request);
+    let package = match cohere_package(state, &request.model_id).await {
+        Ok(package) => package,
+        Err(reason) => {
+            return non_critical_failure_response(
+                state,
+                fail(ModelServeErrorCode::ModelNotExecutable, &reason),
+            )
+            .await;
+        }
+    };
+    let (owned, client) = match start_torch_runtime(state, &request).await? {
+        Ok(started) => started,
+        Err(refusal) => return Ok(refusal),
+    };
+    if let Err(error) = client
+        .verify_runtime(TORCH_AUDIO_TRANSCRIPTION_CAPABILITY)
+        .await
+    {
+        tracing::warn!(%error, "Selected Torch runtime cannot transcribe audio");
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::ProviderLoadFailed,
+                "Selected Torch runtime cannot transcribe audio; reinstall or repair it so it includes the audio route",
+            ),
+        )
+        .await;
+    }
+    let slots = client.list_slots().await?;
+    if slots.iter().any(|slot| slot.model_name == request.model_id) {
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::ProviderLoadFailed,
+                "This audio model already occupies a Torch slot; unload it before loading again",
+            ),
+        )
+        .await;
+    }
+    let slot = match client
+        .load_model(
+            &package.to_string_lossy(),
+            &request.model_id,
+            &audio_device(request.config.device_mode),
+            Some("cohere-asr"),
+        )
+        .await
+    {
+        Ok(slot) if slot.state == SlotState::Ready => slot,
+        Ok(slot) => {
+            tracing::warn!(?slot, "Torch audio load did not become ready");
+            return non_critical_failure_response(
+                state,
+                fail(
+                    ModelServeErrorCode::ProviderLoadFailed,
+                    "Cohere ASR did not become ready in this Torch runtime; inspect its runtime log",
+                ),
+            )
+            .await;
+        }
+        Err(error) => {
+            // The sidecar's reason names what is missing, such as Transformers >=5.4.
+            let reason = format!("Cohere ASR could not load in this Torch runtime: {error}");
+            return non_critical_failure_response(
+                state,
+                fail(ModelServeErrorCode::ProviderLoadFailed, &reason),
+            )
+            .await;
+        }
+    };
+    publish_torch_slot(
+        state,
+        &request,
+        operation,
+        &owned,
+        &client,
+        &slot,
+        TORCH_AUDIO_TRANSCRIPTION_CAPABILITY,
+    )
+    .await
+}
+
+/// Start (or reuse) the profile's managed Torch runtime and wait until it
+/// answers. A refusal is returned as the already-built serving response.
+async fn start_torch_runtime(
+    state: &AppState,
+    request: &ServeModelRequest,
+) -> pumas_library::Result<Result<(OwnedRuntimeProfileObservation, TorchClient), Value>> {
+    let fail = |code, message| serving_error(code, message, request);
+    let Some(manager) = super::get_version_manager(state, "torch").await else {
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::MissingRuntime,
+                "Torch runtime manager is unavailable",
+            ),
+        )
+        .await
+        .map(Err);
+    };
+    let torch_lifecycle_lease = manager.torch_lifecycle_lease().await?;
+    let Some(tag) = manager.get_active_version().await? else {
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::MissingRuntime,
+                "Install and explicitly select a Torch runtime first",
+            ),
+        )
+        .await
+        .map(Err);
+    };
+    if let Err(error) = manager.verify_torch_identity(&tag).await {
+        tracing::warn!(%error, %tag, "Selected Torch runtime identity check failed");
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::MissingRuntime,
+                "Selected Torch runtime failed its installed identity check",
+            ),
+        )
+        .await
+        .map(Err);
+    }
+    let version_dir = manager.version_path(&tag)?;
+    let existing = state
+        .api
+        .observe_owned_runtime_profile(&request.config.profile_id)?;
+    let owned = match existing
+        .filter(|owned| owned.state == pumas_library::models::RuntimeLifecycleState::Running)
+    {
+        Some(owned) => owned,
+        None => {
+            let receipt = state
+                .api
+                .launch_runtime_profile_for_model_with_receipt(
+                    request.config.profile_id.clone(),
+                    &tag,
+                    &version_dir,
+                    None,
+                    None,
+                )
+                .await;
+            match receipt {
+                Ok(receipt) if receipt.response.success && receipt.observation.is_some() => {
+                    receipt.observation.unwrap()
+                }
+                result => {
+                    tracing::warn!(?result, "Managed Torch profile launch failed");
+                    return non_critical_failure_response(
+                        state,
+                        fail(
+                            ModelServeErrorCode::ProviderLoadFailed,
+                            "Managed Torch profile failed to start; inspect its runtime log",
+                        ),
+                    )
+                    .await
+                    .map(Err);
+                }
+            }
+        }
+    };
+    drop(torch_lifecycle_lease);
+    let client = TorchClient::for_owned_sidecar(owned.endpoint_url.as_str());
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        if state
+            .api
+            .observe_owned_runtime_profile(&request.config.profile_id)?
+            .as_ref()
+            != Some(&owned)
+        {
+            return non_critical_failure_response(
+                state,
+                fail(
+                    ModelServeErrorCode::EndpointUnavailable,
+                    "Torch process ownership changed while waiting for startup",
+                ),
+            )
+            .await
+            .map(Err);
+        }
+        if state
+            .api
+            .owned_runtime_profile_has_listener(&request.config.profile_id, &owned)?
+            && client.health_check().await.unwrap_or(false)
+        {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return non_critical_failure_response(
+                state,
+                fail(
+                    ModelServeErrorCode::EndpointUnavailable,
+                    "Managed Torch runtime did not become healthy within 60 seconds",
+                ),
+            )
+            .await
+            .map(Err);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Ok(Ok((owned, client)))
+}
+
+/// Re-verify the runtime and its owning process, then publish the loaded slot.
+async fn publish_torch_slot(
+    state: &AppState,
+    request: &ServeModelRequest,
+    operation: &pumas_library::serving::ServingLoadOperation,
+    owned: &OwnedRuntimeProfileObservation,
+    client: &TorchClient,
+    slot: &pumas_app_manager::ModelSlot,
+    capability: &'static str,
+) -> pumas_library::Result<Value> {
+    let fail = |code, message| serving_error(code, message, request);
     // Re-verify live compatibility and process identity before publication:
     // the sidecar may have been replaced while the model loaded, and a stale
     // admission must not publish. Replacement, incompatibility, load failure,
@@ -321,7 +508,7 @@ pub(super) async fn serve_torch_model(
         .api
         .observe_owned_runtime_profile(&request.config.profile_id)?
         .as_ref()
-        != Some(&owned)
+        != Some(owned)
     {
         if let Err(cleanup) = client.unload_model(&slot.slot_id).await {
             tracing::warn!(%cleanup, "Failed to compensate Torch slot after replacement");
@@ -335,7 +522,7 @@ pub(super) async fn serve_torch_model(
         )
         .await;
     }
-    if let Err(error) = client.verify_image_runtime().await {
+    if let Err(error) = client.verify_runtime(capability).await {
         tracing::warn!(%error, "Torch runtime became incompatible while loading");
         if let Err(cleanup) = client.unload_model(&slot.slot_id).await {
             tracing::warn!(%cleanup, "Failed to compensate Torch slot after incompatibility");
@@ -344,7 +531,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::ProviderLoadFailed,
-                "Selected Torch runtime lost image compatibility",
+                "Selected Torch runtime lost compatibility while the model loaded",
             ),
         )
         .await;
@@ -362,13 +549,13 @@ pub(super) async fn serve_torch_model(
         context_size: None,
         keep_loaded: request.config.keep_loaded,
         endpoint_url: Some(owned.endpoint_url.clone()),
-        memory_bytes: slot.gpu_memory_bytes,
+        memory_bytes: slot.gpu_memory_bytes.or(slot.ram_memory_bytes),
         loaded_at: None,
         last_error: None,
     };
     let mut snapshot = match state
         .api
-        .record_served_model_for_operation_and_owned_profile(operation, status.clone(), &owned)
+        .record_served_model_for_operation_and_owned_profile(operation, status.clone(), owned)
     {
         Ok(snapshot) => snapshot,
         Err(error) => {
@@ -518,16 +705,6 @@ pub(super) async fn unserve_torch_model(
     profile_id: RuntimeProfileId,
     model_alias: String,
 ) -> pumas_library::Result<Value> {
-    if state
-        .api
-        .model_library()
-        .get_model(&request.model_id)
-        .await?
-        .is_some_and(|record| record.model_type == "audio")
-    {
-        return super::serving_audio::unserve_audio_model(state, &profile_id, &request.model_id)
-            .await;
-    }
     let endpoint = state
         .api
         .resolve_model_runtime_profile_endpoint_for_operation(

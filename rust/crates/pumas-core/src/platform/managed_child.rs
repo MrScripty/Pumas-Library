@@ -234,36 +234,6 @@ impl ManagedChild {
         self.child.as_ref().expect("managed child retained").id()
     }
 
-    /// Transfer this child's private protocol pipes once. Both ends must exist;
-    /// a missing end refuses without partially consuming the other. Extracted
-    /// pipes never confer process-stop or cleanup authority.
-    // Shipping audio qualifier remains closed; only Unix tests open the pipes.
-    #[cfg_attr(not(all(test, unix)), allow(dead_code))]
-    pub(crate) fn take_private_stdio(
-        &mut self,
-    ) -> io::Result<(std::process::ChildStdin, std::process::ChildStdout)> {
-        let child = self.child.as_mut().expect("managed child retained");
-        if child.stdin.is_none() || child.stdout.is_none() {
-            return Err(io::Error::other("Private child protocol pipes unavailable"));
-        }
-        Ok((
-            child.stdin.take().expect("both pipes checked"),
-            child.stdout.take().expect("both pipes checked"),
-        ))
-    }
-
-    /// Transfer the private diagnostic pipe to the exact session owner. A
-    /// diagnostic consumer cannot stop the process or discharge its custody.
-    #[allow(dead_code)] // Only the Linux installed-audio session consumes this today.
-    pub(crate) fn take_private_stderr(&mut self) -> io::Result<std::process::ChildStderr> {
-        self.child
-            .as_mut()
-            .expect("managed child retained")
-            .stderr
-            .take()
-            .ok_or_else(|| io::Error::other("Private child diagnostic pipe unavailable"))
-    }
-
     /// Retain every attached lease with this exact child until confirmed drain.
     /// Later guards drop before previously attached prerequisites.
     pub fn attach_cleanup_lease<T: Send + Sync + 'static>(&mut self, lease: Arc<T>) {
@@ -1005,55 +975,6 @@ mod windows {
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod unix_tests {
     use super::*;
-
-    #[test]
-    fn private_stdio_transfers_once_and_matches_actual_child() {
-        use std::io::{Read, Write};
-        use std::process::Stdio;
-        let custody = ManagedChildCustodySlot::new();
-        let mut command = Command::new("/bin/sh");
-        command
-            .args(["-c", "read value; printf '%s' \"$value\""])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped());
-        let mut child = ManagedChild::spawn(&mut command, custody).unwrap();
-        let (mut input, mut output) = child.take_private_stdio().unwrap();
-        assert!(child.take_private_stdio().is_err());
-        input.write_all(b"original-child\n").unwrap();
-        input.flush().unwrap();
-        drop(input);
-        let mut reply = String::new();
-        output.read_to_string(&mut reply).unwrap();
-        assert_eq!(reply, "original-child");
-        child.terminate_and_drain(Duration::from_secs(5)).unwrap();
-    }
-
-    #[test]
-    fn missing_private_stdio_end_does_not_consume_present_end() {
-        use std::process::Stdio;
-        for missing_output in [false, true] {
-            let mut command = Command::new("/bin/sh");
-            command
-                .args(["-c", "read held"])
-                .stdin(if missing_output {
-                    Stdio::piped()
-                } else {
-                    Stdio::null()
-                })
-                .stdout(if missing_output {
-                    Stdio::null()
-                } else {
-                    Stdio::piped()
-                });
-            let mut child =
-                ManagedChild::spawn(&mut command, ManagedChildCustodySlot::new()).unwrap();
-            assert!(child.take_private_stdio().is_err());
-            let original = child.child.as_ref().unwrap();
-            assert_eq!(original.stdin.is_some(), missing_output);
-            assert_eq!(original.stdout.is_some(), !missing_output);
-            child.terminate_and_drain(Duration::from_secs(5)).unwrap();
-        }
-    }
 
     fn wait_for(path: &std::path::Path) -> u32 {
         let deadline = Instant::now() + Duration::from_secs(5);

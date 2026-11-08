@@ -32,7 +32,6 @@ Internal boundaries:
 - [Artifact acquisition](contracts/artifact-acquisition.md), [Hugging Face model-detail cache](contracts/hf-model-detail-cache.md) and [retained download reconciliation](contracts/download-location-reconciliation.md)
 - [Restricted catalog/query owner custody](contracts/restricted-owner-custody.md)
 - [Torch provider protocol](contracts/torch-provider-protocol.md)
-- Audio: [custody foundation](contracts/audio-custody-foundation.md), [owned transport](contracts/owned-audio-transport.md), [owned lifecycle](contracts/owned-audio-lifecycle.md), [installed constructor](contracts/installed-audio-constructor.md), [installed session](contracts/installed-audio-session.md), [Cohere qualification](contracts/cohere-native-qualification.md) and [Cohere cohort](contracts/cohere-native-cohort.md)
 - [Image-to-text native qualification](contracts/image-to-text-native-qualification.md)
 
 Each native qualification contract links its machine-readable cohort or

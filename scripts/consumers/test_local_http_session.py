@@ -69,6 +69,7 @@ class DescriptorFixtures(unittest.TestCase):
         value = {
             "capability": "image_to_text", "semantic_task": "image_to_text",
             "input_formats": ["messages_image"], "output_formats": ["text"],
+            "input_modalities": ["text", "image"], "output_modalities": ["text"],
             "streaming": False, "availability": {"state": "available"},
             "option_bounds": [{"option": "max_tokens", "minimum": 1, "maximum": 4096}],
             "future_field": {"kept": True},
@@ -86,6 +87,9 @@ class DescriptorFixtures(unittest.TestCase):
         self.assertIn("decision", consumer._enum_values(schema, "Capability"))
         self.assertIn("multimodal_embedding", consumer._enum_values(schema, "Capability"))
         self.assertIn("rerank", consumer._enum_values(schema, "Capability"))
+        self.assertIn("messages_multimodal", consumer._enum_values(schema, "InputFormat"))
+        self.assertEqual(consumer._enum_values(schema, "Modality"),
+                         ["text", "image", "audio", "video", "json", "vector"])
         self.assertIn("image_to_text", consumer._enum_values(schema, "SemanticTask"))
 
     def test_valid_descriptor_keeps_additional_fields(self):
@@ -101,7 +105,9 @@ class DescriptorFixtures(unittest.TestCase):
                 self.descriptor(capability="teleport"), self.descriptor(input_formats=["gif"]),
                 self.descriptor(availability={"state": "unavailable", "reason": "tired"}),
                 self.descriptor(option_bounds=[{"option": "speed", "minimum": 0, "maximum": 1}]),
+                self.descriptor(input_modalities=["smell"]),
             ],
+            "descriptor modalities must be arrays": [self.descriptor(output_modalities="text")],
             "descriptor streaming must be Boolean": [self.descriptor(streaming="no")],
             "missing descriptor fields": [self.descriptor(availability={"state": "unavailable"})],
             "unknown descriptor availability": [self.descriptor(availability={"state": "maybe"})],

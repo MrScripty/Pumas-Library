@@ -57,7 +57,17 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             OperationOptions::TextGeneration { .. },
             OutputFormat::Text,
         ) => {
-            body["messages"] = super::image_input::provider_messages(&request.input)?;
+            body["messages"] = super::parts::provider_messages(&request.input)?;
+        }
+        // Chat over messages with non-text parts: every primitive the
+        // served model declares, packed by the shared chat encoder.
+        (
+            Capability::ChatGeneration,
+            OperationInput::ImageMessages { .. },
+            OperationOptions::TextGeneration { .. },
+            OutputFormat::Text,
+        ) => {
+            body["messages"] = super::parts::provider_messages(&request.input)?;
         }
         (
             Capability::TextGeneration,
@@ -92,6 +102,7 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
                 state,
                 questions,
                 images,
+                audio,
             },
             OperationOptions::Decision {},
             OutputFormat::Decisions,
@@ -99,7 +110,10 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             body["state"] = state.clone();
             body["questions"] = json!(questions);
             if !images.is_empty() {
-                body["images"] = json!(super::image_input::decision_images(images)?);
+                body["images"] = json!(super::parts::decision_images(images)?);
+            }
+            if !audio.is_empty() {
+                body["files"] = json!(super::parts::decision_files(audio)?);
             }
         }
         (
@@ -136,7 +150,7 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             if *dimensions == Some(0) {
                 return Err(Rejection::invalid("options.dimensions must be at least 1"));
             }
-            body["input"] = super::image_input::embedding_items(&request.input)?;
+            body["input"] = super::parts::embedding_items(&request.input)?;
         }
         (
             Capability::ImageGeneration,
@@ -264,8 +278,12 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
 }
 /// Validate the finite vision contract without decoding image bytes. Resolver
 /// selection uses this; the handler performs the bounded image projection once.
+/// Light checks for chat over image or audio parts (`image_to_text`, or
+/// `chat_generation` with part messages) before any decoding.
 pub fn validate_image_to_text_request(request: &OperationRequest) -> Result<(), Rejection> {
-    if request.capability != Capability::ImageToText
+    let media_chat = request.capability == Capability::ChatGeneration
+        && matches!(request.input, OperationInput::ImageMessages { .. });
+    if (request.capability != Capability::ImageToText && !media_chat)
         || request.stream
         || request.output != OutputFormat::Text
         || !matches!(

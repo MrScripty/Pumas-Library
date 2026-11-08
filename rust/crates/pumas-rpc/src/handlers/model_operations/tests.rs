@@ -1539,11 +1539,14 @@ fn declared(capability: Capability, available: bool) -> CapabilityDescriptor {
             vec![OutputFormat::RelevanceScores],
         ),
     };
+    let (accepts, produces) = super::protocol_modalities(capability);
     CapabilityDescriptor {
         capability,
         semantic_task,
         input_formats,
         output_formats,
+        input_modalities: accepts.to_vec(),
+        output_modalities: produces.to_vec(),
         streaming: capability.text_generation(),
         availability: if available {
             Availability::Available

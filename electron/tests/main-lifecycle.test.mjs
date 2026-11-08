@@ -570,7 +570,7 @@ test('packaged builds ignore --dev and --debug and install a menu without DevToo
     const [window] = harness.windows;
     try {
       if (packaged) {
-        assert.deepEqual(window.loads, [{ file: '/opt/pumas/resources/frontend/index.html' }],
+        assert.deepEqual(window.loads, [{ file: join('/opt/pumas/resources', 'frontend', 'index.html') }],
           'a packaged build never loads the dev server');
         assert.equal(window.options.webPreferences.devTools, false);
         assert.equal(window.webContents.devToolsOpened, 0);

@@ -299,7 +299,7 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
         }
         let before_capability_query = calls.lock().unwrap().clone();
         let value = caps(state).await;
-        assert_eq!(value["capabilities"].as_array().unwrap().len(), 9);
+        assert_eq!(value["capabilities"].as_array().unwrap().len(), 10);
         let descriptor = &value["capabilities"][6];
         assert_eq!(descriptor["capability"], "image_to_text");
         assert_eq!(descriptor["semantic_task"], "image_to_text");

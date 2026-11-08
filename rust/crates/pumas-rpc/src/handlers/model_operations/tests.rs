@@ -1533,6 +1533,11 @@ fn declared(capability: Capability, available: bool) -> CapabilityDescriptor {
             vec![InputFormat::Decision],
             vec![OutputFormat::Decisions],
         ),
+        Capability::Rerank => (
+            SemanticTask::Rerank,
+            vec![InputFormat::Rerank],
+            vec![OutputFormat::RelevanceScores],
+        ),
     };
     CapabilityDescriptor {
         capability,
@@ -2401,5 +2406,150 @@ async fn decision_answers_of_the_wrong_type_are_invalid_provider_results() {
     let body = json_body(operation(state, decision_request()).await).await;
     assert_eq!(body["error"]["code"], "invalid_provider_result", "{body}");
     assert_eq!(body["error"]["outcome"], "unknown");
+    backend.abort();
+}
+
+/// A llama.cpp-shaped reranking server: `/v1/rerank` answers with `answer`,
+/// and every rerank body is recorded.
+async fn rerank_backend(
+    answer: Value,
+) -> (
+    String,
+    Arc<std::sync::Mutex<Vec<Value>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    let app = Router::new().route(
+        "/v1/rerank",
+        post(move |axum::Json(body): axum::Json<Value>| {
+            let recorded = recorded.clone();
+            let answer = answer.clone();
+            async move {
+                recorded.lock().unwrap().push(body);
+                axum::Json(answer)
+            }
+        }),
+    );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (endpoint, seen, task)
+}
+fn rerank_request() -> Value {
+    json!({"contract_version":1,"request_id":"rank-1","model":"llama",
+        "input":{"kind":"rerank","query":"What is the capital of France?",
+            "documents":["Bananas are yellow.","Paris is the capital of France.","Berlin is in Germany."]},
+        "output":"relevance_scores"})
+}
+/// llama.cpp's shape: sorted by score, with document text it may echo.
+fn rerank_answer() -> Value {
+    json!({"model":"reranker","object":"list","usage":{"prompt_tokens":38,"total_tokens":38},
+        "results":[
+            {"index":1,"relevance_score":0.98,"document":{"text":"Paris is the capital of France."}},
+            {"index":2,"relevance_score":0.02},
+            {"index":0,"relevance_score":0.0001}]})
+}
+
+#[tokio::test]
+async fn rerankers_score_documents_and_only_advertise_rerank() {
+    let (endpoint, seen, backend) = rerank_backend(rerank_answer()).await;
+    let (_root, state) = fixture(&endpoint, Some("text-ranking")).await;
+
+    let caps = json_body(
+        handle_capabilities(
+            State(state.clone()),
+            Ok(Query(CapabilityQuery {
+                model: "llama".into(),
+                profile: None,
+            })),
+        )
+        .await,
+    )
+    .await;
+    let available: Vec<_> = caps["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["availability"]["state"] == "available")
+        .map(|d| d["capability"].as_str().unwrap())
+        .collect();
+    assert_eq!(available, vec!["rerank"], "{caps}");
+
+    let body = json_body(operation(state.clone(), rerank_request()).await).await;
+    assert_eq!(body["request_id"], "rank-1", "{body}");
+    assert_eq!(body["result"]["kind"], "relevance_scores");
+    assert_eq!(
+        body["result"]["results"],
+        json!([
+            {"index":1,"relevance_score":0.98},
+            {"index":2,"relevance_score":0.02},
+            {"index":0,"relevance_score":0.0001}
+        ]),
+        "provider document echoes are not forwarded"
+    );
+    assert_eq!(body["result"]["input_tokens"], 38);
+    let sent = seen.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["query"], "What is the capital of France?");
+    assert_eq!(sent[0]["documents"][1], "Paris is the capital of France.");
+    assert_eq!(sent[0]["top_n"], 3, "every score is requested and checked");
+
+    let mut top = rerank_request();
+    top["options"] = json!({"kind":"rerank","top_n":1});
+    let body = json_body(operation(state.clone(), top).await).await;
+    assert_eq!(
+        body["result"]["results"],
+        json!([{"index":1,"relevance_score":0.98}])
+    );
+
+    // Blank documents and a zero top_n are refused with a reason before any provider call.
+    let mut blank = rerank_request();
+    blank["input"]["documents"][2] = json!("  ");
+    let body = json_body(operation(state.clone(), blank).await).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("input.documents[2]"));
+    let mut zero = rerank_request();
+    zero["options"] = json!({"kind":"rerank","top_n":0});
+    let body = json_body(operation(state.clone(), zero).await).await;
+    assert!(body["error"]["message"].as_str().unwrap().contains("top_n"));
+    assert_eq!(seen.lock().unwrap().len(), 2);
+    backend.abort();
+}
+
+#[tokio::test]
+async fn incoherent_rerank_results_are_invalid_provider_results() {
+    for results in [
+        // A document scored twice and one never scored.
+        json!([{"index":1,"relevance_score":0.9},{"index":1,"relevance_score":0.8},{"index":0,"relevance_score":0.1}]),
+        // An index outside the request.
+        json!([{"index":0,"relevance_score":0.9},{"index":1,"relevance_score":0.8},{"index":7,"relevance_score":0.1}]),
+        // Too few scores.
+        json!([{"index":0,"relevance_score":0.9}]),
+    ] {
+        let (endpoint, _seen, backend) = rerank_backend(json!({"results":results})).await;
+        let (_root, state) = fixture(&endpoint, Some("text-ranking")).await;
+        let body = json_body(operation(state, rerank_request()).await).await;
+        assert_eq!(body["error"]["code"], "invalid_provider_result", "{body}");
+        assert_eq!(body["error"]["outcome"], "unknown");
+        backend.abort();
+    }
+}
+
+#[tokio::test]
+async fn chat_models_do_not_advertise_rerank() {
+    let (endpoint, _seen, backend) = rerank_backend(rerank_answer()).await;
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+    let body = json_body(operation(state, rerank_request()).await).await;
+    assert_eq!(body["error"]["code"], "capability_unavailable", "{body}");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("rerank: model_task_mismatch"));
     backend.abort();
 }

@@ -256,12 +256,16 @@ fn executable_artifact_for_record(
     Some((format, model_path))
 }
 
-/// How llama.cpp must serve a model, derived from its library model type.
+/// How llama.cpp must serve a model, derived from its library model type and
+/// GGUF facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LlamaCppServingMode {
     Generation,
     Embedding,
     Reranking,
+    /// A non-causal decision model (Laya, ModernBERT). llama.cpp enables its
+    /// pooled embedding path itself; Pumas only sizes the micro-batch.
+    PooledDecision,
 }
 
 /// Pooled-session input length used when the profile serves no explicit
@@ -272,26 +276,34 @@ pub(crate) enum LlamaCppServingMode {
 const LLAMA_CPP_DEFAULT_POOLED_INPUT_TOKENS: u64 = 8192;
 
 /// Tokens one pooled (non-causal) input may span. llama.cpp evaluates a whole
-/// embedding or reranking input inside one micro-batch, so the micro-batch must
-/// hold the longest input the session accepts: the served context when one is
-/// set, otherwise the default above, never more than the model's trained
-/// context from its GGUF header. A longer input is refused by llama.cpp with a
-/// reason that reaches the caller.
+/// embedding, reranking or non-causal decision input inside one micro-batch,
+/// so the micro-batch must hold the longest input the session accepts: the
+/// served context when one is set, otherwise the default above, never more
+/// than the model's trained context from its GGUF header. A longer input is
+/// refused by llama.cpp with a reason that reaches the caller.
 fn pooled_batch_tokens(model_path: &Path, served_context: Option<u32>) -> u64 {
     let wanted = served_context
         .map(u64::from)
         .filter(|tokens| *tokens > 0)
         .unwrap_or(LLAMA_CPP_DEFAULT_POOLED_INPUT_TOKENS);
-    crate::model_library::gguf_trained_context_length(model_path)
+    crate::model_library::gguf_serving_facts(model_path)
+        .and_then(|facts| facts.context_length)
         .map_or(wanted, |trained| wanted.min(trained))
 }
 
 impl LlamaCppServingMode {
-    pub(crate) fn for_model_type(model_type: &str) -> Self {
+    /// Causal decision models (Kev) span micro-batches like any causal model,
+    /// so only non-causal ones need the pooled sizing.
+    pub(crate) fn for_model(model_type: &str, model_path: &Path) -> Self {
         if model_type.eq_ignore_ascii_case("embedding") {
             Self::Embedding
         } else if model_type.eq_ignore_ascii_case("reranker") {
             Self::Reranking
+        } else if model_type.eq_ignore_ascii_case("decision")
+            && crate::model_library::gguf_serving_facts(model_path)
+                .is_some_and(|facts| facts.non_causal)
+        {
+            Self::PooledDecision
         } else {
             Self::Generation
         }
@@ -306,15 +318,15 @@ impl LlamaCppServingMode {
     ) -> Vec<(&'static str, String)> {
         let mode = match self {
             Self::Generation => return Vec::new(),
-            Self::Embedding => "embedding",
-            Self::Reranking => "reranking",
+            Self::Embedding => Some("embedding"),
+            Self::Reranking => Some("reranking"),
+            Self::PooledDecision => None,
         };
         let tokens = pooled_batch_tokens(model_path, served_context).to_string();
-        vec![
-            (mode, "true".to_owned()),
-            ("batch-size", tokens.clone()),
-            ("ubatch-size", tokens),
-        ]
+        mode.map(|mode| (mode, "true".to_owned()))
+            .into_iter()
+            .chain([("batch-size", tokens.clone()), ("ubatch-size", tokens)])
+            .collect()
     }
 
     pub(crate) fn cli_args(self, model_path: &Path, served_context: Option<u32>) -> Vec<String> {
@@ -343,8 +355,8 @@ fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> 
         }
         output.push_str("\nalias = ");
         output.push_str(&sanitize_llama_cpp_preset_value(&entry.alias));
-        for (option, value) in
-            LlamaCppServingMode::for_model_type(&entry.model_type).options(&entry.model_path, None)
+        for (option, value) in LlamaCppServingMode::for_model(&entry.model_type, &entry.model_path)
+            .options(&entry.model_path, None)
         {
             output.push_str(&format!("\n{option} = {value}"));
         }
@@ -1897,6 +1909,66 @@ mod tests {
         assert!(LlamaCppServingMode::Generation
             .options(&unknown, None)
             .is_empty());
+    }
+
+    /// A GGUF header declaring attention causality and a trained context.
+    fn write_gguf_with_causality(path: &Path, causal: bool, tokens: u64) {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&2_u64.to_le_bytes());
+        for (key, value_type, value) in [
+            (
+                &b"modern-bert.attention.causal"[..],
+                7_u32,
+                vec![u8::from(causal)],
+            ),
+            (
+                &b"modern-bert.context_length"[..],
+                10,
+                tokens.to_le_bytes().to_vec(),
+            ),
+        ] {
+            bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(key);
+            bytes.extend_from_slice(&value_type.to_le_bytes());
+            bytes.extend_from_slice(&value);
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn non_causal_decision_models_get_a_pooled_micro_batch() {
+        // Laya (ModernBERT) must fit its whole input in one micro-batch; Kev
+        // is causal and keeps llama.cpp's own batching.
+        let root = tempfile::TempDir::new().unwrap();
+        let laya = root.path().join("laya.gguf");
+        let kev = root.path().join("kev.gguf");
+        write_gguf_with_causality(&laya, false, 8192);
+        write_gguf_with_causality(&kev, true, 262_144);
+        let laya_mode = LlamaCppServingMode::for_model("decision", &laya);
+        assert_eq!(laya_mode, LlamaCppServingMode::PooledDecision);
+        assert_eq!(
+            laya_mode.cli_args(&laya, None),
+            ["--batch-size", "8192", "--ubatch-size", "8192"]
+        );
+        assert_eq!(
+            laya_mode.cli_args(&laya, Some(2048)),
+            ["--batch-size", "2048", "--ubatch-size", "2048"]
+        );
+        assert_eq!(
+            LlamaCppServingMode::for_model("decision", &kev),
+            LlamaCppServingMode::Generation
+        );
+        // A non-causal model of another type is not reclassified by this rule.
+        assert_eq!(
+            LlamaCppServingMode::for_model("llm", &laya),
+            LlamaCppServingMode::Generation
+        );
+        assert_eq!(
+            LlamaCppServingMode::for_model("reranker", &kev),
+            LlamaCppServingMode::Reranking
+        );
     }
 
     #[test]

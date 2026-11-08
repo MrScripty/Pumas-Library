@@ -231,10 +231,11 @@ async fn prepare_runtime_profile_launch_spec(
                 .map(|record| record.model_type)
                 .unwrap_or_default();
             launch_spec.extra_args.extend(
-                crate::runtime_profiles::LlamaCppServingMode::for_model_type(&model_type).cli_args(
-                    &model_path,
-                    overrides.and_then(|overrides| overrides.context_size),
-                ),
+                crate::runtime_profiles::LlamaCppServingMode::for_model(&model_type, &model_path)
+                    .cli_args(
+                        &model_path,
+                        overrides.and_then(|overrides| overrides.context_size),
+                    ),
             );
             selected_model_path = Some(model_path);
             if let Some(overrides) = overrides {

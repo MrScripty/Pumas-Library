@@ -21,7 +21,7 @@ import urllib.parse
 MAX_DESCRIPTION = 64 * 1024
 MAX_RPC = 1024 * 1024
 MAX_OPERATION = 32 * 1024 * 1024
-DESCRIPTOR_SCHEMA_SHA256 = "2a0270d10beaa5364ef3c598767dfcddae014a55a42d0c55b3df2bf4acff7f12"
+DESCRIPTOR_SCHEMA_SHA256 = "2048200fc0e60018aa75d8163dcb05924e8830f7d9b64b0d99f5a2999c0d49db"
 
 # Concrete representations from the pinned producer contract, not model or
 # capability names. A pair describes formats to choose, never payload admission.

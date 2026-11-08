@@ -21,12 +21,79 @@ pub(crate) fn gguf_package_evidence(
     read_gguf_package_evidence(&mut file, path, companion_artifacts)
 }
 
-/// The trained context length recorded in a GGUF header, when it is readable.
-pub(crate) fn gguf_trained_context_length(path: &Path) -> Option<u64> {
-    gguf_package_evidence(path, &[])
-        .ok()
-        .and_then(|evidence| evidence.context_length)
-        .filter(|tokens| *tokens > 0)
+/// GGUF facts that decide how llama.cpp must serve a model.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct GgufServingFacts {
+    /// Trained context length, when the header records one.
+    pub context_length: Option<u64>,
+    /// `<arch>.attention.causal = false`: an encoder such as ModernBERT
+    /// (Laya), whose whole input llama.cpp evaluates in one micro-batch.
+    pub non_causal: bool,
+    /// A `cls.output.weight` tensor: the classification head llama.cpp's
+    /// reranking mode scores with. Without it the scores are meaningless.
+    pub ranking_head: bool,
+}
+
+/// Upper bound on tensors listed in one GGUF file.
+const MAX_TENSOR_COUNT: u64 = 1 << 20;
+/// ggml tensors have at most four dimensions; allow headroom, not abuse.
+const MAX_TENSOR_DIMS: u32 = 8;
+/// llama.cpp's name for the classification output of a ranking head.
+const RANKING_HEAD_TENSOR: &str = "cls.output.weight";
+
+/// Serving facts from a GGUF header and tensor index, when readable.
+pub(crate) fn gguf_serving_facts(path: &Path) -> Option<GgufServingFacts> {
+    let mut file = File::open(path).ok()?;
+    read_gguf_serving_facts(&mut file).ok()
+}
+
+fn read_gguf_serving_facts<R: Read + Seek>(reader: &mut R) -> Result<GgufServingFacts> {
+    let mut cursor = BoundedGgufReader::new(reader);
+    let header = cursor.read_array::<24>()?;
+    if &header[..4] != GGUF_MAGIC {
+        return Err(PumasError::Other("not a GGUF file".into()));
+    }
+    let tensor_count = u64::from_le_bytes(header[8..16].try_into().unwrap());
+    let metadata_kv_count = u64::from_le_bytes(header[16..24].try_into().unwrap());
+    if metadata_kv_count > MAX_METADATA_KV_COUNT || tensor_count > MAX_TENSOR_COUNT {
+        return Err(PumasError::Other(
+            "GGUF key or tensor count exceeds bounded limit".into(),
+        ));
+    }
+    let mut facts = GgufServingFacts::default();
+    for _ in 0..metadata_kv_count {
+        let key = cursor.read_string()?;
+        let value_type = cursor.read_u32()?;
+        match read_value(&mut cursor, value_type)? {
+            GgufValue::Bool(causal) if key.ends_with(".attention.causal") => {
+                facts.non_causal = !causal;
+            }
+            GgufValue::Unsigned(tokens) if key.ends_with(".context_length") && tokens > 0 => {
+                facts.context_length = Some(tokens);
+            }
+            GgufValue::Signed(tokens) if key.ends_with(".context_length") && tokens > 0 => {
+                facts.context_length = u64::try_from(tokens).ok();
+            }
+            _ => {}
+        }
+    }
+    // Tensor infos follow the metadata: name, dimension count, dimensions,
+    // element type (u32) and data offset (u64).
+    for _ in 0..tensor_count {
+        let name = cursor.read_string()?;
+        let dims = cursor.read_u32()?;
+        if dims > MAX_TENSOR_DIMS {
+            return Err(PumasError::Other(format!(
+                "GGUF tensor {name} has {dims} dimensions"
+            )));
+        }
+        if name == RANKING_HEAD_TENSOR {
+            facts.ranking_head = true;
+            break;
+        }
+        cursor.skip_bytes(u64::from(dims) * 8 + 4 + 8)?;
+    }
+    Ok(facts)
 }
 
 pub(crate) fn invalid_gguf_package_evidence(companion_artifacts: &[String]) -> GgufPackageEvidence {
@@ -550,6 +617,75 @@ mod tests {
     fn append_unread_tensor_payload_marker(path: &Path) {
         let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
         file.write_all(b"tensor-data-must-not-be-read").unwrap();
+    }
+
+    /// A GGUF with the given metadata entries and tensor names.
+    fn gguf_with(entries: &[Vec<u8>], tensors: &[&str]) -> Vec<u8> {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&(tensors.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+        for entry in entries {
+            bytes.extend_from_slice(entry);
+        }
+        for name in tensors {
+            write_string(&mut bytes, name);
+            bytes.extend_from_slice(&2_u32.to_le_bytes());
+            bytes.extend_from_slice(&1024_u64.to_le_bytes());
+            bytes.extend_from_slice(&2_u64.to_le_bytes());
+            bytes.extend_from_slice(&8_u32.to_le_bytes());
+            bytes.extend_from_slice(&0_u64.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn kv_bool(key: &str, value: bool) -> Vec<u8> {
+        let mut bytes = kv_header(key, 7);
+        bytes.push(u8::from(value));
+        bytes
+    }
+
+    fn serving_facts(bytes: Vec<u8>) -> GgufServingFacts {
+        read_gguf_serving_facts(&mut std::io::Cursor::new(bytes)).unwrap()
+    }
+
+    #[test]
+    fn serving_facts_read_causality_context_and_the_ranking_head() {
+        // Laya: a non-causal ModernBERT encoder with a classification head.
+        let laya = serving_facts(gguf_with(
+            &[
+                kv_string("general.architecture", "modern-bert"),
+                kv_u32("modern-bert.context_length", 8192),
+                kv_bool("modern-bert.attention.causal", false),
+            ],
+            &[
+                "token_embd.weight",
+                "blk.0.attn_qkv.weight",
+                "cls.output.weight",
+            ],
+        ));
+        assert_eq!(laya.context_length, Some(8192));
+        assert!(laya.non_causal);
+        assert!(laya.ranking_head);
+
+        // A reranker GGUF converted as a plain language model has only the
+        // vocabulary head, which llama.cpp's reranking mode cannot score with.
+        let headless = serving_facts(gguf_with(
+            &[
+                kv_string("general.architecture", "qwen3"),
+                kv_u64("qwen3.context_length", 40960),
+            ],
+            &["output.weight", "output_norm.weight", "token_embd.weight"],
+        ));
+        assert_eq!(headless.context_length, Some(40960));
+        assert!(!headless.non_causal);
+        assert!(!headless.ranking_head);
+
+        // Causal unless the header says otherwise.
+        assert!(
+            !serving_facts(gguf_with(&[kv_bool("qwen35.attention.causal", true)], &[])).non_causal
+        );
+        assert!(read_gguf_serving_facts(&mut std::io::Cursor::new(b"NOPE".repeat(6))).is_err());
     }
 
     fn kv_string(key: &str, value: &str) -> Vec<u8> {

@@ -46,14 +46,21 @@ impl PumasApi {
         } else {
             primary.model_library.get_model(model_id).await?
         };
-        let primary_artifact_format = if model.is_some() {
-            primary
-                .model_library
-                .get_primary_model_file(model_id)
-                .and_then(|path| ExecutableArtifactFormat::from_path(&path))
-        } else {
-            None
-        };
+        let primary_path = model
+            .as_ref()
+            .and_then(|_| primary.model_library.get_primary_model_file(model_id));
+        let primary_artifact_format = primary_path
+            .as_deref()
+            .and_then(ExecutableArtifactFormat::from_path);
+        // An unreadable header is left to the runtime, which reports its own reason.
+        let reranker_without_ranking_head = model
+            .as_ref()
+            .is_some_and(|record| record.model_type.eq_ignore_ascii_case("reranker"))
+            && primary_artifact_format == Some(ExecutableArtifactFormat::Gguf)
+            && primary_path
+                .as_deref()
+                .and_then(crate::model_library::gguf_serving_facts)
+                .is_some_and(|facts| !facts.ranking_head);
 
         let runtime_snapshot = self.get_runtime_profiles_snapshot().await?.snapshot;
         let profile = runtime_snapshot
@@ -82,6 +89,7 @@ impl PumasApi {
         let context = ServingValidationContext {
             model_exists: model.is_some(),
             primary_artifact_format,
+            reranker_without_ranking_head,
             profile,
             served_models: primary
                 .serving_service

@@ -68,6 +68,11 @@ pub enum Input {
         #[serde(default)]
         images: Vec<DecisionImage>,
     },
+    /// A query and the documents a reranker scores against it.
+    Rerank {
+        query: String,
+        documents: Vec<String>,
+    },
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Deserialize)]
@@ -113,6 +118,7 @@ pub enum Output {
     PcmS16le,
     PcmF32le,
     Decisions,
+    RelevanceScores,
 }
 impl Output {
     fn adapter_format(self) -> Option<OutputFormat> {
@@ -122,6 +128,7 @@ impl Output {
             Self::PngBase64 => OutputFormat::PngBase64,
             Self::Labels => OutputFormat::Labels,
             Self::Decisions => OutputFormat::Decisions,
+            Self::RelevanceScores => OutputFormat::RelevanceScores,
             Self::PcmS16le | Self::PcmF32le => return None,
         })
     }
@@ -132,6 +139,7 @@ impl Output {
             Self::PngBase64 => "png_base64",
             Self::Labels => "labels",
             Self::Decisions => "decisions",
+            Self::RelevanceScores => "relevance_scores",
             Self::PcmS16le => "pcm_s16le",
             Self::PcmF32le => "pcm_f32le",
         }
@@ -148,6 +156,7 @@ impl Input {
             Self::Audio { .. } => "audio",
             Self::ContentBatch { .. } => "content_batch",
             Self::Decision { .. } => "decision",
+            Self::Rerank { .. } => "rerank",
         }
     }
     fn has_image(&self) -> bool {
@@ -285,6 +294,15 @@ impl ModalityRequest {
                         &image.encoding,
                         &image.data_base64,
                     )?;
+                }
+            }
+            Input::Rerank { query, documents } => {
+                valid_text("input.query", query)?;
+                if documents.is_empty() {
+                    return Err(Rejection::invalid("input.documents must not be empty"));
+                }
+                for (index, document) in documents.iter().enumerate() {
+                    valid_text(&format!("input.documents[{index}]"), document)?;
                 }
             }
             Input::ContentBatch { items } => {
@@ -559,6 +577,7 @@ impl ModalityRequest {
                     }
                 }
                 Capability::Decision => OperationOptions::Decision {},
+                Capability::Rerank => OperationOptions::Rerank { top_n: None },
                 Capability::ImageGeneration => {
                     return Err(Rejection::invalid(
                         "image_generation requires options {\"kind\":\"image_generation\",\"width\":...,\"height\":...}",
@@ -654,6 +673,10 @@ impl ModalityRequest {
                 state: state.clone(),
                 questions: questions.clone(),
                 images: images.clone(),
+            },
+            Input::Rerank { query, documents } => OperationInput::Rerank {
+                query: query.clone(),
+                documents: documents.clone(),
             },
             Input::Messages { messages } if self.input.has_image() => {
                 OperationInput::ImageMessages {
@@ -817,6 +840,7 @@ fn accepts(descriptor: &CapabilityDescriptor, input: &OperationInput) -> bool {
         OperationInput::ImageMessages { .. } => InputFormat::MessagesImage,
         OperationInput::ContentBatch { .. } => InputFormat::ContentBatch,
         OperationInput::Decision { .. } => InputFormat::Decision,
+        OperationInput::Rerank { .. } => InputFormat::Rerank,
         OperationInput::Audio {
             encoding: AudioEncoding::PcmS16le,
             ..

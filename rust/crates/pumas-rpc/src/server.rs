@@ -465,6 +465,7 @@ pub(crate) async fn start_server_with_startup(
         .route("/v1/chat/completions", post(handle_openai_proxy))
         .route("/v1/completions", post(handle_openai_proxy))
         .route("/v1/embeddings", post(handle_openai_proxy))
+        .route("/v1/rerank", post(handle_openai_proxy))
         .route("/v1/images/generations", post(handle_openai_proxy));
 
     // After every route: unknown paths and methods are refused with a reason.

@@ -85,6 +85,7 @@ class DescriptorFixtures(unittest.TestCase):
         # Documented variants are `oneOf` entries; they still decode.
         self.assertIn("decision", consumer._enum_values(schema, "Capability"))
         self.assertIn("multimodal_embedding", consumer._enum_values(schema, "Capability"))
+        self.assertIn("rerank", consumer._enum_values(schema, "Capability"))
         self.assertIn("image_to_text", consumer._enum_values(schema, "SemanticTask"))
 
     def test_valid_descriptor_keeps_additional_fields(self):

@@ -28,7 +28,7 @@ use crate::models::{
     ServingStatusEventKind, ServingStatusResponse, ServingStatusSnapshot, ServingStatusUpdateFeed,
     ServingStatusUpdateFeedResponse,
 };
-use crate::providers::{ExecutableArtifactFormat, ProviderRegistry};
+use crate::providers::{ExecutableArtifactFormat, ProviderRegistry, ServingTask};
 
 const SERVING_STATUS_UPDATE_CHANNEL_CAPACITY: usize = 64;
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +47,10 @@ pub struct ServingValidationProfile {
 pub struct ServingValidationContext {
     pub model_exists: bool,
     pub primary_artifact_format: Option<ExecutableArtifactFormat>,
+    /// The model is a reranker whose GGUF has no ranking head
+    /// (`cls.output.weight`), so a reranking runtime would score it with
+    /// meaningless values.
+    pub reranker_without_ranking_head: bool,
     pub profile: Option<ServingValidationProfile>,
     pub served_models: Vec<ServedModelStatus>,
 }
@@ -559,6 +563,20 @@ fn validate_provider_artifact_compatibility(
         .for_provider(request.config.provider)];
     };
     if behavior.supports_artifact_format(format) {
+        if context.reranker_without_ranking_head
+            && behavior.supports_serving_task(ServingTask::Reranking)
+        {
+            return vec![ModelServeError::non_critical(
+                ModelServeErrorCode::InvalidFormat,
+                "this reranker GGUF has no ranking head (cls.output.weight), so llama.cpp would \
+                 return meaningless relevance scores; use a GGUF converted for reranking, such \
+                 as ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF, or change the model's category if \
+                 it is a generative model",
+            )
+            .for_model(model_id)
+            .for_profile(request.config.profile_id.clone())
+            .for_provider(request.config.provider)];
+        }
         return Vec::new();
     }
 
@@ -659,6 +677,7 @@ mod tests {
         ServingValidationContext {
             model_exists: true,
             primary_artifact_format: Some(ExecutableArtifactFormat::Gguf),
+            reranker_without_ranking_head: false,
             profile: Some(ServingValidationProfile {
                 provider: RuntimeProviderId::Ollama,
                 provider_mode: RuntimeProviderMode::OllamaServe,
@@ -684,6 +703,7 @@ mod tests {
         ServingValidationContext {
             model_exists: true,
             primary_artifact_format: Some(ExecutableArtifactFormat::Onnx),
+            reranker_without_ranking_head: false,
             profile: Some(ServingValidationProfile {
                 provider: RuntimeProviderId::OnnxRuntime,
                 provider_mode: RuntimeProviderMode::OnnxServe,
@@ -1042,6 +1062,32 @@ mod tests {
                     .message
                     .contains("selected provider does not support this model artifact format")
         }));
+    }
+
+    #[test]
+    fn reranking_runtimes_refuse_a_reranker_gguf_without_a_ranking_head() {
+        let mut context = valid_context();
+        context.reranker_without_ranking_head = true;
+        // A provider with no reranking runtime is not judged by this fact.
+        let plain = ServingService::with_provider_registry(ProviderRegistry::from_behaviors([
+            ProviderBehavior::ollama(),
+        ]));
+        assert!(plain.validate_request(&request(), &context).valid);
+
+        let mut reranking = ProviderBehavior::ollama();
+        reranking.serving_tasks.push(ServingTask::Reranking);
+        let service =
+            ServingService::with_provider_registry(ProviderRegistry::from_behaviors([reranking]));
+        let response = service.validate_request(&request(), &context);
+        assert!(!response.valid);
+        assert!(response.errors.iter().any(|error| {
+            error.code == ModelServeErrorCode::InvalidFormat
+                && error
+                    .message
+                    .contains("no ranking head (cls.output.weight)")
+        }));
+        context.reranker_without_ranking_head = false;
+        assert!(service.validate_request(&request(), &context).valid);
     }
 
     #[test]

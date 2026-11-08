@@ -663,6 +663,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         Capability::ImageToText,
         Capability::MultimodalEmbedding,
         Capability::Decision,
+        Capability::Rerank,
     ]
     .into_iter()
     .map(|capability| {
@@ -732,6 +733,15 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![OutputFormat::Decisions],
                     Some(OpenAiGatewayEndpoint::SystemOne),
                     image_input::image_bounds(0, false),
+                ),
+                // Document count and pair length are the runtime's limits; a
+                // pair longer than its micro-batch is refused with its reason.
+                Capability::Rerank => (
+                    SemanticTask::Rerank,
+                    vec![InputFormat::Rerank],
+                    vec![OutputFormat::RelevanceScores],
+                    Some(OpenAiGatewayEndpoint::Rerank),
+                    vec![bound(OptionName::TopN, 1., u32::MAX as f64)],
                 ),
                 Capability::MultimodalEmbedding => (
                     SemanticTask::MultimodalEmbedding,
@@ -835,6 +845,10 @@ fn semantic_task_evidence(metadata: &serde_json::Value) -> Option<&str> {
         })
 }
 
+/// Hugging Face and normalized task names for rerankers.
+fn text_ranking_task(task: &str) -> bool {
+    matches!(task, "text-ranking" | "text_ranking" | "text->ranking")
+}
 fn text_embedding_task(task: &str) -> bool {
     matches!(
         task,
@@ -890,6 +904,7 @@ fn semantic_match(
                 matches!(task, "image-to-text" | "image_to_text" | "image->text")
                     || vision_language_task(task)
             }
+            Capability::Rerank => text_ranking_task(task),
             _ => false,
         });
     }
@@ -902,6 +917,7 @@ fn semantic_match(
     match model_type {
         Some("llm" | "language" | "text") => Some(capability.text_generation()),
         Some("embedding" | "embeddings") => Some(capability == Capability::TextEmbedding),
+        Some("reranker") => Some(capability == Capability::Rerank),
         Some(_) => Some(false),
         None => None,
     }

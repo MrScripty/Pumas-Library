@@ -521,25 +521,39 @@ async fn dispatch_audio(
     disconnect: Option<Extension<RequestDisconnect>>,
     request: &OperationRequest,
     served: &ServedModelStatus,
-    mut body: serde_json::Value,
+    body: serde_json::Value,
 ) -> Response {
-    use pumas_library::runtime_profiles::OwnedAudioEndpointError;
+    use pumas_app_manager::torch_client::TorchAudioError;
     let id = Some(request.request_id.clone());
-    let Some(endpoint) = state
-        .api
-        .owned_audio_endpoint(&served.profile_id, &served.model_id)
-    else {
-        return error(
+    let unavailable = |message: &str| {
+        error(
             StatusCode::SERVICE_UNAVAILABLE,
-            id,
-            ErrorCode::CapabilityUnavailable,
+            id.clone(),
+            Rejection::new(ErrorCode::CapabilityUnavailable, message),
             false,
-        );
+        )
     };
-    // Canonical selection is fixed by the original owning load, not the alias.
-    body["model"] = serde_json::json!(served.model_id);
-    body["profile"] = serde_json::json!(served.profile_id.as_str());
-    let admitted = Arc::new(AtomicBool::new(false));
+    let Some(endpoint) = served.endpoint_url.as_ref() else {
+        return unavailable("the served audio model has no Torch endpoint");
+    };
+    // Recheck process identity, capability and the ready slot right before
+    // admission; the same URL may belong to a replacement process.
+    let client = match openai_gateway::check_live_torch_runtime(
+        &state,
+        served,
+        endpoint,
+        openai_gateway::TorchWork::Audio,
+    )
+    .await
+    {
+        Ok(client) => client,
+        Err(openai_gateway::TorchLiveCheckError::Handshake(failure)) => {
+            return unavailable(&format!("the Torch runtime cannot transcribe audio: {failure}; reinstall or repair the runtime"));
+        }
+        Err(_) => return unavailable("the audio model is not loaded in its Torch runtime"),
+    };
+    let language = body["language"].as_str().unwrap_or("en").to_owned();
+    let admitted = AtomicBool::new(true);
     let result = tokio::select! {
         biased;
         () = state.shutdown_request.clone().requested() => {
@@ -548,7 +562,7 @@ async fn dispatch_audio(
         () = async { match disconnect { Some(Extension(signal)) => signal.disconnected().await, None => std::future::pending().await } } => {
             return error(StatusCode::BAD_GATEWAY, id, ErrorCode::TransportLost, admitted.load(Ordering::Acquire));
         }
-        result = endpoint.execute(body, admitted.clone()) => result,
+        result = client.transcribe_audio(&served.model_id, &body["audio"], &language) => result,
     };
     match result {
         Ok(result) => Json(OperationResponse {
@@ -564,35 +578,41 @@ async fn dispatch_audio(
             },
         })
         .into_response(),
-        Err(OwnedAudioEndpointError::NotAdmitted) => error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            id,
-            ErrorCode::CapabilityUnavailable,
-            false,
-        ),
-        Err(OwnedAudioEndpointError::InvalidRequest) => error(
+        Err(TorchAudioError::InvalidRequest(reason)) => error(
             StatusCode::BAD_REQUEST,
             id,
-            ErrorCode::InvalidRequest,
+            Rejection::new(ErrorCode::InvalidRequest, reason),
             false,
         ),
-        Err(OwnedAudioEndpointError::UnsupportedContract) => error(
-            StatusCode::BAD_REQUEST,
-            id,
-            ErrorCode::UnsupportedContract,
-            false,
-        ),
-        Err(OwnedAudioEndpointError::ProviderFailure) => error(
+        Err(TorchAudioError::ModelUnavailable) => {
+            unavailable("the audio model is not loaded in its Torch runtime")
+        }
+        Err(TorchAudioError::UnsupportedModel) => {
+            unavailable("the served Torch model does not transcribe audio")
+        }
+        Err(TorchAudioError::RuntimeBusy) => {
+            unavailable("the Torch runtime is busy with another operation on this device; retry")
+        }
+        Err(TorchAudioError::Transport | TorchAudioError::Cancelled) => {
+            error(StatusCode::BAD_GATEWAY, id, ErrorCode::TransportLost, true)
+        }
+        Err(TorchAudioError::InvalidBackendResult) => error(
             StatusCode::BAD_GATEWAY,
             id,
-            ErrorCode::ProviderFailure,
+            ErrorCode::InvalidProviderResult,
             true,
         ),
-        Err(OwnedAudioEndpointError::TransportLost) => error(
+        Err(failure @ (TorchAudioError::OutOfMemory | TorchAudioError::BackendFailure)) => error(
             StatusCode::BAD_GATEWAY,
             id,
-            ErrorCode::TransportLost,
-            admitted.load(Ordering::Acquire),
+            Rejection::new(
+                ErrorCode::ProviderFailure,
+                format!(
+                    "the Torch runtime failed to transcribe ({}); inspect its runtime log",
+                    failure.code()
+                ),
+            ),
+            true,
         ),
     }
 }
@@ -676,11 +696,14 @@ async fn describe(
     let runtime_ready = match served.provider {
         RuntimeProviderId::OnnxRuntime => onnx_session.is_some(),
         RuntimeProviderId::Torch => match served.endpoint_url.as_ref() {
-            Some(endpoint) => {
-                openai_gateway::check_live_torch_image_runtime(state, served, endpoint)
-                    .await
-                    .is_ok()
-            }
+            Some(endpoint) => openai_gateway::check_live_torch_runtime(
+                state,
+                served,
+                endpoint,
+                openai_gateway::torch_work_for(model_type),
+            )
+            .await
+            .is_ok(),
             None => false,
         },
         _ => openai_gateway::generation_session_stop(state, served)
@@ -883,16 +906,17 @@ async fn describe(
         };
         let reason = if capability == Capability::AudioClassification {
             Some(AvailabilityReason::UnsupportedAdapter)
-        } else if capability == Capability::AudioTranscription
-            && (served.provider != RuntimeProviderId::Torch
-                || !state
-                    .api
-                    .owned_audio_endpoint(&served.profile_id, &served.model_id)
-                    .is_some_and(|endpoint| endpoint.available()))
-        {
-            Some(AvailabilityReason::UnqualifiedAudioRuntime)
         } else if capability == Capability::AudioTranscription {
-            None
+            // Torch transcribes the audio models it serves (Cohere ASR).
+            if served.provider != RuntimeProviderId::Torch {
+                Some(AvailabilityReason::UnsupportedAdapter)
+            } else if model_type != Some("audio") {
+                Some(AvailabilityReason::ModelTaskMismatch)
+            } else if !runtime_ready {
+                Some(AvailabilityReason::RuntimeUnavailable)
+            } else {
+                None
+            }
         } else if !adapter || (capability == Capability::ImageToText && !image_adapter) {
             Some(AvailabilityReason::UnsupportedAdapter)
         } else if semantics == Some(false) {

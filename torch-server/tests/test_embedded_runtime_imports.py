@@ -25,7 +25,7 @@ root = Path(sys.argv[1]).resolve()
 assert sys.flags.isolated
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(root))
-assert not {"serve", "model_manager", "speech_binding"}.intersection(sys.modules)
+assert not {"serve", "model_manager", "audio_api"}.intersection(sys.modules)
 torch = types.ModuleType("torch")
 class Device:
     def __init__(self, value):
@@ -40,16 +40,13 @@ sys.modules["torch"] = torch
 serve = importlib.import_module("serve")
 app = serve.create_app()
 assert serve.TORCH_PROTOCOL == 3
-assert serve.TORCH_CAPABILITIES == ("image_generation",)
-assert app.state.model_manager._speech_owner is None
-assert type(app.state.model_manager._speech_artifact_authority).__name__ == "UnavailableArtifactUseAuthority"
+assert serve.TORCH_CAPABILITIES == ("image_generation", "audio_transcription")
 for name in (
-    "serve", "control_api", "device_manager", "model_manager", "speech_binding",
-    "image_api", "openai_api", "diffusion", "validation",
+    "serve", "control_api", "device_manager", "model_manager", "audio_api",
+    "audio_input", "audio_contract", "image_api", "openai_api", "diffusion", "validation",
 ):
     module = sys.modules[name]
     assert Path(module.__file__).resolve().is_relative_to(root), (name, module.__file__)
-assert "speech_operations" not in sys.modules
 assert "loaders.cohere_asr_loader" not in sys.modules
 print("EMBEDDED_IMAGE_TEXT_IMPORT_CLOSURE_OK")
 """
@@ -72,14 +69,8 @@ class EmbeddedRuntimeImportTests(unittest.TestCase):
         )
         self.assertIn("serve.py", actual_python)
         self.assertIn("model_manager.py", actual_python)
-        self.assertIn("speech_binding.py", actual_python)
         for name in (
-            "owned_worker.py",
-            "private_owned_channel.py",
-            "owned_audio.py",
-            "owned_model_operations.py",
-            "speech_operations.py",
-            "native_speech_result.py",
+            "audio_api.py",
             "audio_input.py",
             "audio_contract.py",
             "loaders/cohere_asr_loader.py",
@@ -118,10 +109,10 @@ class EmbeddedRuntimeImportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.stage(root)
-            (root / "speech_binding.py").unlink()
+            (root / "audio_input.py").unlink()
             result = self.probe(root)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("No module named 'speech_binding'", result.stderr)
+        self.assertIn("No module named 'audio_input'", result.stderr)
         self.assertNotIn("EMBEDDED_IMAGE_TEXT_IMPORT_CLOSURE_OK", result.stdout)
 
 

@@ -139,9 +139,9 @@ text generation, and image-to-text if it declares image input.
 decision model (`decisions` output modality); such models offer no text
 generation. `rerank` is offered for models recorded as rerankers
 (`text-ranking`) served by llama.cpp; serving refuses a reranker GGUF without
-a ranking head (`cls.output.weight`). `audio_transcription` and `audio_classification` are explicitly
-unavailable with `unqualified_audio_runtime` until the production custody
-bridge and installed runtime are qualified. Build/protocol identity is reported by
+a ranking head (`cls.output.weight`). `audio_transcription` is offered for
+audio models served by Torch (Cohere ASR); see [Audio transcription](#audio-transcription).
+`audio_classification` is reserved and unavailable. Build/protocol identity is reported by
 `pumas-rpc --build-info`; these endpoints define no competing identity type.
 
 For example, a finite text operation is:
@@ -294,30 +294,28 @@ messages without that request still resolve to `image_to_text`, as in
 earlier releases. Speech output, video input and `vector` input are not
 available in this release; a model may still declare them.
 
-## Reserved audio
+## Audio transcription
 
 Audio transcription and audio classification are different capabilities even
-when both produce text. Both are reserved and unavailable in this release.
-Audio as a content part (see [Modalities](#modalities)) is a separate,
-available path.
+when both produce text. `audio_transcription` is available for audio models a
+Torch runtime serves; `audio_classification` is reserved and unavailable.
+Audio as a content part (see [Modalities](#modalities)) is a separate path for
+models that take audio in chat.
 
-The audio declaration reserves `kind: "audio"`, `encoding` (`pcm_s16le` or
+The audio input is `kind: "audio"`, `encoding` (`pcm_s16le` or
 `pcm_f32le`), `sample_rate_hz`, `channels`, `sample_count` (frames per channel),
 and `data_base64`. Supported conversion is 8–192 kHz, one or two channels, and
 at most 30 seconds; float32 samples must be finite and in [-1, 1]. The adapter
 converts supported input to mono 16 kHz PCM16LE; it must not relabel samples.
-Audio options reserve the existing closed language vocabulary and optional
-`max_output_tokens`. The qualified transcription adapter generates up to a
-fixed native 512 tokens, so the descriptor advertises `max_output_tokens` 512–512
-and any other value is refused with that reason. These declarations do not
-admit audio.
+Audio options take an optional `language` (`en de fr it es pt el nl pl vi zh
+ar ja ko`, default `en`) and optional `max_output_tokens`. The transcription
+adapter generates up to 512 tokens, so the descriptor advertises
+`max_output_tokens` 512–512 and any other value is refused with that reason.
+A result whose generation reached that bound reports `finish_reason: "length"`.
 
-Production audio requires trusted selected-byte custody before loading: a
-separate SHA-256 manifest, an owner-controlled copied read source, verified
-installed recipe/code identity, and an exact managed process and slot generation.
-The package observation fingerprint is not byte attestation. Custody survives
-caller loss and uncertain load/unload outcomes. Release requires confirmed
-native/device cessation with no outstanding operation borrows, or complete
-exact-generation process-tree drainage. Finite-audio status/cancel routes and
-runtime/slot references are not present until that custody is qualified; see
-[installed audio session](installed-audio-session.md).
+Availability states why transcription cannot run: `unsupported_adapter` for a
+provider other than Torch, `model_task_mismatch` for a Torch model that is not
+an audio model, and `runtime_unavailable` while its runtime or slot is not
+ready. A Torch runtime installed with the `cohere-asr` adapter resolves
+current packages (Transformers 5.4 or newer) and loads the model from local
+files only, without repository code.

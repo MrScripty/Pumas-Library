@@ -543,30 +543,105 @@ async fn audio_output_semantics_are_validated_before_runtime_admission() {
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
 }
 
-#[cfg(target_os = "linux")]
-async fn controlled_audio_state(
-    length: bool,
-    hold: bool,
-) -> (
-    TempDir,
-    Arc<AppState>,
-    pumas_library::runtime_profiles::ControlledAudioEndpointFixture,
-) {
+/// A Torch sidecar stub serving one ready Cohere slot. Each transcription
+/// request body is recorded and answered with the next scripted reply.
+async fn spawn_torch_audio_stub(
+    replies: Vec<(u16, &'static str)>,
+) -> (String, Arc<std::sync::Mutex<Vec<Value>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    tokio::spawn(async move {
+        let mut replies = replies.into_iter();
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut bytes = Vec::new();
+            while !bytes.ends_with(b"\r\n\r\n") {
+                let mut b = [0];
+                if socket.read_exact(&mut b).await.is_err() {
+                    break;
+                }
+                bytes.push(b[0]);
+            }
+            let head = String::from_utf8_lossy(&bytes).to_string();
+            let length = head
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length: ")
+                        .and_then(|v| v.parse::<usize>().ok())
+                })
+                .unwrap_or(0);
+            let mut body = vec![0; length];
+            socket.read_exact(&mut body).await.unwrap();
+            let (status, reply) = if head.starts_with("GET /health") {
+                (
+                    200,
+                    r#"{"status":"ok","protocol":3,"capabilities":["image_generation","audio_transcription"]}"#,
+                )
+            } else if head.starts_with("GET /api/slots") {
+                (
+                    200,
+                    r#"{"slots":[{"slot_id":"asr","model_name":"library/speech","model_path":"/fixture","device":"cpu","state":"ready","model_type":"cohere-asr"}]}"#,
+                )
+            } else if head.starts_with("POST /api/audio/transcriptions") {
+                recorded
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::from_slice(&body).unwrap());
+                replies.next().unwrap_or((500, "{}"))
+            } else {
+                (404, "{}")
+            };
+            let _ = socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                        reply.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+        }
+    });
+    (endpoint, seen)
+}
+
+async fn torch_audio_state(endpoint: &str, model_type: &str) -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();
     let state = Arc::new(crate::handlers::test_support::build_test_app_state(root.path()).await);
-    let worker = pumas_library::runtime_profiles::ControlledAudioEndpointFixture::launch(
-        &state.api, length, hold,
-    )
-    .await;
-    let profile = RuntimeProfileId::parse("controlled-audio-private").unwrap();
+    let profile = RuntimeProfileId::parse("torch-audio").unwrap();
     let mut config = RuntimeProfileConfig::default_ollama();
     config.profile_id = profile.clone();
     config.provider = RuntimeProviderId::Torch;
     config.provider_mode = RuntimeProviderMode::TorchServe;
+    // Managed and never launched: the served model's endpoint is the stub.
     config.management_mode = RuntimeManagementMode::Managed;
     config.endpoint_url = None;
     config.port = None;
     state.api.upsert_runtime_profile(config).await.unwrap();
+    let model_root = state
+        .api
+        .model_library()
+        .library_root()
+        .join("audio/cohere/speech");
+    std::fs::create_dir_all(&model_root).unwrap();
+    state
+        .api
+        .model_library()
+        .index()
+        .upsert(&ModelRecord {
+            id: "library/speech".into(),
+            path: model_root.display().to_string(),
+            cleaned_name: "speech".into(),
+            official_name: "speech".into(),
+            model_type: model_type.into(),
+            tags: vec![],
+            hashes: HashMap::new(),
+            metadata: json!({}),
+            updated_at: "fixture".into(),
+        })
+        .unwrap();
     state
         .api
         .record_served_model(ServedModelStatus {
@@ -581,192 +656,145 @@ async fn controlled_audio_state(
             tensor_split: None,
             context_size: None,
             keep_loaded: true,
-            endpoint_url: None,
+            endpoint_url: Some(RuntimeEndpointUrl::parse(endpoint).unwrap()),
             memory_bytes: None,
             loaded_at: None,
             last_error: None,
         })
         .await
         .unwrap();
-    (root, state, worker)
+    (root, state)
 }
 
 fn audio_request() -> Value {
-    json!({"contract_version":1,"request_id":"audio-request-17","model":"speech","capability":"audio_transcription","input":{"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="},"output":"text","options":{"kind":"audio"}})
+    json!({"contract_version":1,"request_id":"audio-request-17","model":"speech","capability":"audio_transcription","input":{"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="},"output":"text","options":{"kind":"audio","language":"de"}})
 }
 
-#[cfg(target_os = "linux")]
-#[tokio::test]
-async fn generic_audio_http_uses_owned_process_and_preserves_native_terminal_evidence() {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        for length in [false, true] {
-            let (_root, state, worker) = controlled_audio_state(length, false).await;
-            let (url, server) = public_server(state.clone()).await;
-            let client = reqwest::Client::new();
-            let caps: Value = client
-                .get(format!("{url}/v1/capabilities?model=speech"))
-                .send()
-                .await
-                .unwrap()
-                .json()
-                .await
-                .unwrap();
-            assert_eq!(
-                caps["capabilities"][4]["availability"]["state"],
-                "available"
-            );
-            assert_eq!(caps["capabilities"][4]["streaming"], false);
-            assert_eq!(
-                caps["capabilities"][5]["availability"]["reason"],
-                "unsupported_adapter"
-            );
-            for call in [1, 2] {
-                let response = client
-                    .post(format!("{url}/v1/model-operations"))
-                    .json(&audio_request())
-                    .send()
-                    .await
-                    .unwrap();
-                assert_eq!(response.status(), StatusCode::OK);
-                let value: Value = response.json().await.unwrap();
-                assert_eq!(value["request_id"], "audio-request-17");
-                assert_eq!(
-                    value["result"]["finish_reason"],
-                    if length { "length" } else { "stop" }
-                );
-                assert!(value["result"]["text"]
-                    .as_str()
-                    .unwrap()
-                    .contains(&format!("calls={call};pcm=0000")));
-            }
-            worker.unload().await;
-            let response = client
-                .post(format!("{url}/v1/model-operations"))
-                .json(&audio_request())
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-            let value: Value = response.json().await.unwrap();
-            assert_eq!(value["error"]["outcome"], "not_admitted");
-            state.shutdown_request.request();
-            server.await.unwrap().unwrap();
-            worker.stop().await;
-        }
-    })
-    .await
-    .expect("controlled HTTP process fixture hung");
+async fn audio_capability(state: Arc<AppState>) -> Value {
+    let caps = json_body(
+        handle_capabilities(
+            State(state),
+            Ok(Query(CapabilityQuery {
+                model: "speech".into(),
+                profile: None,
+            })),
+        )
+        .await,
+    )
+    .await;
+    caps["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["capability"] == "audio_transcription")
+        .unwrap()
+        .clone()
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn owned_audio_route_refuses_unsupported_requests_and_stale_selection_without_replay() {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        let (_root, state, worker) = controlled_audio_state(false, false).await;
-        for limit in [42, 511, 513] {
-            let mut value = audio_request();
-            // The typed boundary refuses what the adapter's fixed bound would
-            // refuse natively, with that bound as the reason; the clean
-            // following request is call one.
-            value["options"]["max_output_tokens"] = json!(limit);
-            let response = operation(state.clone(), value).await;
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-            let body = json_body(response).await;
-            assert_eq!(body["error"]["outcome"], "not_admitted");
-            assert!(
-                body["error"]["message"].as_str().unwrap().contains("512"),
-                "{body}"
-            );
-        }
-        let mut classify = audio_request();
-        classify["capability"] = json!("audio_classification");
-        classify["output"] = json!("labels");
-        assert_eq!(
-            operation(state.clone(), classify).await.status(),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-        let mut stream = audio_request();
-        stream["stream"] = json!(true);
-        assert_eq!(
-            operation(state.clone(), stream).await.status(),
-            StatusCode::BAD_REQUEST
-        );
-        let mut malformed = audio_request();
-        malformed["input"]["data_base64"] = json!("not-base64");
-        let response = operation(state.clone(), malformed).await;
+async fn audio_transcription_is_served_by_the_torch_sidecar() {
+    let (endpoint, seen) = spawn_torch_audio_stub(vec![
+        (200, r#"{"text":"guten tag","finish_reason":"stop"}"#),
+        (200, r#"{"text":"lang","finish_reason":"length"}"#),
+    ])
+    .await;
+    let (_root, state) = torch_audio_state(&endpoint, "audio").await;
+    let capability = audio_capability(state.clone()).await;
+    assert_eq!(
+        capability["availability"]["state"], "available",
+        "{capability}"
+    );
+    assert_eq!(capability["input_modalities"], json!(["audio"]));
+    assert_eq!(capability["output_modalities"], json!(["text"]));
+
+    for (text, finish) in [("guten tag", "stop"), ("lang", "length")] {
+        let body = json_body(operation(state.clone(), audio_request()).await).await;
+        assert_eq!(body["request_id"], "audio-request-17");
+        assert_eq!(body["result"]["text"], text);
+        assert_eq!(body["result"]["finish_reason"], finish);
+    }
+    let sent = seen.lock().unwrap().clone();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0]["model_id"], "library/speech");
+    assert_eq!(sent[0]["language"], "de");
+    assert_eq!(sent[0]["audio"]["encoding"], "pcm_s16le");
+    assert_eq!(sent[0]["audio"]["data_base64"], "AAA=");
+    assert!(!sent[0].to_string().contains("audio-request-17"));
+}
+
+#[tokio::test]
+async fn audio_refusals_carry_reasons_and_are_never_replayed() {
+    let (endpoint, seen) = spawn_torch_audio_stub(vec![
+        (400, r#"{"detail":{"code":"invalid_request","message":"Audio input does not satisfy the supported PCM contract"}}"#),
+        (409, r#"{"detail":{"code":"runtime_busy","message":"Audio runtime is busy"}}"#),
+        (502, r#"{"detail":{"code":"backend_failure","message":"/secret/path"}}"#),
+    ])
+    .await;
+    let (_root, state) = torch_audio_state(&endpoint, "audio").await;
+    // The typed boundary refuses before the sidecar sees anything.
+    for limit in [42, 511, 513] {
+        let mut value = audio_request();
+        value["options"]["max_output_tokens"] = json!(limit);
+        let response = operation(state.clone(), value).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let failure = json_body(response).await;
-        assert_eq!(failure["error"]["code"], "invalid_request");
-        assert_eq!(failure["error"]["outcome"], "not_admitted");
-        let result = json_body(operation(state.clone(), audio_request()).await).await;
-        assert!(result["result"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("calls=1;"));
-        let profile = RuntimeProfileId::parse("controlled-audio-private").unwrap();
-        assert!(state
-            .api
-            .owned_audio_endpoint(&profile, "other-model")
-            .is_none());
-        assert!(state
-            .api
-            .owned_audio_endpoint(
-                &RuntimeProfileId::parse("other-profile").unwrap(),
-                "library/speech"
-            )
-            .is_none());
-        let other_root = TempDir::new().unwrap();
-        let other_state =
-            crate::handlers::test_support::build_test_app_state(other_root.path()).await;
-        assert!(other_state
-            .api
-            .owned_audio_endpoint(&profile, "library/speech")
-            .is_none());
-        worker.stop().await;
-        assert!(state
-            .api
-            .owned_audio_endpoint(&profile, "library/speech")
-            .is_none());
-        assert_eq!(
-            json_body(operation(state.clone(), audio_request()).await).await["error"]["outcome"],
-            "not_admitted"
+        let body = json_body(response).await;
+        assert!(
+            body["error"]["message"].as_str().unwrap().contains("512"),
+            "{body}"
         );
-    })
-    .await
-    .expect("controlled generic audio fixture hung");
+    }
+    let mut stream = audio_request();
+    stream["stream"] = json!(true);
+    assert_eq!(
+        operation(state.clone(), stream).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(seen.lock().unwrap().is_empty());
+
+    let response = operation(state.clone(), audio_request()).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = json_body(response).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("PCM contract"));
+
+    let response = operation(state.clone(), audio_request()).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = json_body(response).await;
+    assert_eq!(body["error"]["outcome"], "not_admitted");
+    assert!(body["error"]["message"].as_str().unwrap().contains("busy"));
+
+    let response = operation(state.clone(), audio_request()).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = json_body(response).await;
+    assert_eq!(body["error"]["code"], "provider_failure");
+    assert!(!body.to_string().contains("/secret/path"));
+    assert_eq!(seen.lock().unwrap().len(), 3);
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn audio_http_caller_loss_keeps_original_settlement_and_clean_next_request() {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        let (_root, state, mut worker) = controlled_audio_state(false, true).await;
-        let (url, server) = public_server(state.clone()).await;
-        let client = reqwest::Client::new();
-        for _ in 0..2 {
-            let client = client.clone();
-            let operation_url = format!("{url}/v1/model-operations");
-            let caller = tokio::spawn(async move {
-                client
-                    .post(operation_url)
-                    .json(&audio_request())
-                    .send()
-                    .await
-            });
-            worker.wait_use_started().await;
-            caller.abort();
-            assert!(caller.await.unwrap_err().is_cancelled());
-            // The harness notification observes original native settlement,
-            // rather than a cancellation acknowledgement or waiter disposal.
-            worker.wait_idle().await;
-        }
-        worker.unload().await;
-        state.shutdown_request.request();
-        server.await.unwrap().unwrap();
-        worker.stop().await;
-    })
-    .await
-    .expect("controlled HTTP cancellation fixture hung");
+async fn audio_transcription_states_why_it_is_unavailable() {
+    // A Torch image model never offers transcription.
+    let (endpoint, _) = spawn_torch_audio_stub(vec![]).await;
+    let (_root, state) = torch_audio_state(&endpoint, "diffusion").await;
+    assert_eq!(
+        audio_capability(state).await["availability"]["reason"],
+        "model_task_mismatch"
+    );
+    // A stopped sidecar leaves the model described but not ready.
+    let (_root, state) = torch_audio_state("http://127.0.0.1:9", "audio").await;
+    assert_eq!(
+        audio_capability(state.clone()).await["availability"]["reason"],
+        "runtime_unavailable"
+    );
+    let response = operation(state, audio_request()).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        json_body(response).await["error"]["code"],
+        "capability_unavailable"
+    );
 }
 #[tokio::test]
 async fn unknown_task_fails_closed_and_exact_profile_resolves_ambiguity() {
@@ -1459,20 +1487,21 @@ async fn modality_facade_ambiguity_and_unsupported_pairs_have_no_provider_effect
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn modality_facade_audio_to_text_uses_existing_qualified_owner() {
-    let (_root, state, worker) = controlled_audio_state(false, false).await;
+async fn modality_facade_audio_to_text_selects_torch_transcription() {
+    let (endpoint, seen) =
+        spawn_torch_audio_stub(vec![(200, r#"{"text":"hi","finish_reason":"stop"}"#)]).await;
+    let (_root, state) = torch_audio_state(&endpoint, "audio").await;
     let mut value = audio_request();
     value.as_object_mut().unwrap().remove("capability");
     value.as_object_mut().unwrap().remove("options");
     let response = operation(state.clone(), value).await;
     let status = response.status();
     let body = json_body(response).await;
-    worker.stop().await;
-    state.shutdown_request.request();
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["result"]["kind"], "text");
+    // Without options the transcription language defaults to English.
+    assert_eq!(seen.lock().unwrap()[0]["language"], "en");
 }
 
 fn facade(value: Value) -> modality::ModalityRequest {
@@ -1970,7 +1999,7 @@ async fn rejections_explain_the_problem_and_echo_a_readable_request_id() {
     assert!(body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("unqualified_audio_runtime"));
+        .contains("unsupported_adapter"));
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
 }
 

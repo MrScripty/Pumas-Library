@@ -186,12 +186,6 @@ native runtime mapping, and requires graceful shutdown. Its separately labeled
 fixture hashes and lifecycle log are execution evidence, not pretrained Nomic
 acceptance or embedding-quality evidence. No model weights are downloaded.
 
-The bounded PR/manual `review-audio-dependencies` job separately requires the
-frozen non-model audio dependency cohort to execute under real Linux confinement.
-Unsupported confinement or recipe mismatch fails the job. Its evidence contains
-the exact source head/tree, probe report and log; installed runtime bytes are not
-uploaded. This dependency probe does not qualify a pretrained ASR model.
-
 The producer requires source version 0.8; older 0.7 sources fail before
 compilation. After manifest or dependency changes, regenerate/review the
 matching `<version>` and `<version>-s3` attribution directories. The generator and inference producer

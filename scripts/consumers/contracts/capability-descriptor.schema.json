@@ -35,7 +35,6 @@
     "AvailabilityReason": {
       "enum": [
         "unsupported_adapter",
-        "unqualified_audio_runtime",
         "unknown_model_task",
         "model_task_mismatch",
         "runtime_unavailable"

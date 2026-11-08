@@ -47,7 +47,11 @@ maintainer explicitly announces otherwise.
   launch also confines model loads to the library root and the directories of
   known external-reference models (`PUMAS_TORCH_MODEL_ROOTS`), and passes the
   backend's pid so the sidecar exits when the backend is gone. See the
-  [Torch provider protocol](contracts/torch-provider-protocol.md).
+  [Torch provider protocol](contracts/torch-provider-protocol.md). Audio models
+  (Cohere ASR) load with the same trust as the other Torch models: from local
+  files inside those roots, with Transformers' native implementation and no
+  repository code (`trust_remote_code=False`). There is no separate audio
+  sandbox.
 - Model paths, import roots, URLs, archives, and generated runtime commands are
   privileged inputs and must be validated at their receiving boundary.
 
@@ -148,9 +152,9 @@ whose distributions are exactly those in its hash lock, `requirements.txt`; its
 evidence: a runtime is verified when every package a record lists is installed
 at exactly the recorded version (a recorded package that is absent fails the
 match), which is a version comparison, not a hash or provenance claim. It installs nothing unless the user
-opts into a record's versions. The one exact pin is the Cohere audio candidate
-recipe (`rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json`):
-the confined audio read boundary admits only the files that recipe describes.
+opts into a record's versions. Every adapter, including `cohere-asr`, resolves
+current versions; adapters state only compatibility floors (Cohere ASR needs
+Transformers 5.4 or newer).
 `torch-server/requirements.txt` is an unpinned direct-development input, not a
 shipped dependency set. Its lower bounds sit past the known advisories, because
 scanners such as Scorecard read each bound as the installed version.
@@ -170,7 +174,6 @@ the root `packageManager`.
 | `cargo-deny` advisories and licenses | `rust/Cargo.lock`: all features, the three release targets, policy in `rust/deny.toml` | Yes |
 | `pnpm audit --prod` | `pnpm-lock.yaml`: production dependencies | Yes |
 | `pnpm audit` | `pnpm-lock.yaml`: all dependencies | Only for Electron, which is a devDependency but ships in every desktop package; other findings are build-only and recorded |
-| `pip-audit` | the exact packages of the Cohere audio candidate recipe | Yes |
 | `pip-audit` | `torch-server/requirements-dev.lock` | No: development and CI tooling, not shipped |
 | `pip-audit` | package versions in `torch-server/runtime/verified-runtimes.json` | No: install shortcuts that resolve current versions, so they are evidence, not pins |
 

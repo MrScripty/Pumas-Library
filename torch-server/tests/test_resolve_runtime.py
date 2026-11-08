@@ -1696,10 +1696,11 @@ class ResolverTests(unittest.TestCase):
         self.assertIn("--hash=sha256:" + "a" * 64, requirements[0])
         self.assertEqual(len(requirements), len(resolution["artifacts"]))
 
-    def test_cohere_asr_exact_profile_preserves_torch_selection_and_omits_image_deps(self):
+    def test_cohere_asr_floors_preserve_torch_selection_and_omit_image_deps(self):
         for version in ("2.4.0", "2.9.1", "2.10.0", "2.14.0"):
             extras = resolver.adapter_requirements("cohere-asr", version, "cpu")
-            self.assertIn("transformers==5.4.0", extras)
+            self.assertIn("transformers>=5.4.0", extras)
+            self.assertFalse([item for item in extras if "==" in item or "<" in item])
             fixture = report(
                 version=f"{version}+cpu", url=native_wheel(version), adapter="cohere-asr"
             )
@@ -1716,7 +1717,7 @@ class ResolverTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Torch >=2.4"):
             resolver.adapter_requirements("cohere-asr", "2.3.1", "cpu")
 
-    def test_cohere_asr_report_rejects_missing_and_wrong_native_dependencies(self):
+    def test_cohere_asr_report_rejects_missing_and_too_old_dependencies(self):
         for name in resolver.COHERE_ASR_PACKAGES:
             fixture = report(adapter="cohere-asr")
             fixture["install"] = [
@@ -1724,18 +1725,24 @@ class ResolverTests(unittest.TestCase):
             ]
             with self.subTest(missing=name), self.assertRaises(ValueError):
                 resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
-        for name, wrong in (
-            ("transformers", "4.57.6"),
+        for name, wrong in (("transformers", "4.57.6"), ("accelerate", "1.0.0")):
+            fixture = report(adapter="cohere-asr")
+            next(item for item in fixture["install"] if item["metadata"]["name"] == name)[
+                "metadata"
+            ]["version"] = wrong
+            with self.subTest(name=name, wrong=wrong), self.assertRaises(ValueError):
+                resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
+        for name, current in (
             ("transformers", "5.4.1"),
-            ("accelerate", "1.0.0"),
+            ("transformers", "5.12.0"),
             ("huggingface-hub", "2.0.0"),
             ("tokenizers", "0.23.1"),
         ):
             fixture = report(adapter="cohere-asr")
             next(item for item in fixture["install"] if item["metadata"]["name"] == name)[
                 "metadata"
-            ]["version"] = wrong
-            with self.subTest(name=name, wrong=wrong), self.assertRaises(ValueError):
+            ]["version"] = current
+            with self.subTest(name=name, current=current):
                 resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
 
     def test_adapter_artifacts_are_scoped_to_selection(self):

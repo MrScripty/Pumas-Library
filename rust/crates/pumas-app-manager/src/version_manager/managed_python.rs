@@ -1447,14 +1447,16 @@ mod tests {
                 .await
         });
         let group = wait_for_process_group_marker(&marker).await;
-        assert!(super::super::managed_depot_lease::ManagedDepotLease::read(depot.path()).is_err());
+        assert!(
+            super::super::managed_depot_lease::ManagedDepotLease::mutation(depot.path()).is_err()
+        );
         running.abort();
         assert!(running.await.unwrap_err().is_cancelled());
         cleanup.close();
         cleanup.drain().await.unwrap();
         cleanup.drain_child_slots().await.unwrap();
         assert!(!pumas_library::platform::linux_group::group_has_live_members(group).unwrap());
-        super::super::managed_depot_lease::ManagedDepotLease::read(depot.path()).unwrap();
+        super::super::managed_depot_lease::ManagedDepotLease::mutation(depot.path()).unwrap();
     }
 
     #[cfg(target_os = "linux")]

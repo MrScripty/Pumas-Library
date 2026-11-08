@@ -24,8 +24,6 @@ mod runtime_profiles;
 #[cfg(feature = "inference-plugins")]
 mod serving;
 #[cfg(feature = "inference-plugins")]
-mod serving_audio;
-#[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp;
 #[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp_router;
@@ -1729,10 +1727,6 @@ async fn dispatch_method(
         #[cfg(feature = "inference-plugins")]
         "serve_model" => serving::serve_model(state, params).await,
         #[cfg(feature = "inference-plugins")]
-        "serve_experimental_local_cohere" => {
-            serving::serve_experimental_local_cohere(state, params).await
-        }
-        #[cfg(feature = "inference-plugins")]
         "unserve_model" => serving::unserve_model(state, params).await,
 
         // Version Management
@@ -1753,7 +1747,6 @@ async fn dispatch_method(
 
         // Model Library
         "import_model" => models::import_model(state, params).await,
-        "import_local_cohere" => models::import_local_cohere(state, params).await,
         "search_hf_models" => models::search_hf_models(state, params).await,
         "get_related_models" => models::get_related_models(state, params).await,
         "import_batch" => models::import_batch(state, params).await,

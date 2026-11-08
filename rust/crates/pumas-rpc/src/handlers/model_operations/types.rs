@@ -289,7 +289,7 @@ pub enum OperationOptions {
         top_n: Option<usize>,
     },
 }
-/// The existing private speech owner's closed language vocabulary.
+/// Languages the Cohere ASR transcription adapter accepts.
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -663,9 +663,6 @@ impl AvailabilityReason {
             Self::UnsupportedAdapter => {
                 "unsupported_adapter: the serving provider has no adapter for this capability"
             }
-            Self::UnqualifiedAudioRuntime => {
-                "unqualified_audio_runtime: no qualified audio runtime is serving this model"
-            }
             Self::UnknownModelTask => {
                 "unknown_model_task: the model's library record does not state its task"
             }
@@ -683,7 +680,6 @@ impl AvailabilityReason {
 #[serde(rename_all = "snake_case")]
 pub enum AvailabilityReason {
     UnsupportedAdapter,
-    UnqualifiedAudioRuntime,
     UnknownModelTask,
     ModelTaskMismatch,
     RuntimeUnavailable,

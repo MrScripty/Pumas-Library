@@ -42,8 +42,6 @@
 //! }
 //! ```
 
-mod audio_native_cohort;
-mod audio_runtime_recipe;
 mod cohere_asr_profile;
 mod constraints;
 mod dependencies;
@@ -58,7 +56,6 @@ mod state;
 mod torch_alternatives;
 mod torch_inspection;
 mod torch_preview;
-mod torch_read_source;
 mod torch_verified;
 mod torch_workspace;
 

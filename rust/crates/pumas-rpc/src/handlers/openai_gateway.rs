@@ -98,26 +98,41 @@ fn torch_process_is_stable(
         && torch_process_is_current(after, endpoint)
 }
 
-fn torch_slot_supports_images(
-    model: &ServedModelStatus,
-    slot: &pumas_app_manager::ModelSlot,
-) -> bool {
-    slot.model_name == model.model_id
-        && slot.state == SlotState::Ready
-        && matches!(
-            slot.model_type.as_deref(),
-            Some("nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8")
-        )
+/// The Torch work a served model is checked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TorchWork {
+    Image,
+    Audio,
+}
+
+impl TorchWork {
+    fn capability(self) -> &'static str {
+        match self {
+            Self::Image => pumas_app_manager::torch_client::TORCH_IMAGE_GENERATION_CAPABILITY,
+            Self::Audio => pumas_app_manager::torch_client::TORCH_AUDIO_TRANSCRIPTION_CAPABILITY,
+        }
+    }
+
+    fn supports(self, slot_type: Option<&str>) -> bool {
+        match self {
+            Self::Image => matches!(
+                slot_type,
+                Some("nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8")
+            ),
+            Self::Audio => slot_type == Some("cohere-asr"),
+        }
+    }
 }
 
 /// Observe one compatible, ready Torch runtime without crossing a process
 /// replacement. The process observation, protocol/capability handshake and
 /// ready-slot check remain distinct facts, but all must describe one current
 /// owned profile before admission or listing.
-pub(super) async fn check_live_torch_image_runtime(
+pub(super) async fn check_live_torch_runtime(
     state: &AppState,
     model: &ServedModelStatus,
     endpoint: &RuntimeEndpointUrl,
+    work: TorchWork,
 ) -> Result<TorchClient, TorchLiveCheckError> {
     let before = state
         .api
@@ -129,17 +144,18 @@ pub(super) async fn check_live_torch_image_runtime(
 
     let client = TorchClient::for_owned_sidecar(endpoint.as_str());
     client
-        .check_image_runtime()
+        .check_runtime(work.capability())
         .await
         .map_err(TorchLiveCheckError::Handshake)?;
     let slots = client
         .list_slots()
         .await
         .map_err(|_| TorchLiveCheckError::Slots)?;
-    if !slots
-        .iter()
-        .any(|slot| torch_slot_supports_images(model, slot))
-    {
+    if !slots.iter().any(|slot| {
+        slot.model_name == model.model_id
+            && slot.state == SlotState::Ready
+            && work.supports(slot.model_type.as_deref())
+    }) {
         return Err(TorchLiveCheckError::ModelNotReady);
     }
 
@@ -153,6 +169,24 @@ pub(super) async fn check_live_torch_image_runtime(
     Ok(client)
 }
 
+/// [`check_live_torch_runtime`] for image generation.
+pub(super) async fn check_live_torch_image_runtime(
+    state: &AppState,
+    model: &ServedModelStatus,
+    endpoint: &RuntimeEndpointUrl,
+) -> Result<TorchClient, TorchLiveCheckError> {
+    check_live_torch_runtime(state, model, endpoint, TorchWork::Image).await
+}
+
+/// The Torch work a served library model is for.
+pub(super) fn torch_work_for(model_type: Option<&str>) -> TorchWork {
+    if model_type == Some("audio") {
+        TorchWork::Audio
+    } else {
+        TorchWork::Image
+    }
+}
+
 /// OpenAI-compatible served-model listing backed by Pumas serving status.
 pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.api.get_serving_status().await {
@@ -164,8 +198,19 @@ pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl In
                 .iter()
                 .filter(|model| model.provider == RuntimeProviderId::Torch)
             {
+                let work = torch_work_for(
+                    state
+                        .api
+                        .model_library()
+                        .get_model(&model.model_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .as_ref()
+                        .map(|record| record.model_type.as_str()),
+                );
                 let ready = match model.endpoint_url.as_ref() {
-                    Some(endpoint) => check_live_torch_image_runtime(&state, model, endpoint)
+                    Some(endpoint) => check_live_torch_runtime(&state, model, endpoint, work)
                         .await
                         .is_ok(),
                     None => false,

@@ -9,14 +9,9 @@ mod torch;
 mod torch_tests;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
-#[cfg(all(test, target_os = "linux"))]
-pub(crate) use torch::validate_staged_files;
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;
 pub(crate) use torch::TorchVersionsLock;
-#[cfg(all(test, target_os = "linux"))]
-pub(crate) use torch::{move_verified_packages, BootstrapPackages};
-pub(crate) use torch::{write_embedded_torch_sidecar, StagedFilesManifest};
 
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use chrono::Utc;

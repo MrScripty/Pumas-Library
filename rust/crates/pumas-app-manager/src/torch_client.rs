@@ -62,6 +62,12 @@ pub const SUPPORTED_TORCH_PROTOCOL: u32 = 3;
 /// Capability advertised by image-capable Torch sidecars.
 pub const TORCH_IMAGE_GENERATION_CAPABILITY: &str = "image_generation";
 
+/// Capability advertised by Torch sidecars that serve audio transcription.
+pub const TORCH_AUDIO_TRANSCRIPTION_CAPABILITY: &str = "audio_transcription";
+
+/// Upper bound for a sidecar transcription response body.
+const MAX_TRANSCRIPTION_RESPONSE_BYTES: usize = 256 * 1024;
+
 /// Upper bound for a sidecar image-generation response body (12 MiB gateway JSON).
 const MAX_IMAGE_RESPONSE_BYTES: usize = 12 * 1024 * 1024;
 
@@ -460,14 +466,26 @@ impl TorchHandshake {
     /// [`TorchClient::list_slots`]; this advertisement alone never admits
     /// a model for image work.
     pub fn has_image_capability(&self) -> bool {
-        self.capabilities
-            .iter()
-            .any(|capability| capability == TORCH_IMAGE_GENERATION_CAPABILITY)
+        self.has_capability(TORCH_IMAGE_GENERATION_CAPABILITY)
+    }
+
+    /// Whether the sidecar advertises `capability`.
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|name| name == capability)
     }
 
     /// Require liveness, the supported protocol, and the image-generation
     /// capability, reporting the first failure with its owning reason.
     pub fn check_image_compatible(&self) -> std::result::Result<(), TorchCompatibilityError> {
+        self.check_compatible(TORCH_IMAGE_GENERATION_CAPABILITY)
+    }
+
+    /// Require liveness, the supported protocol, and `capability`, reporting
+    /// the first failure with its owning reason.
+    pub fn check_compatible(
+        &self,
+        capability: &'static str,
+    ) -> std::result::Result<(), TorchCompatibilityError> {
         if !self.is_live() {
             return Err(TorchCompatibilityError::NotLive {
                 status: self.status.clone(),
@@ -479,10 +497,8 @@ impl TorchHandshake {
                 expected: SUPPORTED_TORCH_PROTOCOL,
             });
         }
-        if !self.has_image_capability() {
-            return Err(TorchCompatibilityError::MissingCapability {
-                capability: TORCH_IMAGE_GENERATION_CAPABILITY,
-            });
+        if !self.has_capability(capability) {
+            return Err(TorchCompatibilityError::MissingCapability { capability });
         }
         Ok(())
     }
@@ -561,6 +577,113 @@ impl std::fmt::Display for TorchImageError {
 }
 
 impl std::error::Error for TorchImageError {}
+
+/// Transcript returned by the sidecar's private audio operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TorchTranscription {
+    pub text: String,
+    /// Generation reached the adapter's token bound instead of ending.
+    pub length_limited: bool,
+}
+
+/// Decoded transcription failures from the Torch sidecar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TorchAudioError {
+    /// The sidecar is busy with another operation on the model's device.
+    RuntimeBusy,
+    /// No ready slot holds the requested model.
+    ModelUnavailable,
+    /// The slot's model does not transcribe audio.
+    UnsupportedModel,
+    /// The sidecar refused the request, with its reason.
+    InvalidRequest(String),
+    /// The sidecar ran out of GPU memory.
+    OutOfMemory,
+    /// Transcription stopped (client disconnect or cancellation).
+    Cancelled,
+    /// The sidecar reported an unclassified failure.
+    BackendFailure,
+    /// The sidecar response was not the typed transcription result.
+    InvalidBackendResult,
+    /// The sidecar could not be reached or its body could not be read.
+    Transport,
+}
+
+impl TorchAudioError {
+    /// Stable provider error code for this failure.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::RuntimeBusy => "runtime_busy",
+            Self::ModelUnavailable => "model_unavailable",
+            Self::UnsupportedModel => "unsupported_model",
+            Self::InvalidRequest(_) => "invalid_request",
+            Self::OutOfMemory => "out_of_memory",
+            Self::Cancelled => "cancelled",
+            Self::BackendFailure => "backend_failure",
+            Self::InvalidBackendResult => "invalid_backend_result",
+            Self::Transport => "transport",
+        }
+    }
+}
+
+impl std::fmt::Display for TorchAudioError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRequest(reason) => write!(f, "invalid_request: {reason}"),
+            other => f.write_str(other.code()),
+        }
+    }
+}
+
+impl std::error::Error for TorchAudioError {}
+
+fn decode_audio_error(body: &[u8]) -> TorchAudioError {
+    let detail = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("detail").cloned());
+    let field = |name: &str| {
+        detail
+            .as_ref()
+            .and_then(|detail| detail.get(name))
+            .and_then(serde_json::Value::as_str)
+    };
+    match field("code") {
+        Some("runtime_busy") => TorchAudioError::RuntimeBusy,
+        Some("model_unavailable") => TorchAudioError::ModelUnavailable,
+        Some("unsupported_model") => TorchAudioError::UnsupportedModel,
+        // The sidecar's refusal reasons name request fields, never paths.
+        Some("invalid_request") => TorchAudioError::InvalidRequest(
+            field("message")
+                .unwrap_or("audio request refused")
+                .chars()
+                .take(512)
+                .collect(),
+        ),
+        Some("out_of_memory") => TorchAudioError::OutOfMemory,
+        Some("cancelled") => TorchAudioError::Cancelled,
+        _ => TorchAudioError::BackendFailure,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct TranscriptionBody {
+    text: String,
+    finish_reason: String,
+}
+
+fn decode_transcription(body: &[u8]) -> std::result::Result<TorchTranscription, TorchAudioError> {
+    let parsed = serde_json::from_slice::<TranscriptionBody>(body)
+        .map_err(|_| TorchAudioError::InvalidBackendResult)?;
+    let length_limited = match parsed.finish_reason.as_str() {
+        "stop" => false,
+        "length" => true,
+        _ => return Err(TorchAudioError::InvalidBackendResult),
+    };
+    Ok(TorchTranscription {
+        text: parsed.text,
+        length_limited,
+    })
+}
 
 /// Private sidecar success body for image generation.
 #[derive(Debug, Deserialize)]
@@ -763,9 +886,9 @@ pub struct TorchClient {
     client: reqwest::Client,
     /// Client with extended timeout for model loading operations.
     load_client: reqwest::Client,
-    /// Connection-bounded but duration-unbounded client for image generation:
-    /// only connection establishment is bounded; an admitted request may stay
-    /// connected and silent until its terminal result.
+    /// Connection-bounded but duration-unbounded client for image generation
+    /// and transcription: only connection establishment is bounded; an
+    /// admitted request may stay connected and silent until its terminal result.
     image_client: reqwest::Client,
 }
 
@@ -887,9 +1010,18 @@ impl TorchClient {
     pub async fn check_image_runtime(
         &self,
     ) -> std::result::Result<TorchHandshake, TorchHandshakeFailure> {
+        self.check_runtime(TORCH_IMAGE_GENERATION_CAPABILITY).await
+    }
+
+    /// Fetch the handshake and require the supported protocol plus
+    /// `capability`, keeping each failure reason distinct.
+    pub async fn check_runtime(
+        &self,
+        capability: &'static str,
+    ) -> std::result::Result<TorchHandshake, TorchHandshakeFailure> {
         let handshake = self.fetch_handshake().await?;
         handshake
-            .check_image_compatible()
+            .check_compatible(capability)
             .map(|()| handshake)
             .map_err(TorchHandshakeFailure::Incompatible)
     }
@@ -904,9 +1036,15 @@ impl TorchClient {
     /// alone never admits a model, and a ready slot never proves
     /// compatibility.
     pub async fn verify_image_runtime(&self) -> Result<TorchHandshake> {
+        self.verify_runtime(TORCH_IMAGE_GENERATION_CAPABILITY).await
+    }
+
+    /// Require the supported protocol plus `capability`; see
+    /// [`Self::verify_image_runtime`].
+    pub async fn verify_runtime(&self, capability: &'static str) -> Result<TorchHandshake> {
         let handshake = self.handshake().await?;
         handshake
-            .check_image_compatible()
+            .check_compatible(capability)
             .map(|()| handshake)
             .map_err(|error| PumasError::TorchInference {
                 message: error.to_string(),
@@ -967,6 +1105,48 @@ impl TorchClient {
             return Err(decode_image_error(&bytes));
         }
         decode_image_result(&bytes, width, height)
+    }
+
+    /// Transcribe one recording through the sidecar's private audio operation.
+    ///
+    /// `audio` is the typed PCM part (`encoding`, `sample_rate_hz`,
+    /// `channels`, `sample_count`, `data_base64`). Like image generation the
+    /// transport is connection-bounded but duration-unbounded, and dropping
+    /// the future asks the sidecar to stop.
+    pub async fn transcribe_audio(
+        &self,
+        model_id: &str,
+        audio: &serde_json::Value,
+        language: &str,
+    ) -> std::result::Result<TorchTranscription, TorchAudioError> {
+        let url = format!("{}/api/audio/transcriptions", self.base_url);
+        debug!("Torch transcription for model '{}' at {}", model_id, url);
+        let body = serde_json::json!({
+            "model_id": model_id,
+            "audio": audio,
+            "language": language,
+        });
+        let response = self
+            .image_client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|_| TorchAudioError::Transport)?;
+        let status = response.status();
+        let mut bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| TorchAudioError::Transport)?;
+            if bytes.len().saturating_add(chunk.len()) > MAX_TRANSCRIPTION_RESPONSE_BYTES {
+                return Err(TorchAudioError::InvalidBackendResult);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            return Err(decode_audio_error(&bytes));
+        }
+        decode_transcription(&bytes)
     }
 
     /// List all model slots (loaded and unloaded).
@@ -1836,5 +2016,72 @@ mod tests {
         assert_eq!(device.device_id, "cuda:0");
         assert_eq!(device.name, "NVIDIA RTX 4090");
         assert!(device.is_available);
+    }
+
+    #[tokio::test]
+    async fn transcription_posts_to_the_private_route_and_decodes_results() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let backend = serve_once(
+            listener,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 43\r\n\r\n{\"text\":\"ask not\",\"finish_reason\":\"length\"}",
+        )
+        .await;
+        let audio = serde_json::json!({"encoding": "pcm_s16le"});
+        let result = TorchClient::for_owned_sidecar(&endpoint)
+            .transcribe_audio("asr", &audio, "en")
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            TorchTranscription {
+                text: "ask not".into(),
+                length_limited: true
+            }
+        );
+        assert!(backend
+            .await
+            .unwrap()
+            .starts_with("post /api/audio/transcriptions "));
+    }
+
+    #[test]
+    fn transcription_refusals_keep_their_reasons() {
+        let refusal = |code: &str, message: &str| {
+            decode_audio_error(
+                serde_json::json!({"detail": {"code": code, "message": message}})
+                    .to_string()
+                    .as_bytes(),
+            )
+        };
+        assert_eq!(
+            refusal("invalid_request", "language must be one of: en"),
+            TorchAudioError::InvalidRequest("language must be one of: en".into())
+        );
+        assert_eq!(refusal("runtime_busy", ""), TorchAudioError::RuntimeBusy);
+        assert_eq!(
+            refusal("model_unavailable", ""),
+            TorchAudioError::ModelUnavailable
+        );
+        assert_eq!(
+            refusal("Traceback", "/secret/path"),
+            TorchAudioError::BackendFailure
+        );
+        assert_eq!(
+            decode_transcription(br#"{"text":"x","finish_reason":"other"}"#),
+            Err(TorchAudioError::InvalidBackendResult)
+        );
+        let handshake = TorchHandshake {
+            status: "ok".into(),
+            protocol: SUPPORTED_TORCH_PROTOCOL,
+            capabilities: vec![TORCH_IMAGE_GENERATION_CAPABILITY.into()],
+        };
+        assert_eq!(
+            handshake.check_compatible(TORCH_AUDIO_TRANSCRIPTION_CAPABILITY),
+            Err(TorchCompatibilityError::MissingCapability {
+                capability: TORCH_AUDIO_TRANSCRIPTION_CAPABILITY
+            })
+        );
+        assert!(handshake.check_image_compatible().is_ok());
     }
 }

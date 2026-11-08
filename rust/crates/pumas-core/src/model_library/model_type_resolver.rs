@@ -657,6 +657,7 @@ fn has_audio_architecture(signals: &ConfigSignals) -> bool {
         lower.contains("whisper")
             || lower.contains("speech")
             || lower.contains("audio")
+            || lower.contains("asr")
             || lower.contains("wav2vec")
             || lower.contains("hubert")
             || lower.contains("wavlm")
@@ -681,6 +682,7 @@ fn should_apply_audio_disambiguation_guard(
         value.contains("audio")
             || value.contains("speech")
             || value.contains("whisper")
+            || value.contains("asr")
             || value.contains("tts")
             || value.contains("musicgen")
             || value.contains("encodec")
@@ -1275,6 +1277,23 @@ mod tests {
         let resolved =
             resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Diffusion);
+    }
+
+    #[test]
+    fn cohere_asr_resolves_to_audio_without_a_task_tag() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["CohereAsrForConditionalGeneration"],
+                "model_type": "cohere_asr"
+            }),
+        );
+
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
+        assert_eq!(resolved.model_type, ModelType::Audio);
     }
 
     #[test]

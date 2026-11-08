@@ -20,7 +20,6 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 export const REVIEW_ID = 'current-vulnerability-results';
 export const SUMMARY = 'summary.json';
 const exceptionsPath = 'scripts/release/dependency-audit-exceptions.json';
-const audioRecipePath = 'rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json';
 const verifiedRuntimesPath = 'torch-server/runtime/verified-runtimes.json';
 const devLockPath = 'torch-server/requirements-dev.lock';
 // Declared as devDependencies but shipped inside every desktop package.
@@ -35,8 +34,6 @@ export const SCANS = [
     scope: 'Production dependencies of the frontend and Electron workspaces' },
   { id: 'pnpm-all', ecosystem: 'npm', input: 'pnpm-lock.yaml', report: 'pnpm-audit-all.json', gating: 'shipped-runtime',
     scope: `All dependencies; findings gate only for shipped runtimes declared as devDependencies (${shippedDevRuntimes.join(', ')}), the rest are build-only` },
-  { id: 'pip-audio-recipe', ecosystem: 'pypi', input: audioRecipePath, report: 'pip-audit-audio-recipe.json', gating: true,
-    scope: 'The exact package set Pumas installs for the Cohere audio candidate' },
   { id: 'pip-dev-lock', ecosystem: 'pypi', input: devLockPath, report: 'pip-audit-dev-lock.json', gating: false,
     scope: 'Development and CI tooling lock; not shipped' },
   { id: 'pip-verified-runtimes', ecosystem: 'pypi', input: verifiedRuntimesPath, report: 'pip-audit-verified-runtimes.json', gating: false,
@@ -67,18 +64,6 @@ function accepted(exceptions, ecosystem, finding) {
 // Strip a PEP 440 local segment (`+cpu`); PyPI advisories name public versions.
 function publicVersion(version) {
   return String(version).split('+')[0];
-}
-
-export function recipeRequirements(recipe) {
-  if (!Array.isArray(recipe?.artifacts) || recipe.artifacts.length === 0) fail('audio recipe has no artifacts');
-  const notes = [];
-  const lines = recipe.artifacts.map(item => {
-    if (typeof item?.name !== 'string' || typeof item.version !== 'string') fail('audio recipe artifact lacks name/version');
-    const version = publicVersion(item.version);
-    if (version !== item.version) notes.push(`${item.name} ${item.version} audited as public version ${version}`);
-    return `${item.name}==${version}`;
-  });
-  return { text: `${lines.join('\n')}\n`, notes };
 }
 
 export function verifiedRuntimeRequirements(verified) {
@@ -244,12 +229,9 @@ function runScans({ output, cargoDeny, python }) {
 
   const inputs = path.join(output, 'inputs');
   fs.mkdirSync(inputs);
-  const recipe = recipeRequirements(JSON.parse(fs.readFileSync(path.join(root, audioRecipePath), 'utf8')));
-  fs.writeFileSync(path.join(inputs, 'audio-recipe-requirements.txt'), recipe.text);
   const verified = verifiedRuntimeRequirements(JSON.parse(fs.readFileSync(path.join(root, verifiedRuntimesPath), 'utf8')));
   fs.writeFileSync(path.join(inputs, 'verified-runtimes-requirements.txt'), verified.text);
   for (const [id, args, notes] of [
-    ['pip-audio-recipe', ['--no-deps', '--disable-pip', '-r', path.join(inputs, 'audio-recipe-requirements.txt')], recipe.notes],
     ['pip-dev-lock', ['--require-hashes', '--disable-pip', '-r', devLockPath], []],
     ['pip-verified-runtimes', ['--no-deps', '--disable-pip', '-r', path.join(inputs, 'verified-runtimes-requirements.txt')], verified.notes],
   ]) {

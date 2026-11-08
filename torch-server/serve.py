@@ -3,7 +3,7 @@
 Starts a FastAPI server that provides:
   - /v1/*   OpenAI-compatible API endpoints
   - /api/*  Pumas control endpoints (load/unload/status/devices)
-            plus the private image provider operation
+            plus the private image and audio provider operations
   - /health Health check endpoint
 
 When the launcher sets PUMAS_TORCH_API_TOKEN, every route except /health
@@ -24,6 +24,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from audio_api import router as audio_router
 from control_api import router as control_router
 from device_manager import DeviceManager
 from model_manager import ModelManager
@@ -42,7 +43,7 @@ from validation import (
 
 logger = logging.getLogger(__name__)
 TORCH_PROTOCOL = 3
-TORCH_CAPABILITIES = ("image_generation",)
+TORCH_CAPABILITIES = ("image_generation", "audio_transcription")
 PARENT_POLL_SECONDS = 1.0
 # After asking uvicorn to stop, wait this long for in-flight workers to observe
 # their disconnect before forcing exit.
@@ -83,6 +84,7 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
     app.include_router(openai_router, prefix="/v1")
     app.include_router(control_router, prefix="/api")
     app.include_router(image_router, prefix="/api")
+    app.include_router(audio_router, prefix="/api")
 
     @app.get("/health")
     async def health_check():

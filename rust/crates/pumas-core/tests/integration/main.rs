@@ -18,7 +18,6 @@ mod dependency_requirements_contract_fixtures;
 mod intent_desired_crash_tests;
 mod intent_ipc_tests;
 mod link_health;
-mod local_cohere_import;
 mod local_owner_retention;
 mod local_start_authority;
 mod metadata_artifact_tests;

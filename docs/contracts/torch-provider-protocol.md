@@ -30,7 +30,7 @@ Current protocol: `3`.
 `GET /health` returns:
 
 ```json
-{"status": "ok", "protocol": 3, "capabilities": ["image_generation"]}
+{"status": "ok", "protocol": 3, "capabilities": ["image_generation", "audio_transcription"]}
 ```
 
 - `status`: `"ok"` when the process is alive.
@@ -69,6 +69,10 @@ once that process is gone).
   work. The gateway publishes the public `image_generation` model capability
   only when a Torch slot for that model is ready; the provider advertisement
   alone never makes a model selectable.
+- `audio_transcription` advertises the private transcription endpoint below.
+  The gateway offers the public `audio_transcription` capability only for a
+  ready `cohere-asr` slot. Runtimes installed before this capability existed
+  lack the endpoint; reinstall or repair them.
 - Capabilities are additive: adding a new capability must not change the
   meaning of existing fields, and clients must not treat an unrecognized
   capability as an error.
@@ -120,6 +124,34 @@ gateway relays into public metadata unchanged. These six canonical fields are
 required. Unknown additive private result fields are accepted within the
 12 MiB whole-response bound, but the gateway never projects them publicly.
 
+## Private transcription endpoint
+
+`POST /api/audio/transcriptions` accepts:
+
+```json
+{
+  "model_id": "<provider slot identity>",
+  "audio": {
+    "encoding": "pcm_s16le",
+    "sample_rate_hz": 16000,
+    "channels": 1,
+    "sample_count": 16000,
+    "data_base64": "<little-endian PCM>"
+  },
+  "language": "en"
+}
+```
+
+`audio` is the model-operations audio input without `kind`: PCM16LE or
+finite float32 PCM in [-1, 1], 8–192 kHz, one or two channels and at most 30
+seconds. The sidecar downmixes and resamples it to 16 kHz mono. `language` is
+one of `en de fr it es pt el nl pl vi zh ar ja ko` and defaults to `en`.
+Unknown fields are rejected. The slot must hold a `cohere-asr` model.
+
+A successful result is `{"text": "...", "finish_reason": "stop" | "length"}`.
+`length` means generation reached the adapter's 512-token bound. Refusals use
+the codes below; `invalid_request` carries a reason naming the field.
+
 ## Provider error outcomes
 
 The provider reports failures as `detail: {"code": ..., "message": ...}`,
@@ -166,9 +198,10 @@ never forwarded:
 
 ## Runtime recipe relationship
 
-The sidecar's `/health` reports protocol `3` and the `image_generation`
-capability. `TorchClient` in `pumas-app-manager` admits only that protocol and
-requires the capability before it routes image requests. No runtime recipe
+The sidecar's `/health` reports protocol `3` and the `image_generation` and
+`audio_transcription` capabilities. `TorchClient` in `pumas-app-manager` admits
+only that protocol and requires the matching capability before it routes image
+or transcription requests. No runtime recipe
 pins a dependency set by default: each install resolves current package
 versions and records them, and `torch-server/runtime/verified-runtimes.json`
 records verified combinations as evidence. An installed runtime is *verified*

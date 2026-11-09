@@ -697,8 +697,8 @@ async fn audio_transcription_is_served_by_the_torch_sidecar() {
 
     for (text, finish) in [("guten tag", "stop"), ("lang", "length")] {
         let body = json_body(operation(state.clone(), audio_request()).await).await;
-        assert_eq!(body["request_id"], "audio-request-17");
-        assert_eq!(body["result"]["text"], text);
+        assert_eq!(body["request_id"], "audio-request-17", "{body}");
+        assert_eq!(body["result"]["text"], text, "{body}");
         assert_eq!(body["result"]["finish_reason"], finish);
     }
     let sent = seen.lock().unwrap().clone();
@@ -740,8 +740,9 @@ async fn audio_refusals_carry_reasons_and_are_never_replayed() {
     assert!(seen.lock().unwrap().is_empty());
 
     let response = operation(state.clone(), audio_request()).await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let status = response.status();
     let body = json_body(response).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"]["code"], "invalid_request");
     assert!(body["error"]["message"]
         .as_str()
@@ -749,14 +750,16 @@ async fn audio_refusals_carry_reasons_and_are_never_replayed() {
         .contains("PCM contract"));
 
     let response = operation(state.clone(), audio_request()).await;
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let status = response.status();
     let body = json_body(response).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["error"]["outcome"], "not_admitted");
     assert!(body["error"]["message"].as_str().unwrap().contains("busy"));
 
     let response = operation(state.clone(), audio_request()).await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let status = response.status();
     let body = json_body(response).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
     assert_eq!(body["error"]["code"], "provider_failure");
     assert!(!body.to_string().contains("/secret/path"));
     assert_eq!(seen.lock().unwrap().len(), 3);

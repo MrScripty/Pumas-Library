@@ -1389,6 +1389,17 @@ fn trusted_macos_pypi_torch_wheel(
         })
 }
 
+/// Whether Python reported the interpreter Pumas selected. Windows can name
+/// one file by its 8.3 short path (`RUNNER~1`) or its long path, so a textual
+/// mismatch falls back to comparing the resolved files.
+fn same_interpreter(reported: &Path, selected: &Path) -> bool {
+    reported == selected
+        || matches!(
+            (std::fs::canonicalize(reported), std::fs::canonicalize(selected)),
+            (Ok(reported), Ok(selected)) if reported == selected
+        )
+}
+
 fn validate_direct_torch_report(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
@@ -1411,7 +1422,7 @@ fn validate_direct_torch_report(
         || resolution.python != minor
         || resolution.adapter != adapter
         || resolution.implementation != "cpython"
-        || Path::new(&resolution.interpreter) != python
+        || !same_interpreter(Path::new(&resolution.interpreter), python)
         || resolution.artifacts.is_empty()
         || !match std::env::consts::OS {
             "linux" => resolution.machine == "x86_64" && resolution.platform.starts_with("Linux-"),
@@ -2939,6 +2950,20 @@ mod managed_python_provenance_tests {
         publish(&requirements).unwrap();
         assert!(installed.exists());
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn interpreter_identity_survives_alternate_spellings_of_one_file() {
+        let root = tempfile::tempdir().unwrap();
+        let python = root.path().join("python");
+        std::fs::write(&python, b"interpreter").unwrap();
+        let other = root.path().join("other");
+        std::fs::write(&other, b"interpreter").unwrap();
+        let dotted = root.path().join(".").join("python");
+        assert!(same_interpreter(&python, &python));
+        assert!(same_interpreter(&dotted, &python));
+        assert!(!same_interpreter(&other, &python));
+        assert!(!same_interpreter(&root.path().join("missing"), &python));
     }
 
     #[cfg(target_os = "linux")]

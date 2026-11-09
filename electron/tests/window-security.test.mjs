@@ -32,12 +32,14 @@ test('the bundled entry document is the only file URL that belongs to the applic
 
 test('entry paths compare decoded, and case-insensitively only when asked', () => {
   const spaced = '/opt/Pumas Library/frontend/index.html';
+  // pathToFileURL resolves against the host (a drive letter on Windows).
+  const url = pathToFileURL(spaced).href;
   const policy = createAppOriginPolicy({ frontendEntryPath: spaced });
-  assert.equal(policy.isAppUrl('file:///opt/Pumas%20Library/frontend/index.html'), true);
-  assert.equal(policy.isAppUrl('file:///opt/pumas%20library/frontend/index.html'), false);
+  assert.equal(policy.isAppUrl(url), true);
+  assert.equal(policy.isAppUrl(url.replace('Pumas%20Library', 'pumas%20library')), false);
   const windows = createAppOriginPolicy({ frontendEntryPath: spaced, caseInsensitivePaths: true });
-  assert.equal(windows.isAppUrl('file:///opt/pumas%20library/frontend/INDEX.html'), true);
-  assert.equal(windows.isAppUrl('file:///opt/%E0%A4%A/frontend/index.html'), false);
+  assert.equal(windows.isAppUrl(url.replace('Pumas%20Library', 'pumas%20library').replace('index.html', 'INDEX.html')), true);
+  assert.equal(windows.isAppUrl(url.replace('Pumas%20Library', '%E0%A4%A')), false);
 });
 
 test('the development server origin is trusted only when configured', () => {

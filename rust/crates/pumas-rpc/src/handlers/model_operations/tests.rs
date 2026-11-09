@@ -574,7 +574,7 @@ async fn spawn_torch_audio_stub(
         .route(
             "/api/slots",
             get(move || async move {
-                json_reply(200, r#"{"slots":[{"slot_id":"asr","model_name":"library/speech","model_path":"/fixture","device":"cpu","state":"ready","model_type":"cohere-asr"}]}"#)
+                json_reply(200, r#"{"slots":[{"slot_id":"asr","model_name":"audio/cohere/speech","model_path":"/fixture","device":"cpu","state":"ready","model_type":"cohere-asr"}]}"#)
             }),
         )
         .route(
@@ -595,6 +595,8 @@ async fn spawn_torch_audio_stub(
     (endpoint, seen)
 }
 
+const SPEECH_MODEL: &str = "audio/cohere/speech";
+
 async fn torch_audio_state(endpoint: &str, model_type: &str) -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();
     let state = Arc::new(crate::handlers::test_support::build_test_app_state(root.path()).await);
@@ -608,32 +610,37 @@ async fn torch_audio_state(endpoint: &str, model_type: &str) -> (TempDir, Arc<Ap
     config.endpoint_url = None;
     config.port = None;
     state.api.upsert_runtime_profile(config).await.unwrap();
-    let model_root = state
-        .api
-        .model_library()
-        .library_root()
-        .join("audio/cohere/speech");
+    let model_root = state.api.model_library().library_root().join(SPEECH_MODEL);
     std::fs::create_dir_all(&model_root).unwrap();
-    state
-        .api
-        .model_library()
-        .index()
-        .upsert(&ModelRecord {
-            id: "library/speech".into(),
-            path: model_root.display().to_string(),
-            cleaned_name: "speech".into(),
-            official_name: "speech".into(),
-            model_type: model_type.into(),
-            tags: vec![],
-            hashes: HashMap::new(),
-            metadata: json!({}),
-            updated_at: "fixture".into(),
-        })
+    // Library lookups reconcile the index from each model's metadata.json, so
+    // the fixture is a saved library model, not only an index row.
+    if model_type == "audio" {
+        std::fs::write(
+            model_root.join("config.json"),
+            r#"{"model_type":"cohere_asr","architectures":["CohereAsrForConditionalGeneration"]}"#,
+        )
         .unwrap();
+        std::fs::write(model_root.join("model.safetensors"), b"weights").unwrap();
+    }
+    let library = state.api.model_library();
+    library
+        .save_metadata(
+            &model_root,
+            &pumas_library::models::ModelMetadata {
+                model_id: Some(SPEECH_MODEL.into()),
+                official_name: Some("speech".into()),
+                family: Some("cohere".into()),
+                model_type: Some(model_type.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    library.index_model_dir(&model_root).await.unwrap();
     state
         .api
         .record_served_model(ServedModelStatus {
-            model_id: "library/speech".into(),
+            model_id: SPEECH_MODEL.into(),
             model_alias: Some("speech".into()),
             provider: RuntimeProviderId::Torch,
             profile_id: profile,
@@ -687,6 +694,8 @@ async fn audio_transcription_is_served_by_the_torch_sidecar() {
     ])
     .await;
     let (_root, state) = torch_audio_state(&endpoint, "audio").await;
+    // A reconciled (reclassified) Cohere package is still an audio model.
+    state.api.rebuild_model_index().await.unwrap();
     let capability = audio_capability(state.clone()).await;
     assert_eq!(
         capability["availability"]["state"], "available",
@@ -703,7 +712,7 @@ async fn audio_transcription_is_served_by_the_torch_sidecar() {
     }
     let sent = seen.lock().unwrap().clone();
     assert_eq!(sent.len(), 2);
-    assert_eq!(sent[0]["model_id"], "library/speech");
+    assert_eq!(sent[0]["model_id"], SPEECH_MODEL);
     assert_eq!(sent[0]["language"], "de");
     assert_eq!(sent[0]["audio"]["encoding"], "pcm_s16le");
     assert_eq!(sent[0]["audio"]["data_base64"], "AAA=");

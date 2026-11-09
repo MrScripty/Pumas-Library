@@ -120,7 +120,7 @@ pub use model_type_resolver::{
     ModelTypeResolution,
 };
 pub use naming::normalize_name;
-pub(crate) use package_facts::gguf::gguf_serving_facts;
+pub(crate) use package_facts::gguf::{gguf_package_has_ranking_head, gguf_serving_facts};
 pub use read_only::PumasReadOnlyLibrary;
 pub use task_signature::{
     normalize_task_signature, NormalizedTaskSignature, TaskNormalizationStatus,

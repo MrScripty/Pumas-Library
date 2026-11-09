@@ -754,6 +754,10 @@ impl ModalityRequest {
             // Image bytes were already decoded and projected by the preflight;
             // decision images are decoded once, off the async runtime, by the handler.
             Capability::MultimodalEmbedding | Capability::Decision => {}
+            // Media chat was decoded and packed by `chat_preflight` under the
+            // decoder permit; the handler reuses that body.
+            Capability::ChatGeneration
+                if matches!(operation.input, OperationInput::ImageMessages { .. }) => {}
             _ => {
                 projection::provider_request(&operation)?;
             }

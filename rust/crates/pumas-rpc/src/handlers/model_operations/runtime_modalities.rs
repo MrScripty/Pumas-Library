@@ -175,20 +175,29 @@ async fn llama_cpp(state: &AppState, served: &ServedModelStatus, hints: Hints<'_
         })
         .unwrap_or_default();
     // A router lists every model; a dedicated server lists its one model.
-    let entry = models.as_ref().and_then(|models| {
-        let entries = models["data"]
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        entries
-            .iter()
-            .find(|entry| entry["id"].as_str() == Some(provider_id.as_str()))
-            .or(match entries {
-                [only] => Some(only),
-                _ => None,
-            })
-            .cloned()
-    });
+    let entry = models
+        .as_ref()
+        .and_then(|models| {
+            let entries = models["data"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            entries
+                .iter()
+                .find(|entry| entry["id"].as_str() == Some(provider_id.as_str()))
+                .or(match entries {
+                    [only] => Some(only),
+                    _ => None,
+                })
+                .cloned()
+        })
+        // An entry without modality fields (older llama.cpp) declares nothing; the
+        // live session stands in for it, exactly as for a missing entry.
+        .filter(|entry| {
+            ["input_modalities", "output_modalities"]
+                .iter()
+                .any(|key| entry["architecture"][key].is_array())
+        });
     let Some(entry) = entry else {
         // Without a declaration the loaded session's live inputs stand in for
         // it; with neither, the declaration is unknown.

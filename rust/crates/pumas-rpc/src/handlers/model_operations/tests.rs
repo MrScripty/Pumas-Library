@@ -552,60 +552,50 @@ async fn spawn_torch_audio_stub(
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = seen.clone();
-    tokio::spawn(async move {
-        let mut replies = replies.into_iter();
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let mut bytes = Vec::new();
-            while !bytes.ends_with(b"\r\n\r\n") {
-                let mut b = [0];
-                if socket.read_exact(&mut b).await.is_err() {
-                    break;
+    let replies = Arc::new(std::sync::Mutex::new(
+        replies
+            .into_iter()
+            .collect::<std::collections::VecDeque<_>>(),
+    ));
+    let json_reply = |status: u16, body: &'static str| {
+        (
+            StatusCode::from_u16(status).unwrap(),
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            body,
+        )
+    };
+    let app = Router::new()
+        .route(
+            "/health",
+            get(move || async move {
+                json_reply(200, r#"{"status":"ok","protocol":3,"capabilities":["image_generation","audio_transcription"]}"#)
+            }),
+        )
+        .route(
+            "/api/slots",
+            get(move || async move {
+                json_reply(200, r#"{"slots":[{"slot_id":"asr","model_name":"audio/cohere/speech","model_path":"/fixture","device":"cpu","state":"ready","model_type":"cohere-asr"}]}"#)
+            }),
+        )
+        .route(
+            "/api/audio/transcriptions",
+            post(move |Json(body): Json<Value>| {
+                let recorded = recorded.clone();
+                let replies = replies.clone();
+                async move {
+                    recorded.lock().unwrap().push(body);
+                    let (status, reply) = replies.lock().unwrap().pop_front().unwrap_or((500, "{}"));
+                    json_reply(status, reply)
                 }
-                bytes.push(b[0]);
-            }
-            let head = String::from_utf8_lossy(&bytes).to_string();
-            let length = head
-                .lines()
-                .find_map(|line| {
-                    line.to_ascii_lowercase()
-                        .strip_prefix("content-length: ")
-                        .and_then(|v| v.parse::<usize>().ok())
-                })
-                .unwrap_or(0);
-            let mut body = vec![0; length];
-            socket.read_exact(&mut body).await.unwrap();
-            let (status, reply) = if head.starts_with("GET /health") {
-                (
-                    200,
-                    r#"{"status":"ok","protocol":3,"capabilities":["image_generation","audio_transcription"]}"#,
-                )
-            } else if head.starts_with("GET /api/slots") {
-                (
-                    200,
-                    r#"{"slots":[{"slot_id":"asr","model_name":"library/speech","model_path":"/fixture","device":"cpu","state":"ready","model_type":"cohere-asr"}]}"#,
-                )
-            } else if head.starts_with("POST /api/audio/transcriptions") {
-                recorded
-                    .lock()
-                    .unwrap()
-                    .push(serde_json::from_slice(&body).unwrap());
-                replies.next().unwrap_or((500, "{}"))
-            } else {
-                (404, "{}")
-            };
-            let _ = socket
-                .write_all(
-                    format!(
-                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
-                        reply.len()
-                    )
-                    .as_bytes(),
-                )
-                .await;
-        }
+            }),
+        );
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
     });
     (endpoint, seen)
 }
+
+const SPEECH_MODEL: &str = "audio/cohere/speech";
 
 async fn torch_audio_state(endpoint: &str, model_type: &str) -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();
@@ -620,32 +610,37 @@ async fn torch_audio_state(endpoint: &str, model_type: &str) -> (TempDir, Arc<Ap
     config.endpoint_url = None;
     config.port = None;
     state.api.upsert_runtime_profile(config).await.unwrap();
-    let model_root = state
-        .api
-        .model_library()
-        .library_root()
-        .join("audio/cohere/speech");
+    let model_root = state.api.model_library().library_root().join(SPEECH_MODEL);
     std::fs::create_dir_all(&model_root).unwrap();
-    state
-        .api
-        .model_library()
-        .index()
-        .upsert(&ModelRecord {
-            id: "library/speech".into(),
-            path: model_root.display().to_string(),
-            cleaned_name: "speech".into(),
-            official_name: "speech".into(),
-            model_type: model_type.into(),
-            tags: vec![],
-            hashes: HashMap::new(),
-            metadata: json!({}),
-            updated_at: "fixture".into(),
-        })
+    // Library lookups reconcile the index from each model's metadata.json, so
+    // the fixture is a saved library model, not only an index row.
+    if model_type == "audio" {
+        std::fs::write(
+            model_root.join("config.json"),
+            r#"{"model_type":"cohere_asr","architectures":["CohereAsrForConditionalGeneration"]}"#,
+        )
         .unwrap();
+        std::fs::write(model_root.join("model.safetensors"), b"weights").unwrap();
+    }
+    let library = state.api.model_library();
+    library
+        .save_metadata(
+            &model_root,
+            &pumas_library::models::ModelMetadata {
+                model_id: Some(SPEECH_MODEL.into()),
+                official_name: Some("speech".into()),
+                family: Some("cohere".into()),
+                model_type: Some(model_type.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    library.index_model_dir(&model_root).await.unwrap();
     state
         .api
         .record_served_model(ServedModelStatus {
-            model_id: "library/speech".into(),
+            model_id: SPEECH_MODEL.into(),
             model_alias: Some("speech".into()),
             provider: RuntimeProviderId::Torch,
             profile_id: profile,
@@ -699,6 +694,8 @@ async fn audio_transcription_is_served_by_the_torch_sidecar() {
     ])
     .await;
     let (_root, state) = torch_audio_state(&endpoint, "audio").await;
+    // A reconciled (reclassified) Cohere package is still an audio model.
+    state.api.rebuild_model_index().await.unwrap();
     let capability = audio_capability(state.clone()).await;
     assert_eq!(
         capability["availability"]["state"], "available",
@@ -709,13 +706,13 @@ async fn audio_transcription_is_served_by_the_torch_sidecar() {
 
     for (text, finish) in [("guten tag", "stop"), ("lang", "length")] {
         let body = json_body(operation(state.clone(), audio_request()).await).await;
-        assert_eq!(body["request_id"], "audio-request-17");
-        assert_eq!(body["result"]["text"], text);
+        assert_eq!(body["request_id"], "audio-request-17", "{body}");
+        assert_eq!(body["result"]["text"], text, "{body}");
         assert_eq!(body["result"]["finish_reason"], finish);
     }
     let sent = seen.lock().unwrap().clone();
     assert_eq!(sent.len(), 2);
-    assert_eq!(sent[0]["model_id"], "library/speech");
+    assert_eq!(sent[0]["model_id"], SPEECH_MODEL);
     assert_eq!(sent[0]["language"], "de");
     assert_eq!(sent[0]["audio"]["encoding"], "pcm_s16le");
     assert_eq!(sent[0]["audio"]["data_base64"], "AAA=");
@@ -752,8 +749,9 @@ async fn audio_refusals_carry_reasons_and_are_never_replayed() {
     assert!(seen.lock().unwrap().is_empty());
 
     let response = operation(state.clone(), audio_request()).await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let status = response.status();
     let body = json_body(response).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"]["code"], "invalid_request");
     assert!(body["error"]["message"]
         .as_str()
@@ -761,14 +759,16 @@ async fn audio_refusals_carry_reasons_and_are_never_replayed() {
         .contains("PCM contract"));
 
     let response = operation(state.clone(), audio_request()).await;
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let status = response.status();
     let body = json_body(response).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["error"]["outcome"], "not_admitted");
     assert!(body["error"]["message"].as_str().unwrap().contains("busy"));
 
     let response = operation(state.clone(), audio_request()).await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let status = response.status();
     let body = json_body(response).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
     assert_eq!(body["error"]["code"], "provider_failure");
     assert!(!body.to_string().contains("/secret/path"));
     assert_eq!(seen.lock().unwrap().len(), 3);

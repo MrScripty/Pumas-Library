@@ -762,6 +762,7 @@ async fn describe(
         ) == Some(true)
         && (observation.live(Modality::Image) || observation.live(Modality::Audio));
     let declared_audio = observation.declares_input(Modality::Audio);
+    let declared_image = observation.declares_input(Modality::Image);
     let capabilities = [
         Capability::ChatGeneration,
         Capability::TextGeneration,
@@ -783,7 +784,7 @@ async fn describe(
                     vec![InputFormat::MessagesText, InputFormat::MessagesMultimodal],
                     vec![OutputFormat::Text],
                     Some(OpenAiGatewayEndpoint::ChatCompletions),
-                    media_bounds(text_bounds(served.context_size), declared_audio),
+                    chat_bounds(served.context_size, declared_image, declared_audio),
                 ),
                 Capability::TextGeneration => (
                     SemanticTask::TextGeneration,
@@ -961,6 +962,18 @@ async fn describe(
     (observation.declared, capabilities)
 }
 /// Audio bounds join a descriptor's bounds when the model declares audio.
+/// Text bounds, plus the decode, message and part bounds `provider_messages`
+/// enforces when the model accepts image or audio parts. Images are optional.
+fn chat_bounds(context_size: Option<u32>, image: bool, audio: bool) -> Vec<OptionBound> {
+    let mut bounds = text_bounds(context_size);
+    if image {
+        bounds.extend(parts::image_bounds(0, true));
+    } else if audio {
+        bounds.extend(parts::message_bounds());
+    }
+    media_bounds(bounds, audio)
+}
+
 fn media_bounds(mut bounds: Vec<OptionBound>, audio: bool) -> Vec<OptionBound> {
     if audio {
         bounds.extend(parts::audio_bounds());
@@ -1021,6 +1034,10 @@ fn semantic_match(
                         | "text-to-text"
                         | "text2text-generation"
                         | "conversational"
+                        // Audio-language and omni models chat in text and
+                        // take audio (or any) parts their runtime declares.
+                        | "audio-text-to-text"
+                        | "any-to-any"
                 ) || vision_language_task(task)
                     || (task == "text->text"
                         && matches!(model_type, Some("llm" | "language" | "text")))

@@ -7,11 +7,14 @@ lease (``ModelManager.audio_lease``) until the worker returns.
 """
 
 import json
+import logging
 from pathlib import Path
 from threading import Event
 from typing import Any
 
 from audio_contract import LANGUAGES, MAX_AUDIO_SAMPLES, MAX_TEXT_BYTES, SAMPLE_RATE
+
+logger = logging.getLogger(__name__)
 
 COHERE_ASR = "cohere-asr"
 MAX_NEW_TOKENS = 512
@@ -92,6 +95,18 @@ def _check_cancel(cancel: Event) -> None:
         raise SpeechCancelled("Speech inference cancelled")
 
 
+def _finish_device_work(torch, device, failure) -> None:
+    """Wait for queued CUDA kernels; never replace an earlier failure."""
+    if getattr(device, "type", None) != "cuda":
+        return
+    try:
+        torch.cuda.synchronize(device)
+    except Exception:
+        if failure is None:
+            raise
+        logger.warning("CUDA synchronize failed after an earlier failure", exc_info=True)
+
+
 def _eos_tokens(model) -> frozenset:
     eos = getattr(getattr(model, "generation_config", None), "eos_token_id", None)
     if eos is None:
@@ -99,11 +114,20 @@ def _eos_tokens(model) -> frozenset:
     return frozenset([eos] if isinstance(eos, int) else eos)
 
 
+def _finish_reason(sequence: list, prefix_length: int, eos: frozenset) -> str:
+    """``length`` whenever generation reached the token bound, else ``stop`` on EOS."""
+    generated = sequence[prefix_length:]
+    if len(generated) >= MAX_NEW_TOKENS:
+        return "length"
+    return "stop" if generated and generated[-1] in eos else "length"
+
+
 def transcribe(model, processor, pcm16le: bytes, language: str, cancel: Event) -> tuple[str, str]:
     """Transcribe one recording; return ``(text, finish_reason)``.
 
-    ``finish_reason`` is ``"stop"`` when generation ended on an end-of-sequence
-    token and ``"length"`` when it reached ``MAX_NEW_TOKENS``.
+    ``finish_reason`` is ``"length"`` whenever generation reached
+    ``MAX_NEW_TOKENS`` (even if its last token is EOS) and ``"stop"`` when it
+    ended on an end-of-sequence token before that.
     """
     _check_cancel(cancel)
     _supported_device(model.device)
@@ -125,25 +149,34 @@ def transcribe(model, processor, pcm16le: bytes, language: str, cancel: Event) -
             return cancel.is_set()
 
     audio = np.frombuffer(pcm16le, dtype="<i2").astype(np.float32) / 32768.0
-    inputs = processor(audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", language=language)
-    _check_cancel(cancel)
-    inputs = inputs.to(model.device, dtype=model.dtype)
-    # Chunking metadata the processor returns; generate() does not accept it.
-    inputs = {key: value for key, value in inputs.items() if key != "audio_chunk_index"}
-    with torch.inference_mode():
-        output = model.generate(
-            **inputs,
-            max_new_tokens=MAX_NEW_TOKENS,
-            stopping_criteria=stopping_list([CancelCriterion()]),
-        )
-    _check_cancel(cancel)
-    if model.device.type == "cuda":
-        torch.cuda.synchronize(model.device)
+    failure = None
+    try:
+        inputs = processor(audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", language=language)
+        _check_cancel(cancel)
+        inputs = inputs.to(model.device, dtype=model.dtype)
+        # Chunking metadata the processor returns; generate() does not accept it.
+        inputs = {key: value for key, value in inputs.items() if key != "audio_chunk_index"}
+        # generate() returns the decoder prompt plus the new tokens.
+        prompt = inputs.get("decoder_input_ids")
+        prefix_length = prompt.shape[-1] if prompt is not None else 1
+        with torch.inference_mode():
+            output = model.generate(
+                **inputs,
+                max_new_tokens=MAX_NEW_TOKENS,
+                stopping_criteria=stopping_list([CancelCriterion()]),
+            )
+        _check_cancel(cancel)
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        # Queued CUDA work finishes before the caller releases the device lease,
+        # whether generation succeeded, failed or was cancelled.
+        _finish_device_work(torch, model.device, failure)
     eos = _eos_tokens(model)
     sequences = output.tolist() if hasattr(output, "tolist") else list(output)
-    finish_reason = (
-        "stop" if all(sequence and sequence[-1] in eos for sequence in sequences) else "length"
-    )
+    reasons = {_finish_reason(list(sequence), prefix_length, eos) for sequence in sequences}
+    finish_reason = "length" if "length" in reasons else "stop"
     texts = processor.batch_decode(output, skip_special_tokens=True)
     text = " ".join(part.strip() for part in texts if isinstance(part, str)).strip()
     if len(text.encode("utf-8")) > MAX_TEXT_BYTES:

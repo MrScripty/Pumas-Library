@@ -150,6 +150,39 @@ class TranscriptionTests(unittest.TestCase):
             transcribe(model, fake_processor(), self.pcm, "de", threading.Event())[1], "length"
         )
 
+    def test_reaching_the_bound_reports_length_even_when_the_last_token_is_eos(self):
+        model = fake_model([0, *([7] * (MAX_NEW_TOKENS - 1)), EOS])
+        self.assertEqual(
+            transcribe(model, fake_processor(), self.pcm, "en", threading.Event())[1], "length"
+        )
+        # The decoder prompt is not generated output.
+        processor = fake_processor()
+        processor.return_value = Inputs(decoder_input_ids=np.array([[0, 5, 6]]))
+        model = fake_model([0, 5, 6, *([7] * (MAX_NEW_TOKENS - 2)), EOS])
+        self.assertEqual(transcribe(model, processor, self.pcm, "en", threading.Event())[1], "stop")
+
+    def test_cuda_work_is_synchronized_when_generation_fails_or_is_cancelled(self):
+        for failing in (True, False):
+            fake_torch.cuda.synchronize.reset_mock()
+            cancel = threading.Event()
+            model = fake_model([0, EOS], device="cuda")
+            if failing:
+                model.generate.side_effect = RuntimeError("kernel failure")
+            else:
+                model.generate.side_effect = lambda **_: cancel.set() or np.array([[0, EOS]])
+            with self.assertRaises(RuntimeError if failing else SpeechCancelled):
+                transcribe(model, fake_processor(), self.pcm, "en", cancel)
+            fake_torch.cuda.synchronize.assert_called_once()
+        # A synchronize failure never replaces the original error.
+        fake_torch.cuda.synchronize.side_effect = RuntimeError("sync")
+        try:
+            model = fake_model([0, EOS], device="cuda")
+            model.generate.side_effect = ValueError("original")
+            with self.assertRaisesRegex(ValueError, "original"):
+                transcribe(model, fake_processor(), self.pcm, "en", threading.Event())
+        finally:
+            fake_torch.cuda.synchronize.side_effect = None
+
     def test_invalid_audio_and_language_are_refused_before_the_processor(self):
         model, processor = fake_model([0, EOS]), fake_processor()
         for pcm in (b"", b"\x00", b"\x00" * (MAX_AUDIO_SAMPLES * 2 + 2), "text"):

@@ -895,6 +895,12 @@ async fn dispatch_admitted_command(
             .await
             .map(Box::new)
             .map(RpcOutcome::LinksForModel),
+        RpcCommand::ResolveModelDeclarations { model_id, repo_id } => state
+            .api
+            .resolve_model_declarations(&model_id, repo_id.as_deref())
+            .await
+            .map(crate::contract::ModelDeclarationsOutcome::new)
+            .map(RpcOutcome::ModelDeclarations),
         RpcCommand::DeleteModelWithCascade { model_id } => {
             links::delete_model_with_cascade(state, &model_id)
                 .await

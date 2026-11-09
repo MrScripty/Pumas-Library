@@ -9,16 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sentence-transformers declarations (pooling, normalization, `LogitScore`
+  tokens, prompt template, prompts) are recorded in model metadata as
+  `sentence_transformers`, resolved from the model's package or lineage (its
+  source repository, then its single base model) at an immutable commit.
+  Completed downloads are resolved automatically; `resolve_model_declarations`
+  (optional `repo_id`) resolves any library model
+  ([ADR 0007](docs/adr/0007-model-declarations.md)).
 - `start_model_conversion` direction `gguf_to_ranking_gguf` derives a llama.cpp
   ranking head into a copy of a causal-LM reranker GGUF that shipped without
-  one (for example zerank-2 and some Qwen3-Reranker quantizations). The head is
-  built from the model's own sentence-transformers `LogitScore` contract, read
-  from the source package or fetched from its recorded base model (or the
-  optional `scoring_contract_repo`) at an immutable commit; the derived model
-  records that origin. Architectures whose llama.cpp rank pooling cannot use
-  such a head are refused with the reason ([ADR 0006](docs/adr/0006-derived-ranking-heads.md)).
-  The base conversion environment now also needs `jinja2`; re-run conversion
-  setup.
+  one (for example zerank-2 and some Qwen3-Reranker quantizations), from the
+  model's recorded `LogitScore` declaration. Architectures whose llama.cpp
+  rank pooling cannot use such a head are refused with the reason
+  ([ADR 0006](docs/adr/0006-derived-ranking-heads.md)). The base conversion
+  environment now also needs `jinja2`; re-run conversion setup.
 
 ## [0.8.0] - 2026-11-08
 

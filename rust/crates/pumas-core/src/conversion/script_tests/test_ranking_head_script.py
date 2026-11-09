@@ -52,39 +52,18 @@ def write_gguf(path, arch="qwen3", tokens=TOKENS, head=False, tied=False):
     writer.close()
 
 
-def write_contract(
-    root,
-    true_id=YES,
-    false_id=NO,
-    template=TEMPLATE,
-    options=None,
-    score_extra=None,
-    module_path="1_LogitScore",
-):
-    root.mkdir(parents=True, exist_ok=True)
-    modules = [
-        {
-            "idx": 0,
-            "name": "0",
-            "path": "",
-            "type": "sentence_transformers.base.modules.transformer.Transformer",
-        },
-        {"idx": 1, "name": "1", "path": module_path, "type": ranking.LOGIT_SCORE_TYPE},
-    ]
-    (root / "modules.json").write_text(json.dumps(modules))
-    score_dir = root / "1_LogitScore"
-    score_dir.mkdir(exist_ok=True)
-    score = {"true_token_id": true_id, "false_token_id": false_id, **(score_extra or {})}
-    (score_dir / "config.json").write_text(json.dumps(score))
-    (root / "chat_template.jinja").write_text(template)
-    if options is not None:
-        (root / "sentence_bert_config.json").write_text(
-            json.dumps({"processing_kwargs": {"chat_template": options}})
-        )
-    vocab = {text: index for index, text in enumerate(TOKENS)}
-    (root / "tokenizer.json").write_text(
-        json.dumps({"model": {"type": "BPE", "vocab": vocab}, "added_tokens": []})
-    )
+def write_contract(path, true_id=YES, false_id=NO, template=TEMPLATE, options=None, extra=None):
+    contract = {
+        "true_token_id": true_id,
+        "true_token": TOKENS[true_id],
+        "false_token_id": false_id,
+        "false_token": None if false_id is None else TOKENS[false_id],
+        "chat_template": template,
+        "chat_template_options": options or {},
+        "special_tokens": {"eos_token": "<|im_end|>"},
+        **(extra or {}),
+    }
+    path.write_text(json.dumps(contract))
 
 
 def run(source, contract, output):
@@ -112,7 +91,7 @@ class RankingHeadTests(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.root = Path(self.dir.name)
         self.source = self.root / "source.gguf"
-        self.contract = self.root / "contract"
+        self.contract = self.root / "contract.json"
         self.output = self.root / "ranked.gguf"
 
     def tearDown(self):
@@ -237,11 +216,6 @@ class RankingHeadTests(unittest.TestCase):
         write_contract(self.contract, template=TEMPLATE + "{query}")
         self.refused("template_unsupported")
 
-    def test_unknown_logit_score_field_is_refused(self):
-        write_gguf(self.source)
-        write_contract(self.contract, score_extra={"temperature": 2.0})
-        self.refused("contract_unsupported")
-
     def test_unknown_template_option_is_refused(self):
         write_gguf(self.source)
         write_contract(
@@ -249,15 +223,23 @@ class RankingHeadTests(unittest.TestCase):
         )
         self.refused("contract_unsupported")
 
-    def test_module_path_escaping_the_package_is_refused(self):
-        write_gguf(self.source)
-        write_contract(self.contract, module_path="../1_LogitScore")
-        self.refused("contract_invalid")
-
     def test_equal_token_ids_are_refused(self):
         write_gguf(self.source)
         write_contract(self.contract, true_id=YES, false_id=YES)
         self.refused("contract_invalid")
+
+    def test_unknown_contract_field_is_refused(self):
+        write_gguf(self.source)
+        write_contract(self.contract, extra={"scale": 5})
+        self.refused("contract_invalid")
+
+    def test_vocabulary_strings_come_from_the_contract(self):
+        write_gguf(self.source)
+        write_contract(self.contract)
+        contract = json.loads(self.contract.read_text())
+        contract["true_token"] = "Yes"
+        self.contract.write_text(json.dumps(contract))
+        self.refused("vocabulary_mismatch")
 
     def test_existing_output_is_never_overwritten(self):
         write_gguf(self.source)

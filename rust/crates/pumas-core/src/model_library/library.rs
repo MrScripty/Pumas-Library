@@ -12010,7 +12010,6 @@ mod tests {
                 target_quant: None,
                 was_dequantized: false,
                 conversion_date: now,
-                scoring_contract: None,
             }),
             ..Default::default()
         };
@@ -14088,7 +14087,6 @@ mod tests {
                 target_quant: Some("Q4_K_M".to_string()),
                 was_dequantized: false,
                 conversion_date: chrono::Utc::now().to_rfc3339(),
-                scoring_contract: None,
             }),
             ..Default::default()
         };

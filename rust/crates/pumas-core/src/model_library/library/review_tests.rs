@@ -385,7 +385,6 @@ async fn copied_import_migration_resume_retains_source_and_conversion_blocks() {
         target_quant: None,
         was_dequantized: false,
         conversion_date: "2026-10-03T00:00:00Z".into(),
-        scoring_contract: None,
     });
     let blocked_conversion = insert_model(&library, "llm/review/converted", converted, true);
     insert_model(

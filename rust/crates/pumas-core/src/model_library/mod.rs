@@ -23,6 +23,7 @@
 
 pub(crate) mod artifact_identity;
 mod artifact_load_target;
+pub mod declarations;
 mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;

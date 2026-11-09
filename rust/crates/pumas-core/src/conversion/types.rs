@@ -65,8 +65,8 @@ pub enum ConversionDirection {
     /// Requires GPU with sufficient VRAM for quantization-aware training.
     SafetensorsToSherryQat,
     /// Copy a causal-LM GGUF and add a llama.cpp ranking head derived from the
-    /// model's sentence-transformers `LogitScore` scoring contract. The output
-    /// is a reranker GGUF; the source is not modified.
+    /// model's recorded sentence-transformers `LogitScore` declaration. The
+    /// output is a reranker GGUF; the source is not modified.
     GgufToRankingGguf,
 }
 
@@ -154,11 +154,6 @@ pub struct ConversionRequest {
     /// Use an importance matrix even for non-IQ quant types.
     #[serde(default)]
     pub force_imatrix: Option<bool>,
-    /// Hugging Face repository that publishes the scoring contract for
-    /// `GgufToRankingGguf`. Omitted, the contract comes from the source package
-    /// or, failing that, from the source model's single recorded base model.
-    #[serde(default)]
-    pub scoring_contract_repo: Option<String>,
 }
 
 /// Progress of a conversion or quantization operation.
@@ -236,26 +231,6 @@ pub struct ConversionSource {
     pub was_dequantized: bool,
     /// ISO 8601 timestamp of when conversion was performed
     pub conversion_date: String,
-    /// Scoring contract a derived ranking head was built from.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scoring_contract: Option<ScoringContractOrigin>,
-}
-
-/// Where a ranking head's scoring contract came from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct ScoringContractOrigin {
-    /// `source_package` when the source model's own package held the contract,
-    /// otherwise the Hugging Face repository it was fetched from.
-    pub repo_id: String,
-    /// Immutable commit the contract files were read at; absent for
-    /// `source_package`.
-    #[serde(default)]
-    pub revision: Option<String>,
-    /// Scored tokens, as `LogitScore` declared them.
-    pub true_token_id: u32,
-    #[serde(default)]
-    pub false_token_id: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------

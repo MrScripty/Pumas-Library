@@ -426,6 +426,10 @@ pub(crate) enum RpcCommand {
     DeleteModelWithCascade {
         model_id: String,
     },
+    ResolveModelDeclarations {
+        model_id: String,
+        repo_id: Option<String>,
+    },
     GetFileLinkCount {
         file_path: String,
     },
@@ -638,6 +642,7 @@ impl RpcCommand {
             Self::RemoveOrphanedLinks { .. } => "remove_orphaned_links",
             Self::GetLinksForModel { .. } => "get_links_for_model",
             Self::DeleteModelWithCascade { .. } => "delete_model_with_cascade",
+            Self::ResolveModelDeclarations { .. } => "resolve_model_declarations",
             Self::GetFileLinkCount { .. } => "get_file_link_count",
             Self::CheckFilesWritable { .. } => "check_files_writable",
             Self::SetModelLinkExclusion { .. } => "set_model_link_exclusion",
@@ -782,6 +787,7 @@ pub(crate) enum RpcOutcome {
     RemoveOrphanedLinks(RemoveOrphanedLinksOutcome),
     LinksForModel(Box<LinksForModelResponse>),
     DeleteModel(DeleteModelResponse),
+    ModelDeclarations(ModelDeclarationsOutcome),
     FileLinkCount(FileLinkCountOutcome),
     FilesWritable(Box<FilesWritableOutcome>),
     LinkExclusionMutation(BaseResponse),
@@ -910,6 +916,7 @@ impl RpcOutcome {
             Self::RemoveOrphanedLinks(value) => serde_json::to_value(value),
             Self::LinksForModel(value) => serde_json::to_value(value),
             Self::DeleteModel(value) => serde_json::to_value(value),
+            Self::ModelDeclarations(value) => serde_json::to_value(value),
             Self::FileLinkCount(value) => serde_json::to_value(value),
             Self::FilesWritable(value) => serde_json::to_value(value),
             Self::LinkExclusionMutation(value) => serde_json::to_value(value),
@@ -1236,6 +1243,21 @@ pub(crate) struct FileWritableOutcome {
 impl FileWritableOutcome {
     pub(crate) fn new(path: String, writable: bool) -> Self {
         Self { path, writable }
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct ModelDeclarationsOutcome {
+    success: bool,
+    resolution: pumas_library::DeclarationResolution,
+}
+
+impl ModelDeclarationsOutcome {
+    pub(crate) fn new(resolution: pumas_library::DeclarationResolution) -> Self {
+        Self {
+            success: true,
+            resolution,
+        }
     }
 }
 
@@ -6298,6 +6320,15 @@ struct ModelIdParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ResolveModelDeclarationsParams {
+    #[serde(alias = "modelId")]
+    model_id: String,
+    #[serde(default, alias = "repoId")]
+    repo_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FilePathParams {
     #[serde(alias = "filePath")]
     file_path: String,
@@ -6342,8 +6373,6 @@ struct StartModelConversionParams {
     imatrix_calibration_file: Option<String>,
     #[serde(default, alias = "forceImatrix")]
     force_imatrix: Option<bool>,
-    #[serde(default, alias = "scoringContractRepo")]
-    scoring_contract_repo: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -6767,6 +6796,16 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
                 .map(|model_id| RpcCommand::GetLinksForModel { model_id })
         }),
+        "resolve_model_declarations" => parse_params::<ResolveModelDeclarationsParams>(params)
+            .and_then(|params| {
+                let model_id =
+                    validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)?;
+                let repo_id = params
+                    .repo_id
+                    .map(|repo| validate_bounded_non_empty("repo_id", repo, MAX_IDENTIFIER_BYTES))
+                    .transpose()?;
+                Ok(RpcCommand::ResolveModelDeclarations { model_id, repo_id })
+            }),
         "delete_model_with_cascade" => parse_params::<ModelIdParams>(params).and_then(|params| {
             validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
                 .map(|model_id| RpcCommand::DeleteModelWithCascade { model_id })
@@ -6807,23 +6846,6 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     "imatrix_calibration_file",
                     params.imatrix_calibration_file,
                 )?;
-                let scoring_contract_repo = params
-                    .scoring_contract_repo
-                    .map(|repo| {
-                        validate_bounded_non_empty(
-                            "scoring_contract_repo",
-                            repo,
-                            MAX_IDENTIFIER_BYTES,
-                        )
-                    })
-                    .transpose()?;
-                if scoring_contract_repo.is_some()
-                    && direction != ConversionDirection::GgufToRankingGguf
-                {
-                    return Err(PublicError::invalid_params_because(
-                        "`scoring_contract_repo` applies only to `gguf_to_ranking_gguf`",
-                    ));
-                }
                 Ok(RpcCommand::StartModelConversion {
                     request: ConversionRequest {
                         model_id,
@@ -6832,7 +6854,6 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                         output_name,
                         imatrix_calibration_file,
                         force_imatrix: params.force_imatrix,
-                        scoring_contract_repo,
                     },
                 })
             })
@@ -8075,14 +8096,12 @@ mod tests {
             Some(json!({
                 "model_id": "reranker/acme/model-gguf",
                 "direction": "gguf_to_ranking_gguf",
-                "scoring_contract_repo": "acme/model",
             })),
         ))
         .unwrap();
         match ranking.command {
             RpcCommand::StartModelConversion { request } => {
                 assert_eq!(request.direction, ConversionDirection::GgufToRankingGguf);
-                assert_eq!(request.scoring_contract_repo.as_deref(), Some("acme/model"));
             }
             _ => panic!("wrong admitted conversion command"),
         }
@@ -8133,17 +8152,19 @@ mod tests {
                 "start_model_conversion",
                 json!({
                     "model_id": "model",
-                    "direction": "gguf_to_quantized_gguf",
+                    "direction": "gguf_to_ranking_gguf",
                     "scoring_contract_repo": "acme/model",
                 }),
             ),
+            ("resolve_model_declarations", json!({})),
+            ("resolve_model_declarations", json!({"model_id": " "})),
             (
-                "start_model_conversion",
-                json!({
-                    "model_id": "model",
-                    "direction": "gguf_to_ranking_gguf",
-                    "scoring_contract_repo": " ",
-                }),
+                "resolve_model_declarations",
+                json!({"model_id": "m", "repo_id": " "}),
+            ),
+            (
+                "resolve_model_declarations",
+                json!({"model_id": "m", "unexpected": true}),
             ),
             ("get_conversion_progress", json!({"conversion_id": "  "})),
             (

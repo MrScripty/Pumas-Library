@@ -728,18 +728,20 @@ impl PumasApiBuilder {
         let provider_registry = crate::providers::ProviderRegistry::builtin();
         let runtime_provider_adapters = crate::runtime_profiles::RuntimeProviderAdapters::builtin();
         let hf_client = hf_client.map(Arc::new);
-        let conversion_manager = Arc::new(
-            conversion::ConversionManager::new(
-                self.launcher_root.clone(),
+        if let Some(client) = hf_client.clone() {
+            // Completed downloads record their sentence-transformers
+            // declarations; best-effort, aborted at shutdown (ADR 0007).
+            runtime_tasks.spawn(super::declarations::react_to_downloads(
                 model_library.clone(),
-                Arc::new(model_library::ModelImporter::new(model_library.clone())),
-            )
-            .with_scoring_contract_source(
-                hf_client
-                    .clone()
-                    .map(|client| -> Arc<dyn conversion::ScoringContractSource> { client }),
-            ),
-        );
+                client,
+                self.launcher_root.join("launcher-data").join("tmp"),
+            ));
+        }
+        let conversion_manager = Arc::new(conversion::ConversionManager::new(
+            self.launcher_root.clone(),
+            model_library.clone(),
+            Arc::new(model_library::ModelImporter::new(model_library.clone())),
+        ));
         let intent_service = Arc::new(crate::intent::IntentService::new(
             model_library.clone(),
             hf_client.clone(),

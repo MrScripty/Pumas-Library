@@ -1,12 +1,11 @@
 """Derive a llama.cpp ranking head into a copy of a causal-LM GGUF.
 
-The scoring contract is a sentence-transformers ``LogitScore`` package:
-``modules.json`` locates the ``LogitScore`` module, whose ``config.json`` names
-``true_token_id`` and an optional ``false_token_id``; ``chat_template.jinja``
-(or ``tokenizer_config.json``) renders ``query``/``document`` messages; and
-``sentence_bert_config.json`` may supply chat-template options. The source
-GGUF is never modified; the output holds its tensors byte for byte plus
-``cls.output.weight``, rank pooling, classifier labels and a ``rerank``
+The scoring contract is the ``LogitScore`` part of the model's validated
+sentence-transformers declarations, written by Pumas as JSON: the scored
+token ids and their strings, the chat template that formats ``query`` and
+``document`` messages, its options and the special-token strings it may use.
+The source GGUF is never modified; the output holds its tensors byte for byte
+plus ``cls.output.weight``, rank pooling, classifier labels and a ``rerank``
 template with ``{query}``/``{document}`` placeholders.
 
 Progress lines use the conversion runner's stages (``validating``,
@@ -19,15 +18,19 @@ import argparse
 import json
 import secrets
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-LOGIT_SCORE_TYPE = "sentence_transformers.cross_encoder.modules.logit_score.LogitScore"
-LOGIT_SCORE_KEYS = {"true_token_id", "false_token_id"}
-# Monotone activations: the served score orders documents as the reference.
-MONOTONE_ACTIVATIONS = {
-    "torch.nn.modules.linear.Identity",
-    "torch.nn.modules.activation.Sigmoid",
+CONTRACT_KEYS = {
+    "true_token_id",
+    "true_token",
+    "false_token_id",
+    "false_token",
+    "chat_template",
+    "chat_template_options",
+    "special_tokens",
 }
+# Template options this renderer applies; any other option could change the
+# prompt the model was trained with.
 CHAT_TEMPLATE_OPTIONS = {"add_generation_prompt"}
 # llama.cpp rank-pooling behaviour per architecture. Architectures whose rank
 # pooling applies softmax over the head take a two-row head; the score is then
@@ -49,143 +52,51 @@ def report(stage, **values):
     print(json.dumps({"stage": stage, **values}), flush=True)
 
 
-def read_json(path, what):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise Refusal("contract_missing", f"The scoring contract has no {what}") from None
-    except (UnicodeError, ValueError) as error:
-        raise Refusal("contract_invalid", f"{what} is not valid JSON: {error}") from None
-
-
-def contained(root, relative, what):
-    path = PurePosixPath(relative)
-    if path.is_absolute() or ".." in path.parts or not path.parts:
-        raise Refusal("contract_invalid", f"{what} path leaves the contract package")
-    resolved = (root / Path(*path.parts)).resolve()
-    if root not in resolved.parents and resolved != root:
-        raise Refusal("contract_invalid", f"{what} path leaves the contract package")
-    return resolved
-
-
 def is_token_id(value):
     return type(value) is int and value >= 0
 
 
-def load_contract(root):
-    root = root.resolve()
-    modules = read_json(root / "modules.json", "modules.json")
-    if not isinstance(modules, list) or not all(isinstance(item, dict) for item in modules):
-        raise Refusal("contract_invalid", "modules.json must be a list of module records")
-    scorers = [item for item in modules if item.get("type") == LOGIT_SCORE_TYPE]
-    if len(scorers) != 1:
+def load_contract(path):
+    try:
+        contract = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
         raise Refusal(
-            "contract_unsupported",
-            "The package does not declare exactly one sentence-transformers LogitScore module",
-        )
-    if modules[-1] is not scorers[0]:
-        raise Refusal("contract_unsupported", "Modules after LogitScore are not supported")
-    module_path = scorers[0].get("path")
-    if not isinstance(module_path, str):
-        raise Refusal("contract_invalid", "The LogitScore module has no path")
-    score = read_json(
-        contained(root, module_path, "LogitScore") / "config.json", "LogitScore config.json"
-    )
-    if not isinstance(score, dict) or set(score) != LOGIT_SCORE_KEYS:
-        raise Refusal(
-            "contract_unsupported",
-            "LogitScore config must hold exactly true_token_id and false_token_id",
-        )
-    true_id, false_id = score["true_token_id"], score["false_token_id"]
+            "contract_invalid", f"The scoring contract could not be read: {error}"
+        ) from None
+    if not isinstance(contract, dict) or set(contract) != CONTRACT_KEYS:
+        raise Refusal("contract_invalid", "The scoring contract has missing or unknown fields")
+    true_id, false_id = contract["true_token_id"], contract["false_token_id"]
     if (
         not is_token_id(true_id)
         or not (false_id is None or is_token_id(false_id))
         or true_id == false_id
     ):
-        raise Refusal(
-            "contract_invalid", "LogitScore token ids must be distinct non-negative integers"
-        )
-
-    model_config = root / "config_sentence_transformers.json"
-    if model_config.exists():
-        declared = read_json(model_config, "config_sentence_transformers.json")
-        if (
-            not isinstance(declared, dict)
-            or declared.get("model_type", "CrossEncoder") != "CrossEncoder"
-        ):
-            raise Refusal(
-                "contract_unsupported", "The package is not a sentence-transformers CrossEncoder"
-            )
-        activation = declared.get("activation_fn")
-        if activation is not None and activation not in MONOTONE_ACTIVATIONS:
-            raise Refusal("contract_unsupported", f"Activation {activation} may reorder scores")
-
-    options = {}
-    st_config = root / "sentence_bert_config.json"
-    if st_config.exists():
-        declared = read_json(st_config, "sentence_bert_config.json")
-        kwargs = declared.get("processing_kwargs", {}) if isinstance(declared, dict) else None
-        options = kwargs.get("chat_template", {}) if isinstance(kwargs, dict) else None
-        if not isinstance(options, dict) or not set(options) <= CHAT_TEMPLATE_OPTIONS:
-            raise Refusal("contract_unsupported", "Unsupported chat-template processing options")
-        if any(type(value) is not bool for value in options.values()):
-            raise Refusal("contract_invalid", "Chat-template options must be booleans")
-
-    tokenizer_config = {}
-    if (root / "tokenizer_config.json").exists():
-        tokenizer_config = read_json(root / "tokenizer_config.json", "tokenizer_config.json")
-        if not isinstance(tokenizer_config, dict):
-            raise Refusal("contract_invalid", "tokenizer_config.json must be an object")
-    # Transformers passes the tokenizer's special-token strings to chat templates.
-    special = {
-        key: value
-        for key, value in tokenizer_config.items()
-        if key.endswith("_token") and isinstance(value, str)
-    }
-    template_file = root / "chat_template.jinja"
-    if template_file.exists():
-        try:
-            template = template_file.read_text(encoding="utf-8")
-        except UnicodeError:
-            raise Refusal("contract_invalid", "chat_template.jinja is not UTF-8") from None
-    else:
-        template = tokenizer_config.get("chat_template")
-        if not isinstance(template, str):
-            raise Refusal("contract_missing", "The scoring contract has no chat template")
-
-    tokenizer = read_json(root / "tokenizer.json", "tokenizer.json")
-    tokens = token_strings(tokenizer, [true_id] + ([false_id] if false_id is not None else []))
+        raise Refusal("contract_invalid", "Scored token ids must be distinct non-negative integers")
+    if not isinstance(contract["true_token"], str) or (false_id is None) != (
+        contract["false_token"] is None
+    ):
+        raise Refusal("contract_invalid", "Scored token strings must match their ids")
+    if not isinstance(contract["chat_template"], str):
+        raise Refusal("contract_invalid", "The chat template must be a string")
+    options, special = contract["chat_template_options"], contract["special_tokens"]
+    if not isinstance(options, dict) or any(type(value) is not bool for value in options.values()):
+        raise Refusal("contract_invalid", "Chat-template options must be booleans")
+    if not set(options) <= CHAT_TEMPLATE_OPTIONS:
+        unknown = ", ".join(sorted(set(options) - CHAT_TEMPLATE_OPTIONS))
+        raise Refusal("contract_unsupported", f"Unsupported chat-template options: {unknown}")
+    if not isinstance(special, dict) or not all(
+        isinstance(value, str) for value in special.values()
+    ):
+        raise Refusal("contract_invalid", "Special tokens must be strings")
     return {
         "true_id": true_id,
         "false_id": false_id,
-        "true_token": tokens[true_id],
-        "false_token": tokens.get(false_id) if false_id is not None else None,
-        "template": template,
+        "true_token": contract["true_token"],
+        "false_token": contract["false_token"],
+        "template": contract["chat_template"],
         "options": options,
         "special": special,
     }
-
-
-def token_strings(tokenizer, ids):
-    if not isinstance(tokenizer, dict):
-        raise Refusal("contract_invalid", "tokenizer.json must be an object")
-    found = {}
-    for item in tokenizer.get("added_tokens") or []:
-        if (
-            isinstance(item, dict)
-            and item.get("id") in ids
-            and isinstance(item.get("content"), str)
-        ):
-            found[item["id"]] = item["content"]
-    vocab = (tokenizer.get("model") or {}).get("vocab")
-    if isinstance(vocab, dict):
-        for text, token_id in vocab.items():
-            if token_id in ids and token_id not in found:
-                found[token_id] = text
-    missing = [token_id for token_id in ids if token_id not in found]
-    if missing:
-        raise Refusal("contract_invalid", f"tokenizer.json has no token for id {missing[0]}")
-    return found
 
 
 def render_rerank_template(contract):
@@ -287,11 +198,11 @@ def head_rows(reader, contract):
     return arch, np.stack([true_row, false_row]).astype(np.float32), labels
 
 
-def derive(source, contract_dir, output, report_path):
+def derive(source, contract_path, output, report_path):
     import gguf
 
     report("validating")
-    contract = load_contract(contract_dir)
+    contract = load_contract(contract_path)
     template = render_rerank_template(contract)
     reader = gguf.GGUFReader(source, "r")
     arch, head, labels = head_rows(reader, contract)

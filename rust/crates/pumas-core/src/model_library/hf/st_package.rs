@@ -1,9 +1,9 @@
-//! Fetch a sentence-transformers scoring contract (ADR 0006) from one
-//! immutable revision of a Hugging Face repository.
+//! Fetch a sentence-transformers package's declaration files (ADR 0007) from
+//! one immutable revision of a Hugging Face repository.
 //!
 //! This owns transport only: which files exist at the revision, their bounds
-//! and their integrity. Whether the files form a usable `LogitScore` contract
-//! is decided by the derivation script.
+//! and their integrity. What they declare is decided by
+//! [`crate::model_library::declarations`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -13,7 +13,6 @@ use tokio::io::AsyncWriteExt;
 
 use super::HuggingFaceClient;
 use crate::cancel::CancellationToken;
-use crate::conversion::ScoringContractSource;
 use crate::model_library::artifact_identity::DownloadRevision;
 use crate::{PumasError, Result};
 
@@ -31,14 +30,17 @@ const PACKAGE_FILES: &[&str] = &[
     "tokenizer.json",
 ];
 
-#[async_trait::async_trait]
-impl ScoringContractSource for HuggingFaceClient {
-    async fn fetch_scoring_contract(
+impl HuggingFaceClient {
+    /// Write the declaration files of `repo_id`'s sentence-transformers
+    /// package into `destination` (existing and empty) and return the
+    /// immutable revision read, or `None` when the repository publishes no
+    /// `modules.json`. Checks `cancel` between files.
+    pub(crate) async fn fetch_sentence_transformers_package(
         &self,
         repo_id: &str,
         destination: &Path,
         cancel: &CancellationToken,
-    ) -> Result<String> {
+    ) -> Result<Option<String>> {
         let revision = self.resolve_download_revision(repo_id, None).await?;
         let tree = self.get_repo_files_at_revision(repo_id, &revision).await?;
         let lfs: HashMap<&str, (u64, &str)> = tree
@@ -49,13 +51,8 @@ impl ScoringContractSource for HuggingFaceClient {
         let regular: HashSet<&str> = tree.regular_files.iter().map(String::as_str).collect();
         let listed = |path: &str| lfs.contains_key(path) || regular.contains(path);
         if !listed(MODULES) {
-            return Err(PumasError::InvalidParams {
-                message: format!(
-                    "{repo_id} publishes no sentence-transformers modules.json, so it has no scoring contract"
-                ),
-            });
+            return Ok(None);
         }
-
         let modules = self
             .copy_contract_file(repo_id, &revision, MODULES, &lfs, destination, cancel)
             .await?;
@@ -73,7 +70,7 @@ impl ScoringContractSource for HuggingFaceClient {
             self.copy_contract_file(repo_id, &revision, &path, &lfs, destination, cancel)
                 .await?;
         }
-        Ok(revision.as_str().to_string())
+        Ok(Some(revision.as_str().to_string()))
     }
 }
 
@@ -337,7 +334,7 @@ mod tests {
         let destination = TempDir::new().unwrap();
 
         let revision = client
-            .fetch_scoring_contract(
+            .fetch_sentence_transformers_package(
                 "acme/reranker",
                 destination.path(),
                 &CancellationToken::new(),
@@ -345,7 +342,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(revision, COMMIT);
+        assert_eq!(revision.as_deref(), Some(COMMIT));
         for (path, body) in files {
             assert_eq!(
                 std::fs::read_to_string(destination.path().join(path)).unwrap(),
@@ -358,7 +355,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_repository_without_modules_is_refused_before_any_file_is_fetched() {
+    async fn a_repository_without_modules_has_no_package_and_fetches_nothing() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (client, _cache) = client(&listener).await;
         let server = tokio::spawn(serve(
@@ -366,13 +363,15 @@ mod tests {
             routes("acme/plain", tree(&["config.json"], &[]), &[]),
         ));
         let destination = TempDir::new().unwrap();
-        let error = client
-            .fetch_scoring_contract("acme/plain", destination.path(), &CancellationToken::new())
+        let fetched = client
+            .fetch_sentence_transformers_package(
+                "acme/plain",
+                destination.path(),
+                &CancellationToken::new(),
+            )
             .await
-            .unwrap_err();
-        assert!(
-            matches!(error, PumasError::InvalidParams { message } if message.contains("no sentence-transformers modules.json"))
-        );
+            .unwrap();
+        assert_eq!(fetched, None);
         assert_eq!(server.await.unwrap().len(), 2);
     }
 
@@ -385,7 +384,11 @@ mod tests {
         let server = tokio::spawn(serve(listener, routes("acme/lfs", tree_body, &files)));
         let destination = TempDir::new().unwrap();
         let error = client
-            .fetch_scoring_contract("acme/lfs", destination.path(), &CancellationToken::new())
+            .fetch_sentence_transformers_package(
+                "acme/lfs",
+                destination.path(),
+                &CancellationToken::new(),
+            )
             .await
             .unwrap_err();
         assert!(
@@ -421,7 +424,7 @@ mod tests {
         cancel.cancel();
         let destination = TempDir::new().unwrap();
         let error = client
-            .fetch_scoring_contract("acme/cancel", destination.path(), &cancel)
+            .fetch_sentence_transformers_package("acme/cancel", destination.path(), &cancel)
             .await
             .unwrap_err();
         assert!(matches!(error, PumasError::ConversionCancelled));

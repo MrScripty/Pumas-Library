@@ -48,16 +48,13 @@ These models publish their scoring as a sentence-transformers
   - a `rerank` chat template rendered from the contract's template, with
     `{query}` and `{document}` placeholders.
 
-  The derived GGUF is a new library model whose `conversion_source` records:
-  - the source model;
-  - the contract repository and its resolved revision.
-
-  The source model is never modified.
-- **The contract is discovered, not configured.** It is read from the source
-  model's package when present. Otherwise Pumas fetches its few small files
-  from the source model's recorded `base_model` repository through its own
-  Hugging Face client. A request may name the contract repository explicitly.
-  Nothing is inferred from model names.
+  The derived GGUF is a new library model whose `conversion_source` records
+  the source model. The source model is never modified.
+- **The contract is the model's recorded `LogitScore` declaration**
+  ([ADR 0007](0007-model-declarations.md)), resolved from its package or
+  lineage. Derivation resolves the declarations at admission when none are
+  recorded. Nothing is inferred from model names. The derived model inherits
+  the record, which names the repository and commit the contract was read at.
 - **The head layout is llama.cpp knowledge and stays in the llama.cpp
   conversion backend.**
   - For architectures whose rank pooling applies softmax over the head
@@ -70,8 +67,8 @@ These models publish their scoring as a sentence-transformers
     llama.cpp supports them. `qwen35` in particular applies `cls_out` in-graph
     as a projection.
 - **Derivation verifies before it writes.** It refuses with a reason when:
-  - the GGUF's token strings at the contract's ids differ from the contract
-    tokenizer's;
+  - the GGUF's token strings at the contract's ids differ from the declared
+    ones;
   - the output rows are missing;
   - the template does not place each of `query` and `document` exactly once;
   - the architecture has no known head layout.

@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 15a83517624c6cd8382d21886be9bb44e0dc2b3e164c859db3d4ade47d812191. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 154717c9d618e9c0e9f680020395d503ebd2fd6674db73cc61ec2dbebe093fd4. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);

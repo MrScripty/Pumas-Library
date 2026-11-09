@@ -28,7 +28,6 @@ fn request(direction: ConversionDirection, target: Option<&str>) -> ConversionRe
         output_name: None,
         imatrix_calibration_file: None,
         force_imatrix: None,
-        scoring_contract_repo: None,
     }
 }
 

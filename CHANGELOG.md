@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `start_model_conversion` direction `gguf_to_ranking_gguf` derives a llama.cpp
+  ranking head into a copy of a causal-LM reranker GGUF that shipped without
+  one (for example zerank-2 and some Qwen3-Reranker quantizations). The head is
+  built from the model's own sentence-transformers `LogitScore` contract, read
+  from the source package or fetched from its recorded base model (or the
+  optional `scoring_contract_repo`) at an immutable commit; the derived model
+  records that origin. Architectures whose llama.cpp rank pooling cannot use
+  such a head are refused with the reason ([ADR 0006](docs/adr/0006-derived-ranking-heads.md)).
+  The base conversion environment now also needs `jinja2`; re-run conversion
+  setup.
+
 ## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,

@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 fcf7c51b5fb42225cb3b41014d8c43e38795a325e91abfcd1f87369f00f447f5. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 15a83517624c6cd8382d21886be9bb44e0dc2b3e164c859db3d4ade47d812191. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   try {
@@ -3115,6 +3115,35 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                 valid2 = true;
                                 passing0 = 6;
                               }
+                              const _errs25 = errors;
+                              if (typeof data3 !== "string") {
+                                const err14 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf/7/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                if (vErrors === null) {
+                                  vErrors = [err14];
+                                } else {
+                                  vErrors.push(err14);
+                                }
+                                errors++;
+                              }
+                              if ("gguf_to_ranking_gguf" !== data3) {
+                                const err15 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf/7/const", keyword: "const", params: { allowedValue: "gguf_to_ranking_gguf" }, message: "must be equal to constant" };
+                                if (vErrors === null) {
+                                  vErrors = [err15];
+                                } else {
+                                  vErrors.push(err15);
+                                }
+                                errors++;
+                              }
+                              var _valid0 = _errs25 === errors;
+                              if (_valid0 && valid2) {
+                                valid2 = false;
+                                passing0 = [passing0, 7];
+                              } else {
+                                if (_valid0) {
+                                  valid2 = true;
+                                  passing0 = 7;
+                                }
+                              }
                             }
                           }
                         }
@@ -3122,11 +3151,11 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                     }
                   }
                   if (!valid2) {
-                    const err14 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf", keyword: "oneOf", params: { passingSchemas: passing0 }, message: "must match exactly one schema in oneOf" };
+                    const err16 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf", keyword: "oneOf", params: { passingSchemas: passing0 }, message: "must match exactly one schema in oneOf" };
                     if (vErrors === null) {
-                      vErrors = [err14];
+                      vErrors = [err16];
                     } else {
-                      vErrors.push(err14);
+                      vErrors.push(err16);
                     }
                     errors++;
                     validate29.errors = vErrors;
@@ -3148,12 +3177,12 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                 if (valid0) {
                   if (data.error !== void 0) {
                     let data4 = data.error;
-                    const _errs25 = errors;
+                    const _errs27 = errors;
                     if (typeof data4 !== "string" && data4 !== null) {
                       validate29.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema32.properties.error.type }, message: "must be string,null" }];
                       return false;
                     }
-                    if (errors === _errs25) {
+                    if (errors === _errs27) {
                       if (typeof data4 === "string") {
                         if (func5(data4) > 1024) {
                           validate29.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
@@ -3161,19 +3190,19 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                         }
                       }
                     }
-                    var valid0 = _errs25 === errors;
+                    var valid0 = _errs27 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (data.estimatedOutputSize !== void 0) {
                       let data5 = data.estimatedOutputSize;
-                      const _errs27 = errors;
+                      const _errs29 = errors;
                       if (!(typeof data5 == "number" && (!(data5 % 1) && !isNaN(data5)) && isFinite(data5)) && data5 !== null) {
                         validate29.errors = [{ instancePath: instancePath + "/estimatedOutputSize", schemaPath: "#/properties/estimatedOutputSize/type", keyword: "type", params: { type: schema32.properties.estimatedOutputSize.type }, message: "must be integer,null" }];
                         return false;
                       }
-                      if (errors === _errs27) {
+                      if (errors === _errs29) {
                         if (typeof data5 == "number" && isFinite(data5)) {
                           if (data5 > 9007199254740991 || isNaN(data5)) {
                             validate29.errors = [{ instancePath: instancePath + "/estimatedOutputSize", schemaPath: "#/properties/estimatedOutputSize/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
@@ -3186,31 +3215,31 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                           }
                         }
                       }
-                      var valid0 = _errs27 === errors;
+                      var valid0 = _errs29 === errors;
                     } else {
                       var valid0 = true;
                     }
                     if (valid0) {
                       if (data.outputModelId !== void 0) {
                         let data6 = data.outputModelId;
-                        const _errs29 = errors;
+                        const _errs31 = errors;
                         if (typeof data6 !== "string" && data6 !== null) {
                           validate29.errors = [{ instancePath: instancePath + "/outputModelId", schemaPath: "#/properties/outputModelId/type", keyword: "type", params: { type: schema32.properties.outputModelId.type }, message: "must be string,null" }];
                           return false;
                         }
-                        var valid0 = _errs29 === errors;
+                        var valid0 = _errs31 === errors;
                       } else {
                         var valid0 = true;
                       }
                       if (valid0) {
                         if (data.pipelineStep !== void 0) {
                           let data7 = data.pipelineStep;
-                          const _errs31 = errors;
+                          const _errs33 = errors;
                           if (!(typeof data7 == "number" && (!(data7 % 1) && !isNaN(data7)) && isFinite(data7)) && data7 !== null) {
                             validate29.errors = [{ instancePath: instancePath + "/pipelineStep", schemaPath: "#/properties/pipelineStep/type", keyword: "type", params: { type: schema32.properties.pipelineStep.type }, message: "must be integer,null" }];
                             return false;
                           }
-                          if (errors === _errs31) {
+                          if (errors === _errs33) {
                             if (typeof data7 == "number" && isFinite(data7)) {
                               if (data7 > 4294967295 || isNaN(data7)) {
                                 validate29.errors = [{ instancePath: instancePath + "/pipelineStep", schemaPath: "#/properties/pipelineStep/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -3223,31 +3252,31 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                               }
                             }
                           }
-                          var valid0 = _errs31 === errors;
+                          var valid0 = _errs33 === errors;
                         } else {
                           var valid0 = true;
                         }
                         if (valid0) {
                           if (data.pipelineStepLabel !== void 0) {
                             let data8 = data.pipelineStepLabel;
-                            const _errs33 = errors;
+                            const _errs35 = errors;
                             if (typeof data8 !== "string" && data8 !== null) {
                               validate29.errors = [{ instancePath: instancePath + "/pipelineStepLabel", schemaPath: "#/properties/pipelineStepLabel/type", keyword: "type", params: { type: schema32.properties.pipelineStepLabel.type }, message: "must be string,null" }];
                               return false;
                             }
-                            var valid0 = _errs33 === errors;
+                            var valid0 = _errs35 === errors;
                           } else {
                             var valid0 = true;
                           }
                           if (valid0) {
                             if (data.pipelineStepsTotal !== void 0) {
                               let data9 = data.pipelineStepsTotal;
-                              const _errs35 = errors;
+                              const _errs37 = errors;
                               if (!(typeof data9 == "number" && (!(data9 % 1) && !isNaN(data9)) && isFinite(data9)) && data9 !== null) {
                                 validate29.errors = [{ instancePath: instancePath + "/pipelineStepsTotal", schemaPath: "#/properties/pipelineStepsTotal/type", keyword: "type", params: { type: schema32.properties.pipelineStepsTotal.type }, message: "must be integer,null" }];
                                 return false;
                               }
-                              if (errors === _errs35) {
+                              if (errors === _errs37) {
                                 if (typeof data9 == "number" && isFinite(data9)) {
                                   if (data9 > 4294967295 || isNaN(data9)) {
                                     validate29.errors = [{ instancePath: instancePath + "/pipelineStepsTotal", schemaPath: "#/properties/pipelineStepsTotal/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -3260,19 +3289,19 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                   }
                                 }
                               }
-                              var valid0 = _errs35 === errors;
+                              var valid0 = _errs37 === errors;
                             } else {
                               var valid0 = true;
                             }
                             if (valid0) {
                               if (data.progress !== void 0) {
                                 let data10 = data.progress;
-                                const _errs37 = errors;
+                                const _errs39 = errors;
                                 if (!(typeof data10 == "number" && isFinite(data10)) && data10 !== null) {
                                   validate29.errors = [{ instancePath: instancePath + "/progress", schemaPath: "#/properties/progress/type", keyword: "type", params: { type: schema32.properties.progress.type }, message: "must be number,null" }];
                                   return false;
                                 }
-                                if (errors === _errs37) {
+                                if (errors === _errs39) {
                                   if (typeof data10 == "number" && isFinite(data10)) {
                                     if (data10 > 1 || isNaN(data10)) {
                                       validate29.errors = [{ instancePath: instancePath + "/progress", schemaPath: "#/properties/progress/maximum", keyword: "maximum", params: { comparison: "<=", limit: 1 }, message: "must be <= 1" }];
@@ -3285,55 +3314,31 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                     }
                                   }
                                 }
-                                var valid0 = _errs37 === errors;
+                                var valid0 = _errs39 === errors;
                               } else {
                                 var valid0 = true;
                               }
                               if (valid0) {
                                 if (data.sourceModelId !== void 0) {
-                                  const _errs39 = errors;
+                                  const _errs41 = errors;
                                   if (typeof data.sourceModelId !== "string") {
                                     validate29.errors = [{ instancePath: instancePath + "/sourceModelId", schemaPath: "#/properties/sourceModelId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                     return false;
                                   }
-                                  var valid0 = _errs39 === errors;
+                                  var valid0 = _errs41 === errors;
                                 } else {
                                   var valid0 = true;
                                 }
                                 if (valid0) {
                                   if (data.status !== void 0) {
                                     let data12 = data.status;
-                                    const _errs41 = errors;
                                     const _errs43 = errors;
+                                    const _errs45 = errors;
                                     let valid4 = false;
                                     let passing1 = null;
-                                    const _errs44 = errors;
-                                    if (typeof data12 !== "string") {
-                                      const err15 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/type", keyword: "type", params: { type: "string" }, message: "must be string" };
-                                      if (vErrors === null) {
-                                        vErrors = [err15];
-                                      } else {
-                                        vErrors.push(err15);
-                                      }
-                                      errors++;
-                                    }
-                                    if ("setting_up" !== data12) {
-                                      const err16 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/const", keyword: "const", params: { allowedValue: "setting_up" }, message: "must be equal to constant" };
-                                      if (vErrors === null) {
-                                        vErrors = [err16];
-                                      } else {
-                                        vErrors.push(err16);
-                                      }
-                                      errors++;
-                                    }
-                                    var _valid1 = _errs44 === errors;
-                                    if (_valid1) {
-                                      valid4 = true;
-                                      passing1 = 0;
-                                    }
                                     const _errs46 = errors;
                                     if (typeof data12 !== "string") {
-                                      const err17 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                      const err17 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                       if (vErrors === null) {
                                         vErrors = [err17];
                                       } else {
@@ -3341,8 +3346,8 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                       }
                                       errors++;
                                     }
-                                    if ("validating" !== data12) {
-                                      const err18 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/const", keyword: "const", params: { allowedValue: "validating" }, message: "must be equal to constant" };
+                                    if ("setting_up" !== data12) {
+                                      const err18 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/const", keyword: "const", params: { allowedValue: "setting_up" }, message: "must be equal to constant" };
                                       if (vErrors === null) {
                                         vErrors = [err18];
                                       } else {
@@ -3351,6 +3356,30 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                       errors++;
                                     }
                                     var _valid1 = _errs46 === errors;
+                                    if (_valid1) {
+                                      valid4 = true;
+                                      passing1 = 0;
+                                    }
+                                    const _errs48 = errors;
+                                    if (typeof data12 !== "string") {
+                                      const err19 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                      if (vErrors === null) {
+                                        vErrors = [err19];
+                                      } else {
+                                        vErrors.push(err19);
+                                      }
+                                      errors++;
+                                    }
+                                    if ("validating" !== data12) {
+                                      const err20 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/const", keyword: "const", params: { allowedValue: "validating" }, message: "must be equal to constant" };
+                                      if (vErrors === null) {
+                                        vErrors = [err20];
+                                      } else {
+                                        vErrors.push(err20);
+                                      }
+                                      errors++;
+                                    }
+                                    var _valid1 = _errs48 === errors;
                                     if (_valid1 && valid4) {
                                       valid4 = false;
                                       passing1 = [passing1, 1];
@@ -3359,26 +3388,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                         valid4 = true;
                                         passing1 = 1;
                                       }
-                                      const _errs48 = errors;
+                                      const _errs50 = errors;
                                       if (typeof data12 !== "string") {
-                                        const err19 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                        const err21 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                         if (vErrors === null) {
-                                          vErrors = [err19];
+                                          vErrors = [err21];
                                         } else {
-                                          vErrors.push(err19);
+                                          vErrors.push(err21);
                                         }
                                         errors++;
                                       }
                                       if ("converting" !== data12) {
-                                        const err20 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/const", keyword: "const", params: { allowedValue: "converting" }, message: "must be equal to constant" };
+                                        const err22 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/const", keyword: "const", params: { allowedValue: "converting" }, message: "must be equal to constant" };
                                         if (vErrors === null) {
-                                          vErrors = [err20];
+                                          vErrors = [err22];
                                         } else {
-                                          vErrors.push(err20);
+                                          vErrors.push(err22);
                                         }
                                         errors++;
                                       }
-                                      var _valid1 = _errs48 === errors;
+                                      var _valid1 = _errs50 === errors;
                                       if (_valid1 && valid4) {
                                         valid4 = false;
                                         passing1 = [passing1, 2];
@@ -3387,26 +3416,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                           valid4 = true;
                                           passing1 = 2;
                                         }
-                                        const _errs50 = errors;
+                                        const _errs52 = errors;
                                         if (typeof data12 !== "string") {
-                                          const err21 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                          const err23 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                           if (vErrors === null) {
-                                            vErrors = [err21];
+                                            vErrors = [err23];
                                           } else {
-                                            vErrors.push(err21);
+                                            vErrors.push(err23);
                                           }
                                           errors++;
                                         }
                                         if ("writing" !== data12) {
-                                          const err22 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/const", keyword: "const", params: { allowedValue: "writing" }, message: "must be equal to constant" };
+                                          const err24 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/const", keyword: "const", params: { allowedValue: "writing" }, message: "must be equal to constant" };
                                           if (vErrors === null) {
-                                            vErrors = [err22];
+                                            vErrors = [err24];
                                           } else {
-                                            vErrors.push(err22);
+                                            vErrors.push(err24);
                                           }
                                           errors++;
                                         }
-                                        var _valid1 = _errs50 === errors;
+                                        var _valid1 = _errs52 === errors;
                                         if (_valid1 && valid4) {
                                           valid4 = false;
                                           passing1 = [passing1, 3];
@@ -3415,26 +3444,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                             valid4 = true;
                                             passing1 = 3;
                                           }
-                                          const _errs52 = errors;
+                                          const _errs54 = errors;
                                           if (typeof data12 !== "string") {
-                                            const err23 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                            const err25 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                             if (vErrors === null) {
-                                              vErrors = [err23];
+                                              vErrors = [err25];
                                             } else {
-                                              vErrors.push(err23);
+                                              vErrors.push(err25);
                                             }
                                             errors++;
                                           }
                                           if ("importing" !== data12) {
-                                            const err24 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/const", keyword: "const", params: { allowedValue: "importing" }, message: "must be equal to constant" };
+                                            const err26 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/const", keyword: "const", params: { allowedValue: "importing" }, message: "must be equal to constant" };
                                             if (vErrors === null) {
-                                              vErrors = [err24];
+                                              vErrors = [err26];
                                             } else {
-                                              vErrors.push(err24);
+                                              vErrors.push(err26);
                                             }
                                             errors++;
                                           }
-                                          var _valid1 = _errs52 === errors;
+                                          var _valid1 = _errs54 === errors;
                                           if (_valid1 && valid4) {
                                             valid4 = false;
                                             passing1 = [passing1, 4];
@@ -3443,26 +3472,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                               valid4 = true;
                                               passing1 = 4;
                                             }
-                                            const _errs54 = errors;
+                                            const _errs56 = errors;
                                             if (typeof data12 !== "string") {
-                                              const err25 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                              const err27 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                               if (vErrors === null) {
-                                                vErrors = [err25];
+                                                vErrors = [err27];
                                               } else {
-                                                vErrors.push(err25);
+                                                vErrors.push(err27);
                                               }
                                               errors++;
                                             }
                                             if ("completed" !== data12) {
-                                              const err26 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/const", keyword: "const", params: { allowedValue: "completed" }, message: "must be equal to constant" };
+                                              const err28 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/const", keyword: "const", params: { allowedValue: "completed" }, message: "must be equal to constant" };
                                               if (vErrors === null) {
-                                                vErrors = [err26];
+                                                vErrors = [err28];
                                               } else {
-                                                vErrors.push(err26);
+                                                vErrors.push(err28);
                                               }
                                               errors++;
                                             }
-                                            var _valid1 = _errs54 === errors;
+                                            var _valid1 = _errs56 === errors;
                                             if (_valid1 && valid4) {
                                               valid4 = false;
                                               passing1 = [passing1, 5];
@@ -3471,26 +3500,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                 valid4 = true;
                                                 passing1 = 5;
                                               }
-                                              const _errs56 = errors;
+                                              const _errs58 = errors;
                                               if (typeof data12 !== "string") {
-                                                const err27 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                const err29 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                 if (vErrors === null) {
-                                                  vErrors = [err27];
+                                                  vErrors = [err29];
                                                 } else {
-                                                  vErrors.push(err27);
+                                                  vErrors.push(err29);
                                                 }
                                                 errors++;
                                               }
                                               if ("cancelled" !== data12) {
-                                                const err28 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/const", keyword: "const", params: { allowedValue: "cancelled" }, message: "must be equal to constant" };
+                                                const err30 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/const", keyword: "const", params: { allowedValue: "cancelled" }, message: "must be equal to constant" };
                                                 if (vErrors === null) {
-                                                  vErrors = [err28];
+                                                  vErrors = [err30];
                                                 } else {
-                                                  vErrors.push(err28);
+                                                  vErrors.push(err30);
                                                 }
                                                 errors++;
                                               }
-                                              var _valid1 = _errs56 === errors;
+                                              var _valid1 = _errs58 === errors;
                                               if (_valid1 && valid4) {
                                                 valid4 = false;
                                                 passing1 = [passing1, 6];
@@ -3499,26 +3528,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                   valid4 = true;
                                                   passing1 = 6;
                                                 }
-                                                const _errs58 = errors;
+                                                const _errs60 = errors;
                                                 if (typeof data12 !== "string") {
-                                                  const err29 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                  const err31 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                   if (vErrors === null) {
-                                                    vErrors = [err29];
+                                                    vErrors = [err31];
                                                   } else {
-                                                    vErrors.push(err29);
+                                                    vErrors.push(err31);
                                                   }
                                                   errors++;
                                                 }
                                                 if ("error" !== data12) {
-                                                  const err30 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/const", keyword: "const", params: { allowedValue: "error" }, message: "must be equal to constant" };
+                                                  const err32 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/const", keyword: "const", params: { allowedValue: "error" }, message: "must be equal to constant" };
                                                   if (vErrors === null) {
-                                                    vErrors = [err30];
+                                                    vErrors = [err32];
                                                   } else {
-                                                    vErrors.push(err30);
+                                                    vErrors.push(err32);
                                                   }
                                                   errors++;
                                                 }
-                                                var _valid1 = _errs58 === errors;
+                                                var _valid1 = _errs60 === errors;
                                                 if (_valid1 && valid4) {
                                                   valid4 = false;
                                                   passing1 = [passing1, 7];
@@ -3527,26 +3556,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                     valid4 = true;
                                                     passing1 = 7;
                                                   }
-                                                  const _errs60 = errors;
+                                                  const _errs62 = errors;
                                                   if (typeof data12 !== "string") {
-                                                    const err31 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                    const err33 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                     if (vErrors === null) {
-                                                      vErrors = [err31];
+                                                      vErrors = [err33];
                                                     } else {
-                                                      vErrors.push(err31);
+                                                      vErrors.push(err33);
                                                     }
                                                     errors++;
                                                   }
                                                   if ("building_toolchain" !== data12) {
-                                                    const err32 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/const", keyword: "const", params: { allowedValue: "building_toolchain" }, message: "must be equal to constant" };
+                                                    const err34 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/const", keyword: "const", params: { allowedValue: "building_toolchain" }, message: "must be equal to constant" };
                                                     if (vErrors === null) {
-                                                      vErrors = [err32];
+                                                      vErrors = [err34];
                                                     } else {
-                                                      vErrors.push(err32);
+                                                      vErrors.push(err34);
                                                     }
                                                     errors++;
                                                   }
-                                                  var _valid1 = _errs60 === errors;
+                                                  var _valid1 = _errs62 === errors;
                                                   if (_valid1 && valid4) {
                                                     valid4 = false;
                                                     passing1 = [passing1, 8];
@@ -3555,26 +3584,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                       valid4 = true;
                                                       passing1 = 8;
                                                     }
-                                                    const _errs62 = errors;
+                                                    const _errs64 = errors;
                                                     if (typeof data12 !== "string") {
-                                                      const err33 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                      const err35 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                       if (vErrors === null) {
-                                                        vErrors = [err33];
+                                                        vErrors = [err35];
                                                       } else {
-                                                        vErrors.push(err33);
+                                                        vErrors.push(err35);
                                                       }
                                                       errors++;
                                                     }
                                                     if ("generating_f16_gguf" !== data12) {
-                                                      const err34 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/const", keyword: "const", params: { allowedValue: "generating_f16_gguf" }, message: "must be equal to constant" };
+                                                      const err36 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/const", keyword: "const", params: { allowedValue: "generating_f16_gguf" }, message: "must be equal to constant" };
                                                       if (vErrors === null) {
-                                                        vErrors = [err34];
+                                                        vErrors = [err36];
                                                       } else {
-                                                        vErrors.push(err34);
+                                                        vErrors.push(err36);
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid1 = _errs62 === errors;
+                                                    var _valid1 = _errs64 === errors;
                                                     if (_valid1 && valid4) {
                                                       valid4 = false;
                                                       passing1 = [passing1, 9];
@@ -3583,26 +3612,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                         valid4 = true;
                                                         passing1 = 9;
                                                       }
-                                                      const _errs64 = errors;
+                                                      const _errs66 = errors;
                                                       if (typeof data12 !== "string") {
-                                                        const err35 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                        const err37 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                         if (vErrors === null) {
-                                                          vErrors = [err35];
+                                                          vErrors = [err37];
                                                         } else {
-                                                          vErrors.push(err35);
+                                                          vErrors.push(err37);
                                                         }
                                                         errors++;
                                                       }
                                                       if ("computing_imatrix" !== data12) {
-                                                        const err36 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/const", keyword: "const", params: { allowedValue: "computing_imatrix" }, message: "must be equal to constant" };
+                                                        const err38 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/const", keyword: "const", params: { allowedValue: "computing_imatrix" }, message: "must be equal to constant" };
                                                         if (vErrors === null) {
-                                                          vErrors = [err36];
+                                                          vErrors = [err38];
                                                         } else {
-                                                          vErrors.push(err36);
+                                                          vErrors.push(err38);
                                                         }
                                                         errors++;
                                                       }
-                                                      var _valid1 = _errs64 === errors;
+                                                      var _valid1 = _errs66 === errors;
                                                       if (_valid1 && valid4) {
                                                         valid4 = false;
                                                         passing1 = [passing1, 10];
@@ -3611,26 +3640,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                           valid4 = true;
                                                           passing1 = 10;
                                                         }
-                                                        const _errs66 = errors;
+                                                        const _errs68 = errors;
                                                         if (typeof data12 !== "string") {
-                                                          const err37 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                          const err39 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                           if (vErrors === null) {
-                                                            vErrors = [err37];
+                                                            vErrors = [err39];
                                                           } else {
-                                                            vErrors.push(err37);
+                                                            vErrors.push(err39);
                                                           }
                                                           errors++;
                                                         }
                                                         if ("quantizing" !== data12) {
-                                                          const err38 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/const", keyword: "const", params: { allowedValue: "quantizing" }, message: "must be equal to constant" };
+                                                          const err40 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/const", keyword: "const", params: { allowedValue: "quantizing" }, message: "must be equal to constant" };
                                                           if (vErrors === null) {
-                                                            vErrors = [err38];
+                                                            vErrors = [err40];
                                                           } else {
-                                                            vErrors.push(err38);
+                                                            vErrors.push(err40);
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid1 = _errs66 === errors;
+                                                        var _valid1 = _errs68 === errors;
                                                         if (_valid1 && valid4) {
                                                           valid4 = false;
                                                           passing1 = [passing1, 11];
@@ -3639,26 +3668,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                             valid4 = true;
                                                             passing1 = 11;
                                                           }
-                                                          const _errs68 = errors;
+                                                          const _errs70 = errors;
                                                           if (typeof data12 !== "string") {
-                                                            const err39 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                            const err41 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                             if (vErrors === null) {
-                                                              vErrors = [err39];
+                                                              vErrors = [err41];
                                                             } else {
-                                                              vErrors.push(err39);
+                                                              vErrors.push(err41);
                                                             }
                                                             errors++;
                                                           }
                                                           if ("calibrating" !== data12) {
-                                                            const err40 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/const", keyword: "const", params: { allowedValue: "calibrating" }, message: "must be equal to constant" };
+                                                            const err42 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/const", keyword: "const", params: { allowedValue: "calibrating" }, message: "must be equal to constant" };
                                                             if (vErrors === null) {
-                                                              vErrors = [err40];
+                                                              vErrors = [err42];
                                                             } else {
-                                                              vErrors.push(err40);
+                                                              vErrors.push(err42);
                                                             }
                                                             errors++;
                                                           }
-                                                          var _valid1 = _errs68 === errors;
+                                                          var _valid1 = _errs70 === errors;
                                                           if (_valid1 && valid4) {
                                                             valid4 = false;
                                                             passing1 = [passing1, 12];
@@ -3667,26 +3696,26 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                                               valid4 = true;
                                                               passing1 = 12;
                                                             }
-                                                            const _errs70 = errors;
+                                                            const _errs72 = errors;
                                                             if (typeof data12 !== "string") {
-                                                              const err41 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                              const err43 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                               if (vErrors === null) {
-                                                                vErrors = [err41];
+                                                                vErrors = [err43];
                                                               } else {
-                                                                vErrors.push(err41);
+                                                                vErrors.push(err43);
                                                               }
                                                               errors++;
                                                             }
                                                             if ("training" !== data12) {
-                                                              const err42 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/const", keyword: "const", params: { allowedValue: "training" }, message: "must be equal to constant" };
+                                                              const err44 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/const", keyword: "const", params: { allowedValue: "training" }, message: "must be equal to constant" };
                                                               if (vErrors === null) {
-                                                                vErrors = [err42];
+                                                                vErrors = [err44];
                                                               } else {
-                                                                vErrors.push(err42);
+                                                                vErrors.push(err44);
                                                               }
                                                               errors++;
                                                             }
-                                                            var _valid1 = _errs70 === errors;
+                                                            var _valid1 = _errs72 === errors;
                                                             if (_valid1 && valid4) {
                                                               valid4 = false;
                                                               passing1 = [passing1, 13];
@@ -3709,50 +3738,50 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                       }
                                     }
                                     if (!valid4) {
-                                      const err43 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf", keyword: "oneOf", params: { passingSchemas: passing1 }, message: "must match exactly one schema in oneOf" };
+                                      const err45 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf", keyword: "oneOf", params: { passingSchemas: passing1 }, message: "must match exactly one schema in oneOf" };
                                       if (vErrors === null) {
-                                        vErrors = [err43];
+                                        vErrors = [err45];
                                       } else {
-                                        vErrors.push(err43);
+                                        vErrors.push(err45);
                                       }
                                       errors++;
                                       validate29.errors = vErrors;
                                       return false;
                                     } else {
-                                      errors = _errs43;
+                                      errors = _errs45;
                                       if (vErrors !== null) {
-                                        if (_errs43) {
-                                          vErrors.length = _errs43;
+                                        if (_errs45) {
+                                          vErrors.length = _errs45;
                                         } else {
                                           vErrors = null;
                                         }
                                       }
                                     }
-                                    var valid0 = _errs41 === errors;
+                                    var valid0 = _errs43 === errors;
                                   } else {
                                     var valid0 = true;
                                   }
                                   if (valid0) {
                                     if (data.targetQuant !== void 0) {
                                       let data13 = data.targetQuant;
-                                      const _errs72 = errors;
+                                      const _errs74 = errors;
                                       if (typeof data13 !== "string" && data13 !== null) {
                                         validate29.errors = [{ instancePath: instancePath + "/targetQuant", schemaPath: "#/properties/targetQuant/type", keyword: "type", params: { type: schema32.properties.targetQuant.type }, message: "must be string,null" }];
                                         return false;
                                       }
-                                      var valid0 = _errs72 === errors;
+                                      var valid0 = _errs74 === errors;
                                     } else {
                                       var valid0 = true;
                                     }
                                     if (valid0) {
                                       if (data.tensorsCompleted !== void 0) {
                                         let data14 = data.tensorsCompleted;
-                                        const _errs74 = errors;
+                                        const _errs76 = errors;
                                         if (!(typeof data14 == "number" && (!(data14 % 1) && !isNaN(data14)) && isFinite(data14)) && data14 !== null) {
                                           validate29.errors = [{ instancePath: instancePath + "/tensorsCompleted", schemaPath: "#/properties/tensorsCompleted/type", keyword: "type", params: { type: schema32.properties.tensorsCompleted.type }, message: "must be integer,null" }];
                                           return false;
                                         }
-                                        if (errors === _errs74) {
+                                        if (errors === _errs76) {
                                           if (typeof data14 == "number" && isFinite(data14)) {
                                             if (data14 > 4294967295 || isNaN(data14)) {
                                               validate29.errors = [{ instancePath: instancePath + "/tensorsCompleted", schemaPath: "#/properties/tensorsCompleted/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -3765,19 +3794,19 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                             }
                                           }
                                         }
-                                        var valid0 = _errs74 === errors;
+                                        var valid0 = _errs76 === errors;
                                       } else {
                                         var valid0 = true;
                                       }
                                       if (valid0) {
                                         if (data.tensorsTotal !== void 0) {
                                           let data15 = data.tensorsTotal;
-                                          const _errs76 = errors;
+                                          const _errs78 = errors;
                                           if (!(typeof data15 == "number" && (!(data15 % 1) && !isNaN(data15)) && isFinite(data15)) && data15 !== null) {
                                             validate29.errors = [{ instancePath: instancePath + "/tensorsTotal", schemaPath: "#/properties/tensorsTotal/type", keyword: "type", params: { type: schema32.properties.tensorsTotal.type }, message: "must be integer,null" }];
                                             return false;
                                           }
-                                          if (errors === _errs76) {
+                                          if (errors === _errs78) {
                                             if (typeof data15 == "number" && isFinite(data15)) {
                                               if (data15 > 4294967295 || isNaN(data15)) {
                                                 validate29.errors = [{ instancePath: instancePath + "/tensorsTotal", schemaPath: "#/properties/tensorsTotal/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -3790,7 +3819,7 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                                               }
                                             }
                                           }
-                                          var valid0 = _errs76 === errors;
+                                          var valid0 = _errs78 === errors;
                                         } else {
                                           var valid0 = true;
                                         }
@@ -4159,6 +4188,35 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                 valid2 = true;
                                 passing0 = 6;
                               }
+                              const _errs25 = errors;
+                              if (typeof data3 !== "string") {
+                                const err14 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf/7/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                if (vErrors === null) {
+                                  vErrors = [err14];
+                                } else {
+                                  vErrors.push(err14);
+                                }
+                                errors++;
+                              }
+                              if ("gguf_to_ranking_gguf" !== data3) {
+                                const err15 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf/7/const", keyword: "const", params: { allowedValue: "gguf_to_ranking_gguf" }, message: "must be equal to constant" };
+                                if (vErrors === null) {
+                                  vErrors = [err15];
+                                } else {
+                                  vErrors.push(err15);
+                                }
+                                errors++;
+                              }
+                              var _valid0 = _errs25 === errors;
+                              if (_valid0 && valid2) {
+                                valid2 = false;
+                                passing0 = [passing0, 7];
+                              } else {
+                                if (_valid0) {
+                                  valid2 = true;
+                                  passing0 = 7;
+                                }
+                              }
                             }
                           }
                         }
@@ -4166,11 +4224,11 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                     }
                   }
                   if (!valid2) {
-                    const err14 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf", keyword: "oneOf", params: { passingSchemas: passing0 }, message: "must match exactly one schema in oneOf" };
+                    const err16 = { instancePath: instancePath + "/direction", schemaPath: "#/definitions/ConversionDirection/oneOf", keyword: "oneOf", params: { passingSchemas: passing0 }, message: "must match exactly one schema in oneOf" };
                     if (vErrors === null) {
-                      vErrors = [err14];
+                      vErrors = [err16];
                     } else {
-                      vErrors.push(err14);
+                      vErrors.push(err16);
                     }
                     errors++;
                     validate32.errors = vErrors;
@@ -4192,12 +4250,12 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                 if (valid0) {
                   if (data.error !== void 0) {
                     let data4 = data.error;
-                    const _errs25 = errors;
+                    const _errs27 = errors;
                     if (typeof data4 !== "string" && data4 !== null) {
                       validate32.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema36.properties.error.type }, message: "must be string,null" }];
                       return false;
                     }
-                    if (errors === _errs25) {
+                    if (errors === _errs27) {
                       if (typeof data4 === "string") {
                         if (func5(data4) > 1024) {
                           validate32.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
@@ -4205,19 +4263,19 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                         }
                       }
                     }
-                    var valid0 = _errs25 === errors;
+                    var valid0 = _errs27 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (data.estimatedOutputSize !== void 0) {
                       let data5 = data.estimatedOutputSize;
-                      const _errs27 = errors;
+                      const _errs29 = errors;
                       if (!(typeof data5 == "number" && (!(data5 % 1) && !isNaN(data5)) && isFinite(data5)) && data5 !== null) {
                         validate32.errors = [{ instancePath: instancePath + "/estimatedOutputSize", schemaPath: "#/properties/estimatedOutputSize/type", keyword: "type", params: { type: schema36.properties.estimatedOutputSize.type }, message: "must be integer,null" }];
                         return false;
                       }
-                      if (errors === _errs27) {
+                      if (errors === _errs29) {
                         if (typeof data5 == "number" && isFinite(data5)) {
                           if (data5 > 9007199254740991 || isNaN(data5)) {
                             validate32.errors = [{ instancePath: instancePath + "/estimatedOutputSize", schemaPath: "#/properties/estimatedOutputSize/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
@@ -4230,31 +4288,31 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                           }
                         }
                       }
-                      var valid0 = _errs27 === errors;
+                      var valid0 = _errs29 === errors;
                     } else {
                       var valid0 = true;
                     }
                     if (valid0) {
                       if (data.outputModelId !== void 0) {
                         let data6 = data.outputModelId;
-                        const _errs29 = errors;
+                        const _errs31 = errors;
                         if (typeof data6 !== "string" && data6 !== null) {
                           validate32.errors = [{ instancePath: instancePath + "/outputModelId", schemaPath: "#/properties/outputModelId/type", keyword: "type", params: { type: schema36.properties.outputModelId.type }, message: "must be string,null" }];
                           return false;
                         }
-                        var valid0 = _errs29 === errors;
+                        var valid0 = _errs31 === errors;
                       } else {
                         var valid0 = true;
                       }
                       if (valid0) {
                         if (data.pipelineStep !== void 0) {
                           let data7 = data.pipelineStep;
-                          const _errs31 = errors;
+                          const _errs33 = errors;
                           if (!(typeof data7 == "number" && (!(data7 % 1) && !isNaN(data7)) && isFinite(data7)) && data7 !== null) {
                             validate32.errors = [{ instancePath: instancePath + "/pipelineStep", schemaPath: "#/properties/pipelineStep/type", keyword: "type", params: { type: schema36.properties.pipelineStep.type }, message: "must be integer,null" }];
                             return false;
                           }
-                          if (errors === _errs31) {
+                          if (errors === _errs33) {
                             if (typeof data7 == "number" && isFinite(data7)) {
                               if (data7 > 4294967295 || isNaN(data7)) {
                                 validate32.errors = [{ instancePath: instancePath + "/pipelineStep", schemaPath: "#/properties/pipelineStep/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -4267,31 +4325,31 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                               }
                             }
                           }
-                          var valid0 = _errs31 === errors;
+                          var valid0 = _errs33 === errors;
                         } else {
                           var valid0 = true;
                         }
                         if (valid0) {
                           if (data.pipelineStepLabel !== void 0) {
                             let data8 = data.pipelineStepLabel;
-                            const _errs33 = errors;
+                            const _errs35 = errors;
                             if (typeof data8 !== "string" && data8 !== null) {
                               validate32.errors = [{ instancePath: instancePath + "/pipelineStepLabel", schemaPath: "#/properties/pipelineStepLabel/type", keyword: "type", params: { type: schema36.properties.pipelineStepLabel.type }, message: "must be string,null" }];
                               return false;
                             }
-                            var valid0 = _errs33 === errors;
+                            var valid0 = _errs35 === errors;
                           } else {
                             var valid0 = true;
                           }
                           if (valid0) {
                             if (data.pipelineStepsTotal !== void 0) {
                               let data9 = data.pipelineStepsTotal;
-                              const _errs35 = errors;
+                              const _errs37 = errors;
                               if (!(typeof data9 == "number" && (!(data9 % 1) && !isNaN(data9)) && isFinite(data9)) && data9 !== null) {
                                 validate32.errors = [{ instancePath: instancePath + "/pipelineStepsTotal", schemaPath: "#/properties/pipelineStepsTotal/type", keyword: "type", params: { type: schema36.properties.pipelineStepsTotal.type }, message: "must be integer,null" }];
                                 return false;
                               }
-                              if (errors === _errs35) {
+                              if (errors === _errs37) {
                                 if (typeof data9 == "number" && isFinite(data9)) {
                                   if (data9 > 4294967295 || isNaN(data9)) {
                                     validate32.errors = [{ instancePath: instancePath + "/pipelineStepsTotal", schemaPath: "#/properties/pipelineStepsTotal/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -4304,19 +4362,19 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                   }
                                 }
                               }
-                              var valid0 = _errs35 === errors;
+                              var valid0 = _errs37 === errors;
                             } else {
                               var valid0 = true;
                             }
                             if (valid0) {
                               if (data.progress !== void 0) {
                                 let data10 = data.progress;
-                                const _errs37 = errors;
+                                const _errs39 = errors;
                                 if (!(typeof data10 == "number" && isFinite(data10)) && data10 !== null) {
                                   validate32.errors = [{ instancePath: instancePath + "/progress", schemaPath: "#/properties/progress/type", keyword: "type", params: { type: schema36.properties.progress.type }, message: "must be number,null" }];
                                   return false;
                                 }
-                                if (errors === _errs37) {
+                                if (errors === _errs39) {
                                   if (typeof data10 == "number" && isFinite(data10)) {
                                     if (data10 > 1 || isNaN(data10)) {
                                       validate32.errors = [{ instancePath: instancePath + "/progress", schemaPath: "#/properties/progress/maximum", keyword: "maximum", params: { comparison: "<=", limit: 1 }, message: "must be <= 1" }];
@@ -4329,55 +4387,31 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                     }
                                   }
                                 }
-                                var valid0 = _errs37 === errors;
+                                var valid0 = _errs39 === errors;
                               } else {
                                 var valid0 = true;
                               }
                               if (valid0) {
                                 if (data.sourceModelId !== void 0) {
-                                  const _errs39 = errors;
+                                  const _errs41 = errors;
                                   if (typeof data.sourceModelId !== "string") {
                                     validate32.errors = [{ instancePath: instancePath + "/sourceModelId", schemaPath: "#/properties/sourceModelId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                     return false;
                                   }
-                                  var valid0 = _errs39 === errors;
+                                  var valid0 = _errs41 === errors;
                                 } else {
                                   var valid0 = true;
                                 }
                                 if (valid0) {
                                   if (data.status !== void 0) {
                                     let data12 = data.status;
-                                    const _errs41 = errors;
                                     const _errs43 = errors;
+                                    const _errs45 = errors;
                                     let valid4 = false;
                                     let passing1 = null;
-                                    const _errs44 = errors;
-                                    if (typeof data12 !== "string") {
-                                      const err15 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/type", keyword: "type", params: { type: "string" }, message: "must be string" };
-                                      if (vErrors === null) {
-                                        vErrors = [err15];
-                                      } else {
-                                        vErrors.push(err15);
-                                      }
-                                      errors++;
-                                    }
-                                    if ("setting_up" !== data12) {
-                                      const err16 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/const", keyword: "const", params: { allowedValue: "setting_up" }, message: "must be equal to constant" };
-                                      if (vErrors === null) {
-                                        vErrors = [err16];
-                                      } else {
-                                        vErrors.push(err16);
-                                      }
-                                      errors++;
-                                    }
-                                    var _valid1 = _errs44 === errors;
-                                    if (_valid1) {
-                                      valid4 = true;
-                                      passing1 = 0;
-                                    }
                                     const _errs46 = errors;
                                     if (typeof data12 !== "string") {
-                                      const err17 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                      const err17 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                       if (vErrors === null) {
                                         vErrors = [err17];
                                       } else {
@@ -4385,8 +4419,8 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                       }
                                       errors++;
                                     }
-                                    if ("validating" !== data12) {
-                                      const err18 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/const", keyword: "const", params: { allowedValue: "validating" }, message: "must be equal to constant" };
+                                    if ("setting_up" !== data12) {
+                                      const err18 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/0/const", keyword: "const", params: { allowedValue: "setting_up" }, message: "must be equal to constant" };
                                       if (vErrors === null) {
                                         vErrors = [err18];
                                       } else {
@@ -4395,6 +4429,30 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                       errors++;
                                     }
                                     var _valid1 = _errs46 === errors;
+                                    if (_valid1) {
+                                      valid4 = true;
+                                      passing1 = 0;
+                                    }
+                                    const _errs48 = errors;
+                                    if (typeof data12 !== "string") {
+                                      const err19 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                      if (vErrors === null) {
+                                        vErrors = [err19];
+                                      } else {
+                                        vErrors.push(err19);
+                                      }
+                                      errors++;
+                                    }
+                                    if ("validating" !== data12) {
+                                      const err20 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/1/const", keyword: "const", params: { allowedValue: "validating" }, message: "must be equal to constant" };
+                                      if (vErrors === null) {
+                                        vErrors = [err20];
+                                      } else {
+                                        vErrors.push(err20);
+                                      }
+                                      errors++;
+                                    }
+                                    var _valid1 = _errs48 === errors;
                                     if (_valid1 && valid4) {
                                       valid4 = false;
                                       passing1 = [passing1, 1];
@@ -4403,26 +4461,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                         valid4 = true;
                                         passing1 = 1;
                                       }
-                                      const _errs48 = errors;
+                                      const _errs50 = errors;
                                       if (typeof data12 !== "string") {
-                                        const err19 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                        const err21 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                         if (vErrors === null) {
-                                          vErrors = [err19];
+                                          vErrors = [err21];
                                         } else {
-                                          vErrors.push(err19);
+                                          vErrors.push(err21);
                                         }
                                         errors++;
                                       }
                                       if ("converting" !== data12) {
-                                        const err20 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/const", keyword: "const", params: { allowedValue: "converting" }, message: "must be equal to constant" };
+                                        const err22 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/2/const", keyword: "const", params: { allowedValue: "converting" }, message: "must be equal to constant" };
                                         if (vErrors === null) {
-                                          vErrors = [err20];
+                                          vErrors = [err22];
                                         } else {
-                                          vErrors.push(err20);
+                                          vErrors.push(err22);
                                         }
                                         errors++;
                                       }
-                                      var _valid1 = _errs48 === errors;
+                                      var _valid1 = _errs50 === errors;
                                       if (_valid1 && valid4) {
                                         valid4 = false;
                                         passing1 = [passing1, 2];
@@ -4431,26 +4489,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                           valid4 = true;
                                           passing1 = 2;
                                         }
-                                        const _errs50 = errors;
+                                        const _errs52 = errors;
                                         if (typeof data12 !== "string") {
-                                          const err21 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                          const err23 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                           if (vErrors === null) {
-                                            vErrors = [err21];
+                                            vErrors = [err23];
                                           } else {
-                                            vErrors.push(err21);
+                                            vErrors.push(err23);
                                           }
                                           errors++;
                                         }
                                         if ("writing" !== data12) {
-                                          const err22 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/const", keyword: "const", params: { allowedValue: "writing" }, message: "must be equal to constant" };
+                                          const err24 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/3/const", keyword: "const", params: { allowedValue: "writing" }, message: "must be equal to constant" };
                                           if (vErrors === null) {
-                                            vErrors = [err22];
+                                            vErrors = [err24];
                                           } else {
-                                            vErrors.push(err22);
+                                            vErrors.push(err24);
                                           }
                                           errors++;
                                         }
-                                        var _valid1 = _errs50 === errors;
+                                        var _valid1 = _errs52 === errors;
                                         if (_valid1 && valid4) {
                                           valid4 = false;
                                           passing1 = [passing1, 3];
@@ -4459,26 +4517,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                             valid4 = true;
                                             passing1 = 3;
                                           }
-                                          const _errs52 = errors;
+                                          const _errs54 = errors;
                                           if (typeof data12 !== "string") {
-                                            const err23 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                            const err25 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                             if (vErrors === null) {
-                                              vErrors = [err23];
+                                              vErrors = [err25];
                                             } else {
-                                              vErrors.push(err23);
+                                              vErrors.push(err25);
                                             }
                                             errors++;
                                           }
                                           if ("importing" !== data12) {
-                                            const err24 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/const", keyword: "const", params: { allowedValue: "importing" }, message: "must be equal to constant" };
+                                            const err26 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/4/const", keyword: "const", params: { allowedValue: "importing" }, message: "must be equal to constant" };
                                             if (vErrors === null) {
-                                              vErrors = [err24];
+                                              vErrors = [err26];
                                             } else {
-                                              vErrors.push(err24);
+                                              vErrors.push(err26);
                                             }
                                             errors++;
                                           }
-                                          var _valid1 = _errs52 === errors;
+                                          var _valid1 = _errs54 === errors;
                                           if (_valid1 && valid4) {
                                             valid4 = false;
                                             passing1 = [passing1, 4];
@@ -4487,26 +4545,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                               valid4 = true;
                                               passing1 = 4;
                                             }
-                                            const _errs54 = errors;
+                                            const _errs56 = errors;
                                             if (typeof data12 !== "string") {
-                                              const err25 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                              const err27 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                               if (vErrors === null) {
-                                                vErrors = [err25];
+                                                vErrors = [err27];
                                               } else {
-                                                vErrors.push(err25);
+                                                vErrors.push(err27);
                                               }
                                               errors++;
                                             }
                                             if ("completed" !== data12) {
-                                              const err26 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/const", keyword: "const", params: { allowedValue: "completed" }, message: "must be equal to constant" };
+                                              const err28 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/5/const", keyword: "const", params: { allowedValue: "completed" }, message: "must be equal to constant" };
                                               if (vErrors === null) {
-                                                vErrors = [err26];
+                                                vErrors = [err28];
                                               } else {
-                                                vErrors.push(err26);
+                                                vErrors.push(err28);
                                               }
                                               errors++;
                                             }
-                                            var _valid1 = _errs54 === errors;
+                                            var _valid1 = _errs56 === errors;
                                             if (_valid1 && valid4) {
                                               valid4 = false;
                                               passing1 = [passing1, 5];
@@ -4515,26 +4573,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                 valid4 = true;
                                                 passing1 = 5;
                                               }
-                                              const _errs56 = errors;
+                                              const _errs58 = errors;
                                               if (typeof data12 !== "string") {
-                                                const err27 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                const err29 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                 if (vErrors === null) {
-                                                  vErrors = [err27];
+                                                  vErrors = [err29];
                                                 } else {
-                                                  vErrors.push(err27);
+                                                  vErrors.push(err29);
                                                 }
                                                 errors++;
                                               }
                                               if ("cancelled" !== data12) {
-                                                const err28 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/const", keyword: "const", params: { allowedValue: "cancelled" }, message: "must be equal to constant" };
+                                                const err30 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/6/const", keyword: "const", params: { allowedValue: "cancelled" }, message: "must be equal to constant" };
                                                 if (vErrors === null) {
-                                                  vErrors = [err28];
+                                                  vErrors = [err30];
                                                 } else {
-                                                  vErrors.push(err28);
+                                                  vErrors.push(err30);
                                                 }
                                                 errors++;
                                               }
-                                              var _valid1 = _errs56 === errors;
+                                              var _valid1 = _errs58 === errors;
                                               if (_valid1 && valid4) {
                                                 valid4 = false;
                                                 passing1 = [passing1, 6];
@@ -4543,26 +4601,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                   valid4 = true;
                                                   passing1 = 6;
                                                 }
-                                                const _errs58 = errors;
+                                                const _errs60 = errors;
                                                 if (typeof data12 !== "string") {
-                                                  const err29 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                  const err31 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                   if (vErrors === null) {
-                                                    vErrors = [err29];
+                                                    vErrors = [err31];
                                                   } else {
-                                                    vErrors.push(err29);
+                                                    vErrors.push(err31);
                                                   }
                                                   errors++;
                                                 }
                                                 if ("error" !== data12) {
-                                                  const err30 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/const", keyword: "const", params: { allowedValue: "error" }, message: "must be equal to constant" };
+                                                  const err32 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/7/const", keyword: "const", params: { allowedValue: "error" }, message: "must be equal to constant" };
                                                   if (vErrors === null) {
-                                                    vErrors = [err30];
+                                                    vErrors = [err32];
                                                   } else {
-                                                    vErrors.push(err30);
+                                                    vErrors.push(err32);
                                                   }
                                                   errors++;
                                                 }
-                                                var _valid1 = _errs58 === errors;
+                                                var _valid1 = _errs60 === errors;
                                                 if (_valid1 && valid4) {
                                                   valid4 = false;
                                                   passing1 = [passing1, 7];
@@ -4571,26 +4629,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                     valid4 = true;
                                                     passing1 = 7;
                                                   }
-                                                  const _errs60 = errors;
+                                                  const _errs62 = errors;
                                                   if (typeof data12 !== "string") {
-                                                    const err31 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                    const err33 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                     if (vErrors === null) {
-                                                      vErrors = [err31];
+                                                      vErrors = [err33];
                                                     } else {
-                                                      vErrors.push(err31);
+                                                      vErrors.push(err33);
                                                     }
                                                     errors++;
                                                   }
                                                   if ("building_toolchain" !== data12) {
-                                                    const err32 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/const", keyword: "const", params: { allowedValue: "building_toolchain" }, message: "must be equal to constant" };
+                                                    const err34 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/8/const", keyword: "const", params: { allowedValue: "building_toolchain" }, message: "must be equal to constant" };
                                                     if (vErrors === null) {
-                                                      vErrors = [err32];
+                                                      vErrors = [err34];
                                                     } else {
-                                                      vErrors.push(err32);
+                                                      vErrors.push(err34);
                                                     }
                                                     errors++;
                                                   }
-                                                  var _valid1 = _errs60 === errors;
+                                                  var _valid1 = _errs62 === errors;
                                                   if (_valid1 && valid4) {
                                                     valid4 = false;
                                                     passing1 = [passing1, 8];
@@ -4599,26 +4657,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                       valid4 = true;
                                                       passing1 = 8;
                                                     }
-                                                    const _errs62 = errors;
+                                                    const _errs64 = errors;
                                                     if (typeof data12 !== "string") {
-                                                      const err33 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                      const err35 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                       if (vErrors === null) {
-                                                        vErrors = [err33];
+                                                        vErrors = [err35];
                                                       } else {
-                                                        vErrors.push(err33);
+                                                        vErrors.push(err35);
                                                       }
                                                       errors++;
                                                     }
                                                     if ("generating_f16_gguf" !== data12) {
-                                                      const err34 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/const", keyword: "const", params: { allowedValue: "generating_f16_gguf" }, message: "must be equal to constant" };
+                                                      const err36 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/9/const", keyword: "const", params: { allowedValue: "generating_f16_gguf" }, message: "must be equal to constant" };
                                                       if (vErrors === null) {
-                                                        vErrors = [err34];
+                                                        vErrors = [err36];
                                                       } else {
-                                                        vErrors.push(err34);
+                                                        vErrors.push(err36);
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid1 = _errs62 === errors;
+                                                    var _valid1 = _errs64 === errors;
                                                     if (_valid1 && valid4) {
                                                       valid4 = false;
                                                       passing1 = [passing1, 9];
@@ -4627,26 +4685,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                         valid4 = true;
                                                         passing1 = 9;
                                                       }
-                                                      const _errs64 = errors;
+                                                      const _errs66 = errors;
                                                       if (typeof data12 !== "string") {
-                                                        const err35 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                        const err37 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                         if (vErrors === null) {
-                                                          vErrors = [err35];
+                                                          vErrors = [err37];
                                                         } else {
-                                                          vErrors.push(err35);
+                                                          vErrors.push(err37);
                                                         }
                                                         errors++;
                                                       }
                                                       if ("computing_imatrix" !== data12) {
-                                                        const err36 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/const", keyword: "const", params: { allowedValue: "computing_imatrix" }, message: "must be equal to constant" };
+                                                        const err38 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/10/const", keyword: "const", params: { allowedValue: "computing_imatrix" }, message: "must be equal to constant" };
                                                         if (vErrors === null) {
-                                                          vErrors = [err36];
+                                                          vErrors = [err38];
                                                         } else {
-                                                          vErrors.push(err36);
+                                                          vErrors.push(err38);
                                                         }
                                                         errors++;
                                                       }
-                                                      var _valid1 = _errs64 === errors;
+                                                      var _valid1 = _errs66 === errors;
                                                       if (_valid1 && valid4) {
                                                         valid4 = false;
                                                         passing1 = [passing1, 10];
@@ -4655,26 +4713,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                           valid4 = true;
                                                           passing1 = 10;
                                                         }
-                                                        const _errs66 = errors;
+                                                        const _errs68 = errors;
                                                         if (typeof data12 !== "string") {
-                                                          const err37 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                          const err39 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                           if (vErrors === null) {
-                                                            vErrors = [err37];
+                                                            vErrors = [err39];
                                                           } else {
-                                                            vErrors.push(err37);
+                                                            vErrors.push(err39);
                                                           }
                                                           errors++;
                                                         }
                                                         if ("quantizing" !== data12) {
-                                                          const err38 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/const", keyword: "const", params: { allowedValue: "quantizing" }, message: "must be equal to constant" };
+                                                          const err40 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/11/const", keyword: "const", params: { allowedValue: "quantizing" }, message: "must be equal to constant" };
                                                           if (vErrors === null) {
-                                                            vErrors = [err38];
+                                                            vErrors = [err40];
                                                           } else {
-                                                            vErrors.push(err38);
+                                                            vErrors.push(err40);
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid1 = _errs66 === errors;
+                                                        var _valid1 = _errs68 === errors;
                                                         if (_valid1 && valid4) {
                                                           valid4 = false;
                                                           passing1 = [passing1, 11];
@@ -4683,26 +4741,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                             valid4 = true;
                                                             passing1 = 11;
                                                           }
-                                                          const _errs68 = errors;
+                                                          const _errs70 = errors;
                                                           if (typeof data12 !== "string") {
-                                                            const err39 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                            const err41 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                             if (vErrors === null) {
-                                                              vErrors = [err39];
+                                                              vErrors = [err41];
                                                             } else {
-                                                              vErrors.push(err39);
+                                                              vErrors.push(err41);
                                                             }
                                                             errors++;
                                                           }
                                                           if ("calibrating" !== data12) {
-                                                            const err40 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/const", keyword: "const", params: { allowedValue: "calibrating" }, message: "must be equal to constant" };
+                                                            const err42 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/12/const", keyword: "const", params: { allowedValue: "calibrating" }, message: "must be equal to constant" };
                                                             if (vErrors === null) {
-                                                              vErrors = [err40];
+                                                              vErrors = [err42];
                                                             } else {
-                                                              vErrors.push(err40);
+                                                              vErrors.push(err42);
                                                             }
                                                             errors++;
                                                           }
-                                                          var _valid1 = _errs68 === errors;
+                                                          var _valid1 = _errs70 === errors;
                                                           if (_valid1 && valid4) {
                                                             valid4 = false;
                                                             passing1 = [passing1, 12];
@@ -4711,26 +4769,26 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                                               valid4 = true;
                                                               passing1 = 12;
                                                             }
-                                                            const _errs70 = errors;
+                                                            const _errs72 = errors;
                                                             if (typeof data12 !== "string") {
-                                                              const err41 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                              const err43 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                               if (vErrors === null) {
-                                                                vErrors = [err41];
+                                                                vErrors = [err43];
                                                               } else {
-                                                                vErrors.push(err41);
+                                                                vErrors.push(err43);
                                                               }
                                                               errors++;
                                                             }
                                                             if ("training" !== data12) {
-                                                              const err42 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/const", keyword: "const", params: { allowedValue: "training" }, message: "must be equal to constant" };
+                                                              const err44 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf/13/const", keyword: "const", params: { allowedValue: "training" }, message: "must be equal to constant" };
                                                               if (vErrors === null) {
-                                                                vErrors = [err42];
+                                                                vErrors = [err44];
                                                               } else {
-                                                                vErrors.push(err42);
+                                                                vErrors.push(err44);
                                                               }
                                                               errors++;
                                                             }
-                                                            var _valid1 = _errs70 === errors;
+                                                            var _valid1 = _errs72 === errors;
                                                             if (_valid1 && valid4) {
                                                               valid4 = false;
                                                               passing1 = [passing1, 13];
@@ -4753,50 +4811,50 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                       }
                                     }
                                     if (!valid4) {
-                                      const err43 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf", keyword: "oneOf", params: { passingSchemas: passing1 }, message: "must match exactly one schema in oneOf" };
+                                      const err45 = { instancePath: instancePath + "/status", schemaPath: "#/definitions/ConversionStatus/oneOf", keyword: "oneOf", params: { passingSchemas: passing1 }, message: "must match exactly one schema in oneOf" };
                                       if (vErrors === null) {
-                                        vErrors = [err43];
+                                        vErrors = [err45];
                                       } else {
-                                        vErrors.push(err43);
+                                        vErrors.push(err45);
                                       }
                                       errors++;
                                       validate32.errors = vErrors;
                                       return false;
                                     } else {
-                                      errors = _errs43;
+                                      errors = _errs45;
                                       if (vErrors !== null) {
-                                        if (_errs43) {
-                                          vErrors.length = _errs43;
+                                        if (_errs45) {
+                                          vErrors.length = _errs45;
                                         } else {
                                           vErrors = null;
                                         }
                                       }
                                     }
-                                    var valid0 = _errs41 === errors;
+                                    var valid0 = _errs43 === errors;
                                   } else {
                                     var valid0 = true;
                                   }
                                   if (valid0) {
                                     if (data.targetQuant !== void 0) {
                                       let data13 = data.targetQuant;
-                                      const _errs72 = errors;
+                                      const _errs74 = errors;
                                       if (typeof data13 !== "string" && data13 !== null) {
                                         validate32.errors = [{ instancePath: instancePath + "/targetQuant", schemaPath: "#/properties/targetQuant/type", keyword: "type", params: { type: schema36.properties.targetQuant.type }, message: "must be string,null" }];
                                         return false;
                                       }
-                                      var valid0 = _errs72 === errors;
+                                      var valid0 = _errs74 === errors;
                                     } else {
                                       var valid0 = true;
                                     }
                                     if (valid0) {
                                       if (data.tensorsCompleted !== void 0) {
                                         let data14 = data.tensorsCompleted;
-                                        const _errs74 = errors;
+                                        const _errs76 = errors;
                                         if (!(typeof data14 == "number" && (!(data14 % 1) && !isNaN(data14)) && isFinite(data14)) && data14 !== null) {
                                           validate32.errors = [{ instancePath: instancePath + "/tensorsCompleted", schemaPath: "#/properties/tensorsCompleted/type", keyword: "type", params: { type: schema36.properties.tensorsCompleted.type }, message: "must be integer,null" }];
                                           return false;
                                         }
-                                        if (errors === _errs74) {
+                                        if (errors === _errs76) {
                                           if (typeof data14 == "number" && isFinite(data14)) {
                                             if (data14 > 4294967295 || isNaN(data14)) {
                                               validate32.errors = [{ instancePath: instancePath + "/tensorsCompleted", schemaPath: "#/properties/tensorsCompleted/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -4809,19 +4867,19 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                             }
                                           }
                                         }
-                                        var valid0 = _errs74 === errors;
+                                        var valid0 = _errs76 === errors;
                                       } else {
                                         var valid0 = true;
                                       }
                                       if (valid0) {
                                         if (data.tensorsTotal !== void 0) {
                                           let data15 = data.tensorsTotal;
-                                          const _errs76 = errors;
+                                          const _errs78 = errors;
                                           if (!(typeof data15 == "number" && (!(data15 % 1) && !isNaN(data15)) && isFinite(data15)) && data15 !== null) {
                                             validate32.errors = [{ instancePath: instancePath + "/tensorsTotal", schemaPath: "#/properties/tensorsTotal/type", keyword: "type", params: { type: schema36.properties.tensorsTotal.type }, message: "must be integer,null" }];
                                             return false;
                                           }
-                                          if (errors === _errs76) {
+                                          if (errors === _errs78) {
                                             if (typeof data15 == "number" && isFinite(data15)) {
                                               if (data15 > 4294967295 || isNaN(data15)) {
                                                 validate32.errors = [{ instancePath: instancePath + "/tensorsTotal", schemaPath: "#/properties/tensorsTotal/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
@@ -4834,7 +4892,7 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                                               }
                                             }
                                           }
-                                          var valid0 = _errs76 === errors;
+                                          var valid0 = _errs78 === errors;
                                         } else {
                                           var valid0 = true;
                                         }

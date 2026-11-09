@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 fcf7c51b5fb42225cb3b41014d8c43e38795a325e91abfcd1f87369f00f447f5. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 15a83517624c6cd8382d21886be9bb44e0dc2b3e164c859db3d4ade47d812191. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -19,7 +19,7 @@ export type CheckedVersionDependencies = { "installed": ReadonlyArray<string>; "
 export type CheckVersionDependenciesOutcome = { "dependencies": CheckedVersionDependencies; "success": true };
 export type CheckVersionDependenciesParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
 export type ConversionCancelledOutcome = { "cancelled": boolean; "success": true };
-export type ConversionDirection = ("gguf_to_safetensors") | ("safetensors_to_gguf") | ("safetensors_to_quantized_gguf") | ("gguf_to_quantized_gguf") | ("safetensors_to_nvfp4") | ("safetensors_to_fp8") | ("safetensors_to_sherry_qat");
+export type ConversionDirection = ("gguf_to_safetensors") | ("safetensors_to_gguf") | ("safetensors_to_quantized_gguf") | ("gguf_to_quantized_gguf") | ("safetensors_to_nvfp4") | ("safetensors_to_fp8") | ("safetensors_to_sherry_qat") | ("gguf_to_ranking_gguf");
 export type ConversionEnvironmentOutcome = { "ready": boolean; "success": true };
 export type ConversionListOutcome = { "conversions": ReadonlyArray<ConversionProgressOutcome>; "success": true };
 export type ConversionProgressOutcome = { "bytesWritten": number | null; "conversionId": string; "currentTensor": string | null; "direction": ConversionDirection; "error": string | null; "estimatedOutputSize": number | null; "outputModelId": string | null; "pipelineStep": number | null; "pipelineStepLabel": string | null; "pipelineStepsTotal": number | null; "progress": number | null; "sourceModelId": string; "status": ConversionStatus; "targetQuant": string | null; "tensorsCompleted": number | null; "tensorsTotal": number | null };

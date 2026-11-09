@@ -59,6 +59,9 @@ pub struct ConversionManager {
     id_counter: Mutex<u64>,
     /// Registered quantization backends (strategy pattern).
     backends: Vec<Arc<dyn QuantizationBackend>>,
+    /// Fetches scoring contracts for ranking-head derivation; absent when the
+    /// instance has no Hugging Face access.
+    scoring_contracts: Option<Arc<dyn super::ScoringContractSource>>,
 }
 
 impl ConversionManager {
@@ -104,7 +107,18 @@ impl ConversionManager {
             progress,
             id_counter: Mutex::new(0),
             backends,
+            scoring_contracts: None,
         }
+    }
+
+    /// Supply the source of scoring contracts that ranking-head derivation
+    /// fetches when the source package does not carry one.
+    pub fn with_scoring_contract_source(
+        mut self,
+        source: Option<Arc<dyn super::ScoringContractSource>>,
+    ) -> Self {
+        self.scoring_contracts = source;
+        self
     }
 
     // -----------------------------------------------------------------------
@@ -575,6 +589,50 @@ impl ConversionManager {
                     },
                 )?
             }
+            ConversionDirection::GgufToRankingGguf => {
+                let lookup_library = self.model_library.clone();
+                let lookup_id = source_model_id.clone();
+                let source_file = tokio::task::spawn_blocking(move || {
+                    lookup_library.get_primary_model_file(&lookup_id)
+                })
+                .await
+                .map_err(|error| PumasError::ConversionFailed {
+                    message: format!("Primary model file lookup failed: {error}"),
+                })?
+                .filter(|file| {
+                        file.extension()
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("gguf"))
+                    })
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: format!(
+                            "Ranking-head derivation needs a GGUF model; {source_model_id} has no primary GGUF file"
+                        ),
+                    })?;
+                let contract = super::ranking_head::locate_contract(
+                    &model_path,
+                    &metadata,
+                    request.scoring_contract_repo.as_deref(),
+                    self.scoring_contracts.clone(),
+                )
+                .await?;
+                let job = super::ranking_head::RankingHeadJob {
+                    conversion_id: conv_id,
+                    launcher_root: launcher_root.clone(),
+                    source_model_id,
+                    source_file,
+                    source_metadata: metadata,
+                    contract,
+                };
+                self.workers.spawn_in_environment(
+                    initial_progress,
+                    cancel_token.clone(),
+                    launcher_root.clone(),
+                    async move {
+                        super::ranking_head::run(job, progress.as_ref(), &cancel_token, &library)
+                            .await
+                    },
+                )?
+            }
         };
 
         Ok(conversion_id)
@@ -856,6 +914,7 @@ async fn run_conversion(
         target_quant: target_quant.map(|s| s.to_string()),
         was_dequantized: is_dequantized,
         conversion_date: chrono::Utc::now().to_rfc3339(),
+        scoring_contract: None,
     };
 
     progress.set_status(conversion_id, ConversionStatus::Importing);
@@ -900,7 +959,9 @@ async fn run_conversion(
 /// Get the source file extension for a conversion direction.
 fn source_extension(direction: ConversionDirection) -> &'static str {
     match direction {
-        ConversionDirection::GgufToSafetensors | ConversionDirection::GgufToQuantizedGguf => "gguf",
+        ConversionDirection::GgufToSafetensors
+        | ConversionDirection::GgufToQuantizedGguf
+        | ConversionDirection::GgufToRankingGguf => "gguf",
         ConversionDirection::SafetensorsToGguf
         | ConversionDirection::SafetensorsToQuantizedGguf
         | ConversionDirection::SafetensorsToNvfp4
@@ -918,7 +979,8 @@ fn target_extension(direction: ConversionDirection) -> &'static str {
         | ConversionDirection::SafetensorsToSherryQat => "safetensors",
         ConversionDirection::SafetensorsToGguf
         | ConversionDirection::SafetensorsToQuantizedGguf
-        | ConversionDirection::GgufToQuantizedGguf => "gguf",
+        | ConversionDirection::GgufToQuantizedGguf
+        | ConversionDirection::GgufToRankingGguf => "gguf",
     }
 }
 

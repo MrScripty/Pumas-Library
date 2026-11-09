@@ -475,9 +475,9 @@ jobs:
       - if: matrix.shard == 'torch'
         run: python -m pip install --require-hashes -r torch-server/requirements-dev.lock
       - if: matrix.shard == 'torch'
-        run: python -m ruff check torch-server scripts/release scripts/rust
+        run: python -m ruff check torch-server scripts/release scripts/rust rust/crates/pumas-core/src/conversion/ranking_head_script.py rust/crates/pumas-core/src/conversion/script_tests
       - if: matrix.shard == 'torch'
-        run: python -m ruff format --check torch-server scripts/release scripts/rust
+        run: python -m ruff format --check torch-server scripts/release scripts/rust rust/crates/pumas-core/src/conversion/ranking_head_script.py rust/crates/pumas-core/src/conversion/script_tests
       - name: Test native packaged release contracts
         if: matrix.shard == 'torch'
         working-directory: scripts/release
@@ -490,6 +490,9 @@ jobs:
       # validate host APIs without claiming GPU inference or model support.
       - if: matrix.shard == 'torch'
         run: python -m unittest discover -s torch-server/tests
+      - name: Test ranking-head derivation script
+        if: matrix.shard == 'torch'
+        run: python -m unittest discover -s rust/crates/pumas-core/src/conversion/script_tests
       # The acceptance tooling reads managed CPython .tar.zst archives with
       # `compression.zstd`, which needs CPython 3.14; the repository runtime
       # stays on .python-version. One exact pin serves both acceptance jobs.

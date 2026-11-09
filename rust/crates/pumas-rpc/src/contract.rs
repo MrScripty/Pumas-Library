@@ -6342,6 +6342,8 @@ struct StartModelConversionParams {
     imatrix_calibration_file: Option<String>,
     #[serde(default, alias = "forceImatrix")]
     force_imatrix: Option<bool>,
+    #[serde(default, alias = "scoringContractRepo")]
+    scoring_contract_repo: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -6805,6 +6807,23 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     "imatrix_calibration_file",
                     params.imatrix_calibration_file,
                 )?;
+                let scoring_contract_repo = params
+                    .scoring_contract_repo
+                    .map(|repo| {
+                        validate_bounded_non_empty(
+                            "scoring_contract_repo",
+                            repo,
+                            MAX_IDENTIFIER_BYTES,
+                        )
+                    })
+                    .transpose()?;
+                if scoring_contract_repo.is_some()
+                    && direction != ConversionDirection::GgufToRankingGguf
+                {
+                    return Err(PublicError::invalid_params_because(
+                        "`scoring_contract_repo` applies only to `gguf_to_ranking_gguf`",
+                    ));
+                }
                 Ok(RpcCommand::StartModelConversion {
                     request: ConversionRequest {
                         model_id,
@@ -6813,6 +6832,7 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                         output_name,
                         imatrix_calibration_file,
                         force_imatrix: params.force_imatrix,
+                        scoring_contract_repo,
                     },
                 })
             })
@@ -7455,6 +7475,7 @@ fn parse_conversion_direction(value: &str) -> Result<ConversionDirection, Public
         "safetensors_to_sherry_qat" | "SafetensorsToSherryQat" => {
             Ok(ConversionDirection::SafetensorsToSherryQat)
         }
+        "gguf_to_ranking_gguf" | "GgufToRankingGguf" => Ok(ConversionDirection::GgufToRankingGguf),
         _ => Err(PublicError::invalid_params_because(
             "`direction` is not a supported conversion direction",
         )),
@@ -8049,6 +8070,23 @@ mod tests {
             _ => panic!("wrong admitted conversion command"),
         }
 
+        let ranking = AdmittedRpcRequest::decode(&request(
+            "start_model_conversion",
+            Some(json!({
+                "model_id": "reranker/acme/model-gguf",
+                "direction": "gguf_to_ranking_gguf",
+                "scoring_contract_repo": "acme/model",
+            })),
+        ))
+        .unwrap();
+        match ranking.command {
+            RpcCommand::StartModelConversion { request } => {
+                assert_eq!(request.direction, ConversionDirection::GgufToRankingGguf);
+                assert_eq!(request.scoring_contract_repo.as_deref(), Some("acme/model"));
+            }
+            _ => panic!("wrong admitted conversion command"),
+        }
+
         let backend = AdmittedRpcRequest::decode(&request(
             "setup_quantization_backend",
             Some(json!({"backend": "llama_cpp"})),
@@ -8089,6 +8127,22 @@ mod tests {
                     "model_id": "model",
                     "direction": "gguf_to_safetensors",
                     "unexpected": true,
+                }),
+            ),
+            (
+                "start_model_conversion",
+                json!({
+                    "model_id": "model",
+                    "direction": "gguf_to_quantized_gguf",
+                    "scoring_contract_repo": "acme/model",
+                }),
+            ),
+            (
+                "start_model_conversion",
+                json!({
+                    "model_id": "model",
+                    "direction": "gguf_to_ranking_gguf",
+                    "scoring_contract_repo": " ",
                 }),
             ),
             ("get_conversion_progress", json!({"conversion_id": "  "})),

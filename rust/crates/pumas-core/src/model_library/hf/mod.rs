@@ -21,6 +21,7 @@ mod download;
 mod lifecycle;
 mod metadata;
 mod package_selection;
+mod scoring_contract;
 mod search;
 mod types;
 

@@ -103,6 +103,7 @@ exit 2
                 output_name: None,
                 imatrix_calibration_file: None,
                 force_imatrix: None,
+                scoring_contract_repo: None,
             })
             .await
             .unwrap();
@@ -439,6 +440,7 @@ exit 2
                     output_name: None,
                     imatrix_calibration_file: None,
                     force_imatrix: None,
+                    scoring_contract_repo: None,
                 })
                 .await
                 .unwrap();

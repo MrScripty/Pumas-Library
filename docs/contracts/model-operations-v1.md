@@ -139,7 +139,11 @@ text generation, and image-to-text if it declares image input.
 decision model (`decisions` output modality); such models offer no text
 generation. `rerank` is offered for models recorded as rerankers
 (`text-ranking`) served by llama.cpp; serving refuses a reranker GGUF without
-a ranking head (`cls.output.weight`). `audio_transcription` is offered for
+a ranking head (`cls.output.weight`). A causal-LM reranker GGUF without one can
+be given a head by the `gguf_to_ranking_gguf` conversion
+([ADR 0006](../adr/0006-derived-ranking-heads.md)); its scores are
+`σ(ℓ_true − ℓ_false)` (or `σ(ℓ_true)` for a one-token contract), which orders
+documents as the model's reference scorer does. `audio_transcription` is offered for
 audio models served by Torch (Cohere ASR); see [Audio transcription](#audio-transcription).
 `audio_classification` is reserved and unavailable. Build/protocol identity is reported by
 `pumas-rpc --build-info`; these endpoints define no competing identity type.

@@ -86,6 +86,7 @@ pub async fn write_quantized_metadata(
         target_quant: Some(target_quant.to_string()),
         was_dequantized: false,
         conversion_date: chrono::Utc::now().to_rfc3339(),
+        scoring_contract: None,
     };
 
     let converted_metadata = ModelMetadata {

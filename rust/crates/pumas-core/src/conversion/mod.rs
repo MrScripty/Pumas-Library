@@ -22,6 +22,7 @@ mod options;
 mod outputs;
 pub(crate) mod pipeline;
 pub(crate) mod progress;
+mod ranking_head;
 mod readiness;
 mod script_process;
 mod scripts;
@@ -35,9 +36,11 @@ mod workers;
 pub use llama_cpp::LlamaCppBackend;
 pub use manager::ConversionManager;
 pub use nvfp4::Nvfp4Backend;
+pub use ranking_head::{ScoringContractSource, SOURCE_PACKAGE_CONTRACT};
 pub use sherry::SherryBackend;
 pub use types::{
     BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest,
     ConversionSetupSnapshot, ConversionSetupStatus, ConversionSource, ConversionStatus,
-    QuantBackend, QuantOption, QuantizationBackend, QuantizeParams, ScriptProgressLine,
+    QuantBackend, QuantOption, QuantizationBackend, QuantizeParams, ScoringContractOrigin,
+    ScriptProgressLine,
 };

@@ -552,57 +552,45 @@ async fn spawn_torch_audio_stub(
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = seen.clone();
-    tokio::spawn(async move {
-        let mut replies = replies.into_iter();
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let mut bytes = Vec::new();
-            while !bytes.ends_with(b"\r\n\r\n") {
-                let mut b = [0];
-                if socket.read_exact(&mut b).await.is_err() {
-                    break;
+    let replies = Arc::new(std::sync::Mutex::new(
+        replies
+            .into_iter()
+            .collect::<std::collections::VecDeque<_>>(),
+    ));
+    let json_reply = |status: u16, body: &'static str| {
+        (
+            StatusCode::from_u16(status).unwrap(),
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            body,
+        )
+    };
+    let app = Router::new()
+        .route(
+            "/health",
+            get(move || async move {
+                json_reply(200, r#"{"status":"ok","protocol":3,"capabilities":["image_generation","audio_transcription"]}"#)
+            }),
+        )
+        .route(
+            "/api/slots",
+            get(move || async move {
+                json_reply(200, r#"{"slots":[{"slot_id":"asr","model_name":"library/speech","model_path":"/fixture","device":"cpu","state":"ready","model_type":"cohere-asr"}]}"#)
+            }),
+        )
+        .route(
+            "/api/audio/transcriptions",
+            post(move |Json(body): Json<Value>| {
+                let recorded = recorded.clone();
+                let replies = replies.clone();
+                async move {
+                    recorded.lock().unwrap().push(body);
+                    let (status, reply) = replies.lock().unwrap().pop_front().unwrap_or((500, "{}"));
+                    json_reply(status, reply)
                 }
-                bytes.push(b[0]);
-            }
-            let head = String::from_utf8_lossy(&bytes).to_string();
-            let length = head
-                .lines()
-                .find_map(|line| {
-                    line.to_ascii_lowercase()
-                        .strip_prefix("content-length: ")
-                        .and_then(|v| v.parse::<usize>().ok())
-                })
-                .unwrap_or(0);
-            let mut body = vec![0; length];
-            socket.read_exact(&mut body).await.unwrap();
-            let (status, reply) = if head.starts_with("GET /health") {
-                (
-                    200,
-                    r#"{"status":"ok","protocol":3,"capabilities":["image_generation","audio_transcription"]}"#,
-                )
-            } else if head.starts_with("GET /api/slots") {
-                (
-                    200,
-                    r#"{"slots":[{"slot_id":"asr","model_name":"library/speech","model_path":"/fixture","device":"cpu","state":"ready","model_type":"cohere-asr"}]}"#,
-                )
-            } else if head.starts_with("POST /api/audio/transcriptions") {
-                recorded
-                    .lock()
-                    .unwrap()
-                    .push(serde_json::from_slice(&body).unwrap());
-                replies.next().unwrap_or((500, "{}"))
-            } else {
-                (404, "{}")
-            };
-            let _ = socket
-                .write_all(
-                    format!(
-                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
-                        reply.len()
-                    )
-                    .as_bytes(),
-                )
-                .await;
-        }
+            }),
+        );
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
     });
     (endpoint, seen)
 }

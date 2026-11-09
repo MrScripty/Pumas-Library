@@ -77,6 +77,22 @@ class AudioRouteTests(unittest.TestCase):
             seen, {"model": "model", "processor": "processor", "bytes": 3200, "language": "en"}
         )
 
+    def test_audio_conversion_runs_off_the_event_loop(self):
+        offloaded = []
+        real_to_thread = asyncio.to_thread
+
+        async def to_thread(func, *args, **kwargs):
+            offloaded.append(getattr(func, "__name__", ""))
+            return await real_to_thread(func, *args, **kwargs)
+
+        payload = TranscriptionRequest(model_id="asr", audio=pcm())
+        with (
+            patch("loaders.cohere_asr_loader.transcribe", lambda *a: ("x", "stop")),
+            patch.object(asyncio, "to_thread", to_thread),
+        ):
+            asyncio.run(transcribe_audio(payload, request(ready_lease)))
+        self.assertIn("normalize_audio", offloaded)
+
     def test_refusals_carry_codes_and_reasons(self):
         @asynccontextmanager
         async def missing(_):

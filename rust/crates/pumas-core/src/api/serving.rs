@@ -59,8 +59,8 @@ impl PumasApi {
             && primary_artifact_format == Some(ExecutableArtifactFormat::Gguf)
             && primary_path
                 .as_deref()
-                .and_then(crate::model_library::gguf_serving_facts)
-                .is_some_and(|facts| !facts.ranking_head);
+                .and_then(crate::model_library::gguf_package_has_ranking_head)
+                == Some(false);
 
         let runtime_snapshot = self.get_runtime_profiles_snapshot().await?.snapshot;
         let profile = runtime_snapshot

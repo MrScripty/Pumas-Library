@@ -943,3 +943,78 @@ async fn decision_audio_is_sent_as_wav_files_to_a_declared_decision_model() {
     assert!(sent.get("images").is_none());
     backend.abort();
 }
+
+fn find_capability(value: &Value, name: &str) -> Value {
+    value["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["capability"] == name)
+        .unwrap()
+        .clone()
+}
+
+fn bound<'a>(capability: &'a Value, option: &str) -> Option<&'a Value> {
+    capability["option_bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|bound| bound["option"] == option)
+}
+
+#[tokio::test]
+async fn a_recorded_audio_language_task_chats_with_audio_and_advertises_message_bounds() {
+    let (endpoint, _calls, backend) = declaring_backend(
+        json!(["text", "audio"]),
+        json!(["text"]),
+        json!({"vision":false,"audio":true}),
+        reply(),
+    )
+    .await;
+    let (_root, state) = fixture(&endpoint, Some("audio-text-to-text")).await;
+    with_projector(&state, "audio").await;
+    let value = caps(state).await;
+    let chat = find_capability(&value, "chat_generation");
+    assert_eq!(chat["availability"]["state"], "available", "{chat}");
+    assert_eq!(chat["input_modalities"], json!(["text", "audio"]));
+    for option in ["message_count", "content_parts", "audio_seconds"] {
+        assert!(bound(&chat, option).is_some(), "{option}: {chat}");
+    }
+    // No image is declared, so no image bounds are advertised.
+    assert!(bound(&chat, "image_count").is_none(), "{chat}");
+    backend.abort();
+}
+
+#[tokio::test]
+async fn an_entry_without_modality_fields_keeps_live_image_input_and_its_bounds() {
+    // Older llama.cpp lists the model without architecture modalities; the
+    // live session's vision flag still establishes image input.
+    let (endpoint, _calls, backend) = declaring_backend(
+        Value::Null,
+        Value::Null,
+        json!({"vision":true,"audio":false}),
+        reply(),
+    )
+    .await;
+    let (_root, state) = fixture(&endpoint, Some("image-text-to-text")).await;
+    with_projector(&state, "vlm").await;
+    let value = caps(state).await;
+    assert!(
+        value["modalities"]["input"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("image")),
+        "{value}"
+    );
+    let chat = find_capability(&value, "chat_generation");
+    assert!(chat["input_modalities"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("image")));
+    let images = bound(&chat, "image_count").expect("image bounds advertised");
+    assert_eq!(images["minimum"], json!(0.0), "{chat}");
+    for option in ["image_bytes", "message_count", "content_parts"] {
+        assert!(bound(&chat, option).is_some(), "{option}: {chat}");
+    }
+    backend.abort();
+}

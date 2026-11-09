@@ -62,11 +62,14 @@ Evidence from 0.8.0 testing (LFM3-Audio-2B Q4_0, Qwen3-Reranker-0.6B Q8_0):
    weaker is returned as a candidate needing confirmation and is never
    applied silently.
 2. **Plan.** From the confirmed source, Pumas builds the `DownloadRequest` a
-   user would have made (repository, revision, files) and runs the existing
-   download preflight (`prepare_hf_download_owned_at_revision`). That gives
-   the snapshot and Hugging Face evidence, the pipeline tag, package selection
-   (projector, shards, config and tokenizer companions), the artifact ID and
-   the destination.
+   user would have made (repository, revision, files). Today
+   `prepare_hf_download_owned_at_revision` returns only the snapshot and
+   Hugging Face evidence; file selection (projector, shards, config and
+   tokenizer companions) and the destination are decided inside
+   `start_prepared_hf_download_owned`, which also starts the download. S2
+   extracts that selection into a shared, read-only planning step that returns
+   the selected files, artifact ID and proposed destination without side
+   effects. Downloads and imports then both call it.
 3. **Completeness.** The local files are compared with the selected package.
    A missing companion (for example the `mmproj`) or a truncated file is
    reported by name. With the caller's consent, the existing download custody
@@ -109,7 +112,7 @@ Evidence from 0.8.0 testing (LFM3-Audio-2B Q4_0, Qwen3-Reranker-0.6B Q8_0):
 | Slice | Content | Status |
 | --- | --- | --- |
 | S1 | Reverse search with hash confirmation; tests for each lookup bug | Next |
-| S2 | Plan and completeness on the download preflight; `plan_model_import` RPC | Planned |
+| S2 | Shared read-only download planning (selection, artifact ID, destination) extracted from `start_prepared_hf_download_owned`; completeness; `plan_model_import` RPC | Planned |
 | S3 | Ingest through download staging and finalization; import/download equivalence tests | Planned |
 | S4 | Completion of missing or truncated files through download custody | Planned |
 | S5 | Backend pending-lookup job; re-identifying existing records | Planned |

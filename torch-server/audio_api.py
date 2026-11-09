@@ -95,7 +95,8 @@ async def transcribe_audio(payload: TranscriptionRequest, request: Request):
             f"language must be one of: {', '.join(sorted(LANGUAGES))}",
         )
     try:
-        normalized = normalize_audio(payload.audio)
+        # Resampling a 30 s clip is CPU work; keep it off the event loop.
+        normalized = await asyncio.to_thread(normalize_audio, payload.audio)
     except AudioInputError as error:
         raise failure(400, "invalid_request", str(error)) from None
     import base64

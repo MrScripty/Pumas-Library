@@ -47,6 +47,43 @@ pub(crate) fn gguf_serving_facts(path: &Path) -> Option<GgufServingFacts> {
     read_gguf_serving_facts(&mut file).ok()
 }
 
+/// Whether the GGUF package at `primary` has a ranking head, checking every
+/// shard of a split package (`name-00001-of-00003.gguf`): the head may sit in
+/// any of them. `None` when any shard is missing or unreadable, so the
+/// runtime reports its own reason.
+pub(crate) fn gguf_package_has_ranking_head(primary: &Path) -> Option<bool> {
+    let shards = gguf_split_shards(primary).unwrap_or_else(|| vec![primary.to_path_buf()]);
+    let mut found = false;
+    for shard in shards {
+        found |= gguf_serving_facts(&shard)?.ranking_head;
+    }
+    Some(found)
+}
+
+/// Every shard path of a split GGUF named `<stem>-NNNNN-of-MMMMM.gguf`.
+fn gguf_split_shards(primary: &Path) -> Option<Vec<std::path::PathBuf>> {
+    let name = primary.file_name()?.to_str()?;
+    let stem = name.strip_suffix(".gguf")?;
+    let (head, total) = stem.rsplit_once("-of-")?;
+    let (base, index) = head.rsplit_once('-')?;
+    if total.len() != 5
+        || index.len() != 5
+        || !total
+            .bytes()
+            .chain(index.bytes())
+            .all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let count: u32 = total.parse().ok().filter(|count| *count > 1)?;
+    let directory = primary.parent()?;
+    Some(
+        (1..=count)
+            .map(|shard| directory.join(format!("{base}-{shard:05}-of-{total}.gguf")))
+            .collect(),
+    )
+}
+
 fn read_gguf_serving_facts<R: Read + Seek>(reader: &mut R) -> Result<GgufServingFacts> {
     let mut cursor = BoundedGgufReader::new(reader);
     let header = cursor.read_array::<24>()?;
@@ -686,6 +723,29 @@ mod tests {
             !serving_facts(gguf_with(&[kv_bool("qwen35.attention.causal", true)], &[])).non_causal
         );
         assert!(read_gguf_serving_facts(&mut std::io::Cursor::new(b"NOPE".repeat(6))).is_err());
+    }
+
+    #[test]
+    fn a_split_reranker_has_a_ranking_head_when_any_shard_holds_it() {
+        let root = tempfile::tempdir().unwrap();
+        let shard = |index: u32, tensors: &[&str]| {
+            let path = root
+                .path()
+                .join(format!("reranker-{index:05}-of-00002.gguf"));
+            std::fs::write(&path, gguf_with(&[], tensors)).unwrap();
+            path
+        };
+        let first = shard(1, &["token_embd.weight"]);
+        // Only the first shard exists yet: unreadable, so the runtime decides.
+        assert_eq!(gguf_package_has_ranking_head(&first), None);
+        shard(2, &["cls.output.weight"]);
+        assert_eq!(gguf_package_has_ranking_head(&first), Some(true));
+        shard(2, &["output.weight"]);
+        assert_eq!(gguf_package_has_ranking_head(&first), Some(false));
+
+        let single = root.path().join("single.gguf");
+        std::fs::write(&single, gguf_with(&[], &["cls.output.weight"])).unwrap();
+        assert_eq!(gguf_package_has_ranking_head(&single), Some(true));
     }
 
     fn kv_string(key: &str, value: &str) -> Vec<u8> {

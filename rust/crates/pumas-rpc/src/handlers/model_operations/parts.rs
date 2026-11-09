@@ -65,14 +65,18 @@ pub(super) fn image_bounds(min_images: usize, messages: bool) -> Vec<super::type
         super::bound(OptionName::Height, 1., f64::from(MAX_DIMENSION)),
     ];
     if messages {
-        bounds.push(super::bound(
-            OptionName::MessageCount,
-            1.,
-            MAX_MESSAGES as f64,
-        ));
-        bounds.push(super::bound(OptionName::ContentParts, 1., MAX_PARTS as f64));
+        bounds.extend(message_bounds());
     }
     bounds
+}
+
+/// The message and content-part bounds for media-bearing messages.
+pub(super) fn message_bounds() -> Vec<super::types::OptionBound> {
+    use super::types::OptionName;
+    vec![
+        super::bound(OptionName::MessageCount, 1., MAX_MESSAGES as f64),
+        super::bound(OptionName::ContentParts, 1., MAX_PARTS as f64),
+    ]
 }
 
 /// The audio bounds this module enforces, advertised by every capability

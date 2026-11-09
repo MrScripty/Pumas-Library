@@ -2959,9 +2959,13 @@ mod managed_python_provenance_tests {
         std::fs::write(&python, b"interpreter").unwrap();
         let other = root.path().join("other");
         std::fs::write(&other, b"interpreter").unwrap();
-        let dotted = root.path().join(".").join("python");
+        // `..` survives Path comparison (an interior `.` would not), so only the
+        // resolved-file fallback can match this spelling, as with 8.3 names.
+        std::fs::create_dir(root.path().join("bin")).unwrap();
+        let indirect = root.path().join("bin").join("..").join("python");
+        assert_ne!(indirect, python);
         assert!(same_interpreter(&python, &python));
-        assert!(same_interpreter(&dotted, &python));
+        assert!(same_interpreter(&indirect, &python));
         assert!(!same_interpreter(&other, &python));
         assert!(!same_interpreter(&root.path().join("missing"), &python));
     }

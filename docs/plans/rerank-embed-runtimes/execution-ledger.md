@@ -94,3 +94,28 @@ remains pending the reference safetensors and a served session.
   `reranker/qwen3/qwen3-reranker-0_6b-q8_0-gguf`. Both are copied
   publications that never acknowledged a Ready index; Pumas refuses to
   reclassify them and has no recovery API for them.
+- **Derived 4B head:** `qwen3-reranker-4b-gguf` (QuantFactory, Q8_0) had no
+  ranking head and its card names no base model, so
+  `resolve_model_declarations` with `repo_id` `Qwen/Qwen3-Reranker-4B`
+  recorded the declarations (at `22e68366…`; yes 9693, no 2152, Identity).
+  `gguf_to_ranking_gguf` completed, and the output served on llama.cpp
+  ranks the oracle pairs in the expected order (top document 0.996 and 0.997;
+  unrelated documents ≤0.03). Results are in `scratchpad/oracle/derived_4b.json`.
+- **Found live: derived models were hidden.** A derived model inherited its
+  source's `repo_id` and quant, so duplicate-artifact grouping folded it into
+  its source and `get_models` never listed it. Fixed on this branch.
+- **Sweep of refusals** (`validate_model_serving_config`, complete packages):
+  every embedding GGUF, the bge GGUF, Prism, and the Torch safetensors pass.
+  Refused with a reason: reranker GGUFs without a ranking head
+  (`CLM-v0.1-8B-GGUF` has no sentence-transformers package in its lineage
+  (`czl/CLM-v0.1-8B-GGUF`, `Contrastive-LM/CLM-v0.1-8B`), so no head can be
+  derived).
+- **ONNX live (nomic-embed-text-v1.5 ONNX, CPU profile `onnx-text-live`):**
+  declarations resolved from `nomic-ai/nomic-embed-text-v1.5@e9b67630`
+  (mean pooling, no Normalize, max_seq_length 8192). `serve_model` failed
+  with a bare "could not load". The cause, found by loading the same
+  package through `OnnxRuntimeSession::load`, was `config.json`'s differing
+  `max_position_embeddings` (2048) and `n_positions` (8192). Both are fixed
+  on this branch: the smaller limit applies, and load refusals carry their
+  reason. The loader then embeds with ONNX Runtime 1.24.2. A dev backend
+  needs `ORT_DYLIB_PATH`; packaged builds ship the library.

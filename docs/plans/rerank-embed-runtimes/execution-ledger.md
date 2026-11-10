@@ -55,3 +55,33 @@ with the `LogitScore` contract of `Qwen/Qwen3-Reranker-0.6B` (true 9693
 
 This is structural evidence; A1's score agreement with sentence-transformers
 remains pending the reference safetensors and a served session.
+
+## Live evidence (2026-11-10, pumas-rpc from this branch)
+
+- **Download resumes:** root cause of the mass `HTTP continuation
+  representation or resource changed` failures: Hugging Face's CDN
+  (`us.aws.cdn.hf.co/xet-bridge-us`, CloudFront-signed) returns the same query
+  parameters in a different order on each redirect. Fixed by comparing retained
+  parameters as a sorted multiset (PR #126; also on this branch). No recurrence
+  after restart.
+- **Declaration resolution:** `resolve_model_declarations` on
+  `mradermacher/Qwen3-Reranker-0.6B-GGUF` searched the repository (no
+  `modules.json`), then its card's base model `Qwen/Qwen3-Reranker-0.6B` at
+  `e61197ed…`. It recorded `CrossEncoder`, `LogitScore` true 9693 `yes`, false
+  2152 `no`, activation Identity, and the 741-character template. This needed
+  two fixes found live: base model from `model_card`, and declaration files
+  fetched without the API client's 30 s total timeout.
+- **Conversion through Pumas:** `setup` → `check_conversion_environment` ready
+  (jinja2 probe) → `start_model_conversion` `gguf_to_ranking_gguf` →
+  completed. 311 tensors; output `…-ranking`, `model_type` reranker,
+  `pipeline_tag` text-ranking, declarations inherited.
+- **Serving and rerank:** served on llama.cpp b12099 (dedicated, GPU).
+  `/v1/served-models` reports `rerank` available and `text_embedding`
+  `model_task_mismatch`. Typed `rerank` on two queries × eight documents
+  ranks relevant documents first (for example 0.9999 / 0.9751 / 0.8437 for the
+  three boiling-point passages vs ≤0.0004 for unrelated ones).
+- **Still pending:**
+  - A1 numeric agreement with sentence-transformers. The reference
+    safetensors are still downloading.
+  - The ggml-org comparison run. Serving that older entry is refused with
+    `conflict` while downloads hold the library.

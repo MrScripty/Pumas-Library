@@ -202,10 +202,29 @@ fn lineage(requested: Option<&str>, metadata: &ModelMetadata) -> Vec<String> {
     if let Some(repo) = metadata.repo_id.as_deref() {
         push(repo);
     }
-    if let Some([base]) = metadata.base_model.as_deref() {
-        push(base);
+    if let Some(base) = single_base_model(metadata) {
+        push(&base);
     }
     repos
+}
+
+/// The model's one base model: the recorded `base_model`, else the model
+/// card's (a string or a one-entry list). Several base models are ambiguous.
+fn single_base_model(metadata: &ModelMetadata) -> Option<String> {
+    if let Some(recorded) = metadata.base_model.as_deref() {
+        return match recorded {
+            [base] => Some(base.clone()),
+            _ => None,
+        };
+    }
+    match metadata.model_card.as_ref()?.get("base_model")? {
+        serde_json::Value::String(base) => Some(base.clone()),
+        serde_json::Value::Array(bases) => match bases.as_slice() {
+            [serde_json::Value::String(base)] => Some(base.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Resolve declarations for each newly completed download that has none.
@@ -282,5 +301,38 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(lineage(None, &same), ["a/b"]);
+    }
+
+    #[test]
+    fn the_model_card_names_the_base_model_when_none_is_recorded() {
+        let card = |value: serde_json::Value| ModelMetadata {
+            repo_id: Some("mradermacher/zerank-2-GGUF".into()),
+            model_card: Some([("base_model".to_string(), value)].into_iter().collect()),
+            ..Default::default()
+        };
+        assert_eq!(
+            lineage(
+                None,
+                &card(serde_json::json!("zeroentropy/zerank-2-reranker"))
+            ),
+            [
+                "mradermacher/zerank-2-GGUF",
+                "zeroentropy/zerank-2-reranker"
+            ]
+        );
+        assert_eq!(
+            lineage(
+                None,
+                &card(serde_json::json!(["zeroentropy/zerank-2-reranker"]))
+            ),
+            [
+                "mradermacher/zerank-2-GGUF",
+                "zeroentropy/zerank-2-reranker"
+            ]
+        );
+        assert_eq!(
+            lineage(None, &card(serde_json::json!(["a/b", "c/d"]))),
+            ["mradermacher/zerank-2-GGUF"]
+        );
     }
 }

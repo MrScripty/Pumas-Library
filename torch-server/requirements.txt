@@ -2,7 +2,7 @@
 # from a source checkout. It is not shipped and managed installs never read
 # it. CI installs the hash lock requirements-dev.lock instead; see README.md.
 torch>=2.13.0
-transformers>=4.55.0
+transformers>=5.22.2
 safetensors>=0.4.0
 fastapi>=0.109.1
 uvicorn[standard]>=0.24.0

@@ -85,3 +85,12 @@ remains pending the reference safetensors and a served session.
     safetensors are still downloading.
   - The ggml-org comparison run. Serving that older entry is refused with
     `conflict` while downloads hold the library.
+- **Library resilience (found live):** one record with
+  `dependency_bindings: null` (`audio/lfm3/lfm3-audio-2b-gguf`, a copy-import
+  from 2026-11-07) failed `get_models`, so the desktop showed "Library
+  unavailable". The catalog now leaves such records out and lists them in
+  `unavailable_records` with the reason. After the fix the live library
+  loads 112 models. Two records are reported: that one and
+  `reranker/qwen3/qwen3-reranker-0_6b-q8_0-gguf`. Both are copied
+  publications that never acknowledged a Ready index; Pumas refuses to
+  reclassify them and has no recovery API for them.

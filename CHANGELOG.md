@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ([ADR 0006](docs/adr/0006-derived-ranking-heads.md)). The base conversion
   environment now also needs `jinja2`; re-run conversion setup.
 
+### Fixed
+
+- One malformed library record no longer makes the whole library unavailable.
+  `get_models` and catalog search leave the record out and list it in
+  `unavailable_records` with the model ID and the reason; the library view
+  shows those records beside the models that loaded.
+
 ## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,

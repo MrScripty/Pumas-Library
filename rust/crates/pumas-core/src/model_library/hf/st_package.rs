@@ -86,7 +86,7 @@ impl HuggingFaceClient {
     ) -> Result<Vec<u8>> {
         cancel_check(cancel)?;
         let bytes = self
-            .fetch_contract_file(repo_id, revision, path, lfs.get(path).copied())
+            .fetch_contract_file(repo_id, revision, path, lfs.get(path).copied(), cancel)
             .await?;
         write_contained(destination, path, &bytes).await?;
         Ok(bytes)
@@ -174,6 +174,7 @@ impl HuggingFaceClient {
         revision: &DownloadRevision,
         path: &str,
         lfs: Option<(u64, &str)>,
+        cancel: &CancellationToken,
     ) -> Result<Vec<u8>> {
         relative_path(path)?;
         let encoded = path
@@ -188,8 +189,14 @@ impl HuggingFaceClient {
             revision.as_str(),
             encoded
         );
-        let mut request = self.client.get(&url);
-        if let Some(auth) = self.auth_header_value().await {
+        // A file body is an artifact transfer: like downloads it has a connect
+        // timeout but no total timeout, and cancellation is checked per chunk.
+        let auth = self.auth_header_value().await;
+        let mut request = self
+            .download_client
+            .for_request(&url, auth.is_some())?
+            .get(&url);
+        if let Some(auth) = auth {
             request = request.header("Authorization", auth);
         }
         let network = |message: String| PumasError::Network {
@@ -213,6 +220,7 @@ impl HuggingFaceClient {
             .await
             .map_err(|error| network(format!("Failed to read {path} from {repo_id}: {error}")))?
         {
+            cancel_check(cancel)?;
             let within = u64::try_from(bytes.len())
                 .ok()
                 .zip(u64::try_from(chunk.len()).ok())

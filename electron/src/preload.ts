@@ -61,6 +61,7 @@ import {
   decodeDownloadStatusOutcome,
   decodeModelIndexRefreshOutcome,
   decodeModelsOutcome,
+  decodeFinishRetainedImportOutcome,
   decodeLinkHealthOutcome,
   decodeHfDownloadDetailsOutcome,
   decodeInferenceSettingsOutcome,
@@ -818,6 +819,9 @@ const electronAPI = {
   delete_model_with_cascade: (modelId: string) =>
     apiCall('delete_model_with_cascade',
       requireDecoded(decodeModelIdParams({ model_id: modelId }), 'delete_model_with_cascade request')),
+  finish_retained_import: (modelId: string) =>
+    validatedApiCall('finish_retained_import', decodeFinishRetainedImportOutcome,
+      requireDecoded(decodeModelIdParams({ model_id: modelId }), 'finish_retained_import request')),
 
   get_sandbox_info: () => apiCall('get_sandbox_info'),
   set_model_link_exclusion: (modelId: string, appId: string, excluded: boolean) =>

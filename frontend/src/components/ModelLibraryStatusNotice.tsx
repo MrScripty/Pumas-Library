@@ -1,4 +1,5 @@
 import type { ModelLibraryDiagnostics, ModelLibraryLoadStatus } from '../hooks/useModels';
+import { UnavailableLibraryRecords } from './UnavailableLibraryRecords';
 
 interface ModelLibraryStatusNoticeProps {
   libraryLoadStatus: ModelLibraryLoadStatus;
@@ -6,6 +7,8 @@ interface ModelLibraryStatusNoticeProps {
   hasVisibleModels: boolean;
   /** Why the download list could not be loaded; null when it loaded. */
   downloadListError: string | null;
+  /** Repairs a left-out record the backend reports as a retained import. */
+  onFinishRetainedImport?: (modelId: string) => Promise<void>;
 }
 
 const NOTICE_CLASS = 'rounded border border-[hsl(var(--launcher-border))] px-3 py-2 text-sm text-[hsl(var(--text-secondary))]';
@@ -33,6 +36,7 @@ export function ModelLibraryStatusNotice({
   diagnostics,
   hasVisibleModels,
   downloadListError,
+  onFinishRetainedImport,
 }: ModelLibraryStatusNoticeProps) {
   const visibleRows = describeVisibleRows(diagnostics, hasVisibleModels);
   const failures = [
@@ -59,20 +63,10 @@ export function ModelLibraryStatusNotice({
           {message}
         </div>
       ))}
-      {unavailableRecords.length > 0 && (
-        <div role="alert" className={FAILURE_CLASS}>
-          {unavailableRecords.length === 1
-            ? '1 library record could not be shown:'
-            : `${unavailableRecords.length} library records could not be shown:`}
-          <ul className="mt-1 list-disc pl-5">
-            {unavailableRecords.map((record, index) => (
-              <li key={`${index}:${record.model_id}`}>
-                {record.model_id}: {record.reason}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <UnavailableLibraryRecords
+        records={unavailableRecords}
+        onFinishRetainedImport={onFinishRetainedImport}
+      />
     </>
   );
 }

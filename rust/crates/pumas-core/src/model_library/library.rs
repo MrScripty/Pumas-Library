@@ -12,6 +12,8 @@ mod category_tests;
 mod migration;
 mod projection;
 mod publication_observation;
+mod retained_publication;
+pub use retained_publication::RetainedImportOutcome;
 #[cfg(test)]
 mod review_tests;
 
@@ -958,7 +960,7 @@ impl ModelLibrary {
             }
             if !crate::models::copied_import_ready_value(&record.metadata) {
                 if canonical.copied_import_ready() {
-                    mark_import_unavailable(metadata, model_dir, "import_publication_finalization_pending", "The copied publication has no acknowledged final index commit; no supported recovery API exists, so retain it for manual diagnosis");
+                    mark_import_unavailable(metadata, model_dir, "import_publication_finalization_pending", "The copied publication is Ready on disk, but its final index commit was never acknowledged; finish it with finish_retained_import, which re-verifies the confirmed receipt and rehashes the payload");
                 }
                 return Ok(());
             }
@@ -1081,7 +1083,7 @@ impl ModelLibrary {
             true
         };
         if !ready {
-            return Err(PumasError::Validation { field: "import_publication".into(), message: format!("Copied publication at {} has no verified, acknowledged Ready index. Edits and in-place retry cannot finalize it; retained terminal publications require manual diagnosis and have no supported recovery API", model_dir.display()) });
+            return Err(PumasError::Validation { field: "import_publication".into(), message: format!("Copied publication at {} has no verified, acknowledged Ready index. Edits and in-place retry cannot finalize it. If it is Ready on disk, finish_retained_import re-verifies and finishes it; otherwise retain it for manual diagnosis", model_dir.display()) });
         }
         Ok(())
     }
@@ -1335,12 +1337,26 @@ impl ModelLibrary {
         metadata: &ModelMetadata,
     ) -> Result<()> {
         let record = metadata_to_record(&expected.id, target.display_path(), metadata);
-        if self.index.finalize_import_if_unchanged(&record, expected)?
-            == crate::index::ProjectionCommit::Conflict
-        {
-            return Err(PumasError::Other("Import final index commit conflicted with a newer observation; payload and metadata retained, finalization not acknowledged".into()));
+        let mut expected = expected.clone();
+        // Another writer (a metadata refresh, a watcher) may re-project the
+        // Pending row while the import hashes its payload. A row that still
+        // holds this same Pending publication is no newer evidence about it:
+        // commit against the current row instead of stranding a verified
+        // publication Ready on disk and Pending in the index.
+        for _ in 0..3 {
+            if self
+                .index
+                .finalize_import_if_unchanged(&record, &expected)?
+                != crate::index::ProjectionCommit::Conflict
+            {
+                return Ok(());
+            }
+            match self.index.get(&expected.id)? {
+                Some(current) if same_pending_publication(&current, metadata) => expected = current,
+                _ => break,
+            }
         }
-        Ok(())
+        Err(PumasError::Other("Import final index commit conflicted with a newer observation; payload and metadata retained, finalization not acknowledged".into()))
     }
 
     /// Explicit owned same-root move: preserve the receipt's physical identity
@@ -6495,6 +6511,19 @@ fn record_duplicate_preference_score(record: &ModelRecord) -> i64 {
 
 /// Conversion outputs are recorded with `match_source` "conversion"; the
 /// index projection keeps that field, not `conversion_source` itself.
+/// The indexed row still holds `metadata`'s publication, unacknowledged.
+fn same_pending_publication(current: &ModelRecord, metadata: &ModelMetadata) -> bool {
+    let Some(identity) = metadata.import_publication.as_ref() else {
+        return false;
+    };
+    current
+        .metadata
+        .pointer("/import_publication/id")
+        .and_then(Value::as_str)
+        == Some(identity.id.as_str())
+        && !crate::models::copied_import_ready_value(&current.metadata)
+}
+
 fn record_is_conversion_output(record: &ModelRecord) -> bool {
     record.metadata.get("match_source").and_then(Value::as_str) == Some("conversion")
 }

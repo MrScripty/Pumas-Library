@@ -165,6 +165,7 @@ export const RPC_METHOD_REGISTRY = {
     'remove_orphaned_links',
     'get_links_for_model',
     'delete_model_with_cascade',
+    'finish_retained_import',
     'get_file_link_count',
     'check_files_writable',
     'set_model_link_exclusion',

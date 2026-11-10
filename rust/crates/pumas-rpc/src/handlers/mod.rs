@@ -903,6 +903,12 @@ async fn dispatch_admitted_command(
             .await
             .map(crate::contract::ModelDeclarationsOutcome::new)
             .map(RpcOutcome::ModelDeclarations),
+        RpcCommand::FinishRetainedImport { model_id } => state
+            .api
+            .finish_retained_import(&model_id)
+            .await
+            .map(crate::contract::FinishRetainedImportOutcome::new)
+            .map(RpcOutcome::FinishRetainedImport),
         RpcCommand::DeleteModelWithCascade { model_id } => {
             links::delete_model_with_cascade(state, &model_id)
                 .await

@@ -430,6 +430,9 @@ pub(crate) enum RpcCommand {
         model_id: String,
         repo_id: Option<String>,
     },
+    FinishRetainedImport {
+        model_id: String,
+    },
     GetFileLinkCount {
         file_path: String,
     },
@@ -643,6 +646,7 @@ impl RpcCommand {
             Self::GetLinksForModel { .. } => "get_links_for_model",
             Self::DeleteModelWithCascade { .. } => "delete_model_with_cascade",
             Self::ResolveModelDeclarations { .. } => "resolve_model_declarations",
+            Self::FinishRetainedImport { .. } => "finish_retained_import",
             Self::GetFileLinkCount { .. } => "get_file_link_count",
             Self::CheckFilesWritable { .. } => "check_files_writable",
             Self::SetModelLinkExclusion { .. } => "set_model_link_exclusion",
@@ -788,6 +792,7 @@ pub(crate) enum RpcOutcome {
     LinksForModel(Box<LinksForModelResponse>),
     DeleteModel(DeleteModelResponse),
     ModelDeclarations(ModelDeclarationsOutcome),
+    FinishRetainedImport(FinishRetainedImportOutcome),
     FileLinkCount(FileLinkCountOutcome),
     FilesWritable(Box<FilesWritableOutcome>),
     LinkExclusionMutation(BaseResponse),
@@ -917,6 +922,7 @@ impl RpcOutcome {
             Self::LinksForModel(value) => serde_json::to_value(value),
             Self::DeleteModel(value) => serde_json::to_value(value),
             Self::ModelDeclarations(value) => serde_json::to_value(value),
+            Self::FinishRetainedImport(value) => serde_json::to_value(value),
             Self::FileLinkCount(value) => serde_json::to_value(value),
             Self::FilesWritable(value) => serde_json::to_value(value),
             Self::LinkExclusionMutation(value) => serde_json::to_value(value),
@@ -1243,6 +1249,36 @@ pub(crate) struct FileWritableOutcome {
 impl FileWritableOutcome {
     pub(crate) fn new(path: String, writable: bool) -> Self {
         Self { path, writable }
+    }
+}
+
+/// `finish_retained_import`: whether the index now acknowledges the Ready
+/// publication, or already did.
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct FinishRetainedImportOutcome {
+    success: bool,
+    outcome: FinishedRetainedImport,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FinishedRetainedImport {
+    Acknowledged,
+    AlreadyReady,
+}
+
+impl FinishRetainedImportOutcome {
+    pub(crate) fn new(outcome: pumas_library::model_library::RetainedImportOutcome) -> Self {
+        use pumas_library::model_library::RetainedImportOutcome as Outcome;
+        Self {
+            success: true,
+            outcome: match outcome {
+                Outcome::Acknowledged => FinishedRetainedImport::Acknowledged,
+                Outcome::AlreadyReady => FinishedRetainedImport::AlreadyReady,
+            },
+        }
     }
 }
 
@@ -1853,13 +1889,57 @@ pub(crate) struct ModelsOutcome {
 pub(crate) struct UnavailableCatalogRecord {
     model_id: String,
     reason: String,
+    /// The library's own diagnosis code when it recorded one (for example
+    /// `import_publication_finalization_pending`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    /// The operation that can repair the record, when one exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery: Option<CatalogRecordRecovery>,
+}
+
+/// A supported repair for a record the catalog left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CatalogRecordRecovery {
+    /// `finish_retained_import`: Ready on disk, final index commit never
+    /// acknowledged.
+    FinishRetainedImport,
+}
+
+/// The copied-publication diagnosis the library recorded for a record, as
+/// `(code, message)`. Those gates are what leave a record unprojectable;
+/// other validation errors describe projectable models.
+fn recorded_diagnosis(metadata: &Value) -> Option<(String, String)> {
+    let error = metadata.get("validation_errors")?.as_array()?.first()?;
+    let code = error.get("code")?.as_str()?;
+    code.starts_with("import_publication").then(|| {
+        Some((
+            code.to_string(),
+            error.get("message")?.as_str()?.to_string(),
+        ))
+    })?
 }
 
 impl UnavailableCatalogRecord {
-    fn new(model_id: &str, error: &PumasError) -> Self {
+    /// The library's recorded diagnosis outranks the projection error it
+    /// causes: a retained publication is reported as such, not as the
+    /// missing projection field it leaves behind.
+    fn new(model_id: &str, diagnosis: Option<(String, String)>, error: &PumasError) -> Self {
+        let recovery = diagnosis
+            .as_ref()
+            .filter(|(code, _)| code == "import_publication_finalization_pending")
+            .map(|_| CatalogRecordRecovery::FinishRetainedImport);
+        let (code, reason) = match diagnosis {
+            Some((code, message)) => (Some(bounded_report_text(&code)), message),
+            None => (None, error.to_string()),
+        };
         Self {
             model_id: bounded_report_text(model_id),
-            reason: bounded_report_text(&error.to_string()),
+            reason: bounded_report_text(&reason),
+            code,
+            recovery,
         }
     }
 }
@@ -3899,6 +3979,7 @@ impl ModelsOutcome {
         let mut unavailable_records = Vec::new();
         for record in records {
             let model_id = record.id.clone();
+            let diagnosis = recorded_diagnosis(&record.metadata);
             let projected = issue_download_recovery_ticket(library_root, &record)
                 .and_then(|recovery| CatalogModel::from_record(record, recovery))
                 .and_then(|catalog_model| {
@@ -3926,7 +4007,8 @@ impl ModelsOutcome {
                         %error,
                         "Model catalog left out a record it could not project"
                     );
-                    unavailable_records.push(UnavailableCatalogRecord::new(&model_id, &error));
+                    unavailable_records
+                        .push(UnavailableCatalogRecord::new(&model_id, diagnosis, &error));
                 }
             }
         }
@@ -6874,6 +6956,10 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                     .transpose()?;
                 Ok(RpcCommand::ResolveModelDeclarations { model_id, repo_id })
             }),
+        "finish_retained_import" => parse_params::<ModelIdParams>(params).and_then(|params| {
+            validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
+                .map(|model_id| RpcCommand::FinishRetainedImport { model_id })
+        }),
         "delete_model_with_cascade" => parse_params::<ModelIdParams>(params).and_then(|params| {
             validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
                 .map(|model_id| RpcCommand::DeleteModelWithCascade { model_id })
@@ -9159,6 +9245,8 @@ mod tests {
             vec![UnavailableCatalogRecord {
                 model_id: "llm/acme/model".into(),
                 reason: "Invalid model catalog record llm/acme/model: the catalog contains this ID more than once".into(),
+                code: None,
+                recovery: None,
             }]
         );
 
@@ -9204,6 +9292,36 @@ mod tests {
             PumasError::Other(message)
                 if message == "Invalid model catalog record llm/acme/model: related availability is not boolean"
         ));
+    }
+
+    #[test]
+    fn a_retained_publication_is_reported_with_its_diagnosis_and_repair() {
+        let metadata = json!({
+            "dependency_bindings": null,
+            "download_incomplete": false,
+            "download_has_part_files": false,
+            "download_missing_expected_files": 0,
+            "download_progress": null,
+            "validation_errors": [{
+                "code": "import_publication_finalization_pending",
+                "message": "The copied publication is Ready on disk, but its final index commit was never acknowledged",
+                "path": "/models/audio/acme/retained"
+            }]
+        });
+        let outcome = ModelsOutcome::from_records(
+            vec![catalog_record("audio/acme/retained", metadata)],
+            Path::new("/models"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&outcome).unwrap()["unavailable_records"],
+            json!([{
+                "model_id": "audio/acme/retained",
+                "reason": "The copied publication is Ready on disk, but its final index commit was never acknowledged",
+                "code": "import_publication_finalization_pending",
+                "recovery": "finish_retained_import"
+            }])
+        );
     }
 
     #[test]

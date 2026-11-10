@@ -107,7 +107,7 @@ pub use library::{
     PackageFactsCacheMigrationDryRunItem, PackageFactsCacheMigrationDryRunReport,
     PackageFactsCacheMigrationExecutionItem, PackageFactsCacheMigrationExecutionReport,
     PackageFactsCacheMigrationPlannedWork, PackageFactsCacheMigrationValidationReport,
-    ReclassifyResult,
+    ReclassifyResult, RetainedImportOutcome,
 };
 pub use link_registry::LinkRegistry;
 pub use mapper::ModelMapper;

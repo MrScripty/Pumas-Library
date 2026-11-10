@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 8272c78372278637598bab63f379147d10371ff2b23fd010c11cd6827b730fe8. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 da92e417741415da3ba3adeed516b1037d0ca8ceb0d1a188b18a9d1dab9a3d54. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -13,6 +13,7 @@ export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgr
 export type CatalogIntegrityState = ({ "state": "clean" }) | ({ "count": number; "otherModelIds": ReadonlyArray<string>; "state": "duplicate" });
 export type CatalogModel = { "adapter": boolean; "artifact": CatalogArtifactState; "dependencyCount": number; "displayDate"?: string; "displayName": string; "format"?: string; "id": string; "inputModalities": ReadonlyArray<string>; "integrity": CatalogIntegrityState; "modelDir": string; "modelType": string; "outputModalities": ReadonlyArray<string>; "quantization"?: string; "relatedAvailable": boolean; "sizeBytes"?: number };
 export type CatalogPartialReason = "part_file_present" | "expected_files_missing";
+export type CatalogRecordRecovery = ("finish_retained_import");
 export type CatalogRecoveryIdentity = { "recoveryToken": string; "repoId": string; "selectedArtifactFiles"?: ReadonlyArray<string>; "selectedArtifactId"?: string; "selectedArtifactQuant"?: string };
 export type CatalogSearchOutcome = { "models": ReadonlyArray<CatalogModel>; "query": string; "query_time_ms": number; "success": true; "total_count": number; "unavailable_records": ReadonlyArray<UnavailableCatalogRecord> };
 export type CheckedVersionDependencies = { "installed": ReadonlyArray<string>; "missing": ReadonlyArray<string>; "requirementsFile": string | null };
@@ -54,6 +55,8 @@ export type DownloadStatusOutcome = (DownloadStatusFoundOutcome) | (DownloadStat
 export type EmbeddedMetadataResponse = { "file_type": string; "metadata": { readonly [key: string]: DesktopJsonValue } };
 export type FileGroup = { "filenames": ReadonlyArray<string>; "label": string; "shardCount": number };
 export type FindTorchAlternativesParams = { "build": string; "python": string; "tag": string };
+export type FinishedRetainedImport = "acknowledged" | "already_ready";
+export type FinishRetainedImportOutcome = { "outcome": FinishedRetainedImport; "success": true };
 export type GetBackendSetupParams = { "backend": QuantBackend };
 export type GetHfDownloadDetailsParams = ({ "quants"?: ReadonlyArray<string> | null; "repo_id": string }) | ({ "quants"?: ReadonlyArray<string> | null; "repoId": string });
 export type GetReleaseDependenciesOutcome = { "dependencies": ReadonlyArray<string>; "success": true };
@@ -249,7 +252,7 @@ export type TorchVerifiedPackage = { "name": string; "version": string };
 export type TorchVerifiedRuntime = { "adapters": ReadonlyArray<string>; "build": string; "packages": ReadonlyArray<TorchVerifiedPackage>; "python": string; "scope": string; "sourceCommit": string; "tag": string; "verifiedOn": string };
 export type TrialTorchRuntimeOutcome = { "capabilities": ReadonlyArray<string>; "cleanup": TorchTrialCleanup; "error": string | null; "generation": string | null; "healthStatus": TorchTrialHealthStatus; "profileId": string; "protocol": number | null; "startedByTrial": boolean; "startupStatus": TorchTrialStartupStatus; "success": boolean; "tag": string };
 export type TrialTorchRuntimeParams = ({ "profile_id": string; "tag": string }) | ({ "profileId": string; "tag": string });
-export type UnavailableCatalogRecord = { "model_id": string; "reason": string };
+export type UnavailableCatalogRecord = { "code"?: string | null; "model_id": string; "reason": string; "recovery"?: (CatalogRecordRecovery) | (null) };
 export type UpdateInferenceSettingsOutcome = { "model_id": string; "success": true };
 export type UpdateInferenceSettingsParams = ({ "model_id": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "modelId": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "modelId": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "modelId": string });
 export type UpdateModelNotesFailure = { "error": string; "model_id": string; "success": false };
@@ -286,6 +289,7 @@ export declare function decodeDownloadResolutionRequest(input: unknown): DecodeO
 export declare function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome>;
 export declare function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome>;
 export declare function decodeFindTorchAlternativesParams(input: unknown): DecodeOutcome<FindTorchAlternativesParams>;
+export declare function decodeFinishRetainedImportOutcome(input: unknown): DecodeOutcome<FinishRetainedImportOutcome>;
 export declare function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams>;
 export declare function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams>;
 export declare function decodeGetReleaseDependenciesOutcome(input: unknown): DecodeOutcome<GetReleaseDependenciesOutcome>;

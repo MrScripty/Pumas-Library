@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `get_models` and catalog search leave the record out and list it in
   `unavailable_records` with the model ID and the reason; the library view
   shows those records beside the models that loaded.
+- A copied import no longer gets stuck Ready on disk but Pending in the index
+  when a metadata refresh overlaps its hash pass. Imports already stuck that
+  way can be finished with `finish_retained_import`, or with "Verify and
+  finish import" in the library view, which first re-verifies the confirmed
+  receipt and rehashes the payload. `unavailable_records` now carries the
+  library's diagnosis `code` and a `recovery` when a repair exists
+  ([ADR 0008](docs/adr/0008-retained-copied-publications.md)).
 
 ## [0.8.0] - 2026-11-08
 

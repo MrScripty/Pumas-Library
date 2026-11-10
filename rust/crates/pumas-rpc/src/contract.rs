@@ -1842,6 +1842,40 @@ impl From<pumas_library::models::ModelLookupReport> for ModelLookupOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+    /// Records the catalog could not project, each with its reason. One bad
+    /// record never hides the rest of the library.
+    unavailable_records: Vec<UnavailableCatalogRecord>,
+}
+
+/// A library record left out of a catalog projection, and why.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct UnavailableCatalogRecord {
+    model_id: String,
+    reason: String,
+}
+
+impl UnavailableCatalogRecord {
+    fn new(model_id: &str, error: &PumasError) -> Self {
+        Self {
+            model_id: bounded_report_text(model_id),
+            reason: bounded_report_text(&error.to_string()),
+        }
+    }
+}
+
+/// Report text that fits the catalog's identifier bound, cut on a character
+/// boundary.
+fn bounded_report_text(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= MAX_IDENTIFIER_BYTES {
+        return trimmed.to_string();
+    }
+    let mut end = MAX_IDENTIFIER_BYTES;
+    while !trimmed.is_char_boundary(end) {
+        end -= 1;
+    }
+    trimmed[..end].to_string()
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -3854,30 +3888,52 @@ fn invalid_catalog_record(model_id: &str, reason: &str) -> PumasError {
 }
 
 impl ModelsOutcome {
+    /// Project every valid record. A record that cannot be projected, or that
+    /// repeats an earlier record's ID, is left out and reported with its
+    /// reason, so one bad record never hides the rest of the library.
     pub(crate) fn from_records(
         records: Vec<ModelRecord>,
         library_root: &Path,
     ) -> Result<Self, PumasError> {
         let mut models = BTreeMap::new();
+        let mut unavailable_records = Vec::new();
         for record in records {
             let model_id = record.id.clone();
-            let recovery = issue_download_recovery_ticket(library_root, &record)?;
-            let catalog_model = CatalogModel::from_record(record, recovery)?;
-            if catalog_model.id != model_id {
-                return Err(invalid_catalog_record(
-                    &model_id,
-                    "map key does not match record id",
-                ));
-            }
-            if models.insert(model_id.clone(), catalog_model).is_some() {
-                return Err(PumasError::Other(format!(
-                    "Model catalog contains duplicate ID: {model_id}"
-                )));
+            let projected = issue_download_recovery_ticket(library_root, &record)
+                .and_then(|recovery| CatalogModel::from_record(record, recovery))
+                .and_then(|catalog_model| {
+                    if catalog_model.id != model_id {
+                        return Err(invalid_catalog_record(
+                            &model_id,
+                            "map key does not match record id",
+                        ));
+                    }
+                    if models.contains_key(&model_id) {
+                        return Err(invalid_catalog_record(
+                            &model_id,
+                            "the catalog contains this ID more than once",
+                        ));
+                    }
+                    Ok(catalog_model)
+                });
+            match projected {
+                Ok(catalog_model) => {
+                    models.insert(model_id, catalog_model);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        model_id = %model_id,
+                        %error,
+                        "Model catalog left out a record it could not project"
+                    );
+                    unavailable_records.push(UnavailableCatalogRecord::new(&model_id, &error));
+                }
             }
         }
         Ok(Self {
             success: true,
             models,
+            unavailable_records,
         })
     }
 }
@@ -3897,6 +3953,8 @@ pub(crate) struct CatalogSearchOutcome {
     total_count: u64,
     query_time_ms: f64,
     query: String,
+    /// Matching records the catalog could not project, each with its reason.
+    unavailable_records: Vec<UnavailableCatalogRecord>,
 }
 
 impl CatalogSearchOutcome {
@@ -3918,21 +3976,31 @@ impl CatalogSearchOutcome {
             .iter()
             .map(|record| record.id.clone())
             .collect::<Vec<_>>();
-        let mut projected = ModelsOutcome::from_records(search.models, root)?.models;
-        let models = order
-            .into_iter()
-            .map(|id| {
-                projected
-                    .remove(&id)
-                    .ok_or_else(|| invalid_domain_outcome("catalog search identity"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let ModelsOutcome {
+            models: mut projected,
+            unavailable_records,
+            ..
+        } = ModelsOutcome::from_records(search.models, root)?;
+        let reported = |id: &str| {
+            unavailable_records
+                .iter()
+                .any(|record| record.model_id == id)
+        };
+        let mut models = Vec::with_capacity(order.len());
+        for id in order {
+            match projected.remove(&id) {
+                Some(model) => models.push(model),
+                None if reported(&id) => {}
+                None => return Err(invalid_domain_outcome("catalog search identity")),
+            }
+        }
         Ok(Self {
             success: true,
             models,
             total_count,
             query_time_ms: search.query_time_ms,
             query: search.query,
+            unavailable_records,
         })
     }
 }
@@ -7745,8 +7813,17 @@ mod tests {
         }
     }
 
+    /// The projection, failing on the first record it left out, so record
+    /// validation tests see each rejection's reason.
+    fn strict(outcome: ModelsOutcome) -> Result<ModelsOutcome, PumasError> {
+        match outcome.unavailable_records.first() {
+            Some(record) => Err(PumasError::Other(record.reason.clone())),
+            None => Ok(outcome),
+        }
+    }
+
     fn models_outcome(records: Vec<ModelRecord>) -> Result<ModelsOutcome, PumasError> {
-        ModelsOutcome::from_records(records, Path::new("/models"))
+        ModelsOutcome::from_records(records, Path::new("/models")).and_then(strict)
     }
 
     fn managed_models_outcome(mut records: Vec<ModelRecord>) -> Result<ModelsOutcome, PumasError> {
@@ -7758,7 +7835,7 @@ mod tests {
                 record.path = model_dir.canonicalize().unwrap().display().to_string();
             }
         }
-        ModelsOutcome::from_records(records, temp.path())
+        ModelsOutcome::from_records(records, temp.path()).and_then(strict)
     }
 
     fn admission_error(body: &[u8]) -> RpcAdmissionError {
@@ -9070,10 +9147,20 @@ mod tests {
                             "otherModelIds": ["llm/acme/model-copy"]
                         }
                     }
-                }
+                },
+                "unavailable_records": []
             })
         );
-        assert!(ModelsOutcome::from_records(vec![model.clone(), model], temp.path()).is_err());
+        let repeated =
+            ModelsOutcome::from_records(vec![model.clone(), model], temp.path()).unwrap();
+        assert_eq!(repeated.models.len(), 1);
+        assert_eq!(
+            repeated.unavailable_records,
+            vec![UnavailableCatalogRecord {
+                model_id: "llm/acme/model".into(),
+                reason: "Invalid model catalog record llm/acme/model: the catalog contains this ID more than once".into(),
+            }]
+        );
 
         let refreshed = RpcOutcome::ModelIndexRefresh(ModelIndexRefreshOutcome::new(48))
             .into_value()
@@ -9117,6 +9204,67 @@ mod tests {
             PumasError::Other(message)
                 if message == "Invalid model catalog record llm/acme/model: related availability is not boolean"
         ));
+    }
+
+    #[test]
+    fn one_malformed_record_is_reported_without_hiding_the_rest_of_the_catalog() {
+        let valid_metadata = json!({
+            "dependency_bindings": [],
+            "download_incomplete": false,
+            "download_has_part_files": false,
+            "download_missing_expected_files": 0,
+            "download_progress": null
+        });
+        let mut malformed = valid_metadata.clone();
+        malformed["dependency_bindings"] = Value::Null;
+        let records = vec![
+            catalog_record("llm/acme/first", valid_metadata.clone()),
+            catalog_record("audio/acme/malformed", malformed),
+            catalog_record("llm/acme/second", valid_metadata),
+        ];
+        let outcome = ModelsOutcome::from_records(records.clone(), Path::new("/models")).unwrap();
+        let value = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(
+            value["models"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            ["llm/acme/first", "llm/acme/second"]
+        );
+        assert_eq!(
+            value["unavailable_records"],
+            json!([{
+                "model_id": "audio/acme/malformed",
+                "reason": "Invalid model catalog record audio/acme/malformed: dependency_bindings is missing or not an array"
+            }])
+        );
+
+        let search = CatalogSearchOutcome::from_search(
+            pumas_library::index::SearchResult {
+                total_count: records.len(),
+                models: records,
+                query_time_ms: 0.5,
+                query: "acme".into(),
+            },
+            Path::new("/models"),
+        )
+        .unwrap();
+        let value = serde_json::to_value(search).unwrap();
+        assert_eq!(
+            value["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|model| model["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["llm/acme/first", "llm/acme/second"]
+        );
+        assert_eq!(
+            value["unavailable_records"][0]["model_id"],
+            "audio/acme/malformed"
+        );
+        assert_eq!(value["total_count"], 3);
     }
 
     #[test]
@@ -9229,7 +9377,7 @@ mod tests {
         for record in invalid_records {
             assert!(
                 managed_models_outcome(vec![record]).is_err(),
-                "invalid catalog record must fail the whole outcome"
+                "invalid catalog record must be left out with its reason"
             );
         }
     }

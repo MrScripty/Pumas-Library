@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 154717c9d618e9c0e9f680020395d503ebd2fd6674db73cc61ec2dbebe093fd4. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 8272c78372278637598bab63f379147d10371ff2b23fd010c11cd6827b730fe8. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -14,7 +14,7 @@ export type CatalogIntegrityState = ({ "state": "clean" }) | ({ "count": number;
 export type CatalogModel = { "adapter": boolean; "artifact": CatalogArtifactState; "dependencyCount": number; "displayDate"?: string; "displayName": string; "format"?: string; "id": string; "inputModalities": ReadonlyArray<string>; "integrity": CatalogIntegrityState; "modelDir": string; "modelType": string; "outputModalities": ReadonlyArray<string>; "quantization"?: string; "relatedAvailable": boolean; "sizeBytes"?: number };
 export type CatalogPartialReason = "part_file_present" | "expected_files_missing";
 export type CatalogRecoveryIdentity = { "recoveryToken": string; "repoId": string; "selectedArtifactFiles"?: ReadonlyArray<string>; "selectedArtifactId"?: string; "selectedArtifactQuant"?: string };
-export type CatalogSearchOutcome = { "models": ReadonlyArray<CatalogModel>; "query": string; "query_time_ms": number; "success": true; "total_count": number };
+export type CatalogSearchOutcome = { "models": ReadonlyArray<CatalogModel>; "query": string; "query_time_ms": number; "success": true; "total_count": number; "unavailable_records": ReadonlyArray<UnavailableCatalogRecord> };
 export type CheckedVersionDependencies = { "installed": ReadonlyArray<string>; "missing": ReadonlyArray<string>; "requirementsFile": string | null };
 export type CheckVersionDependenciesOutcome = { "dependencies": CheckedVersionDependencies; "success": true };
 export type CheckVersionDependenciesParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
@@ -116,7 +116,7 @@ export type ModelRuntimeRoute = { "auto_load": boolean; "model_id": string; "pro
 export type ModelServeError = { "code": ModelServeErrorCode; "message": string; "model_id"?: string | null; "profile_id"?: string | null; "provider"?: (RuntimeProviderId) | (null); "severity": ModelServeErrorSeverity };
 export type ModelServeErrorCode = "invalid_request" | "model_not_found" | "model_not_executable" | "profile_not_found" | "profile_stopped" | "unsupported_provider" | "unsupported_placement" | "device_unavailable" | "insufficient_memory" | "provider_load_failed" | "missing_runtime" | "invalid_format" | "endpoint_unavailable" | "duplicate_model_alias" | "ambiguous_model_routing" | "unknown";
 export type ModelServeErrorSeverity = "non_critical" | "critical";
-export type ModelsOutcome = { "models": { readonly [key: string]: CatalogModel }; "success": true };
+export type ModelsOutcome = { "models": { readonly [key: string]: CatalogModel }; "success": true; "unavailable_records": ReadonlyArray<UnavailableCatalogRecord> };
 export type NetworkStatusResponse = { "circuit_breaker_rejections": number; "circuit_states": { readonly [key: string]: string }; "error"?: string | null; "failed_requests": number; "is_offline": boolean; "retries": number; "success": boolean; "success_rate": number; "successful_requests": number; "total_requests": number };
 export type ParamConstraints = { "allowed_values": (null) | (ReadonlyArray<DesktopJsonValue>); "max": number | null; "min": number | null };
 export type ParamType = "Number" | "Integer" | "String" | "Boolean";
@@ -249,6 +249,7 @@ export type TorchVerifiedPackage = { "name": string; "version": string };
 export type TorchVerifiedRuntime = { "adapters": ReadonlyArray<string>; "build": string; "packages": ReadonlyArray<TorchVerifiedPackage>; "python": string; "scope": string; "sourceCommit": string; "tag": string; "verifiedOn": string };
 export type TrialTorchRuntimeOutcome = { "capabilities": ReadonlyArray<string>; "cleanup": TorchTrialCleanup; "error": string | null; "generation": string | null; "healthStatus": TorchTrialHealthStatus; "profileId": string; "protocol": number | null; "startedByTrial": boolean; "startupStatus": TorchTrialStartupStatus; "success": boolean; "tag": string };
 export type TrialTorchRuntimeParams = ({ "profile_id": string; "tag": string }) | ({ "profileId": string; "tag": string });
+export type UnavailableCatalogRecord = { "model_id": string; "reason": string };
 export type UpdateInferenceSettingsOutcome = { "model_id": string; "success": true };
 export type UpdateInferenceSettingsParams = ({ "model_id": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "modelId": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "modelId": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "modelId": string });
 export type UpdateModelNotesFailure = { "error": string; "model_id": string; "success": false };

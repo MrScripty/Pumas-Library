@@ -40,6 +40,7 @@ export function ModelLibraryStatusNotice({
     diagnostics?.searchError ? `Library search failed: ${diagnostics.searchError}` : null,
     downloadListError ? `Download list unavailable: ${downloadListError}` : null,
   ].filter((message): message is string => message !== null);
+  const unavailableRecords = diagnostics?.unavailableRecords ?? [];
 
   return (
     <>
@@ -58,6 +59,20 @@ export function ModelLibraryStatusNotice({
           {message}
         </div>
       ))}
+      {unavailableRecords.length > 0 && (
+        <div role="alert" className={FAILURE_CLASS}>
+          {unavailableRecords.length === 1
+            ? '1 library record could not be shown:'
+            : `${unavailableRecords.length} library records could not be shown:`}
+          <ul className="mt-1 list-disc pl-5">
+            {unavailableRecords.map((record, index) => (
+              <li key={`${index}:${record.model_id}`}>
+                {record.model_id}: {record.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </>
   );
 }

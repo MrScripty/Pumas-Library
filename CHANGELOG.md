@@ -26,9 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (for example Prism-Qwen3.5-Reranker, bge-reranker-v2-m3, harrier) through
   `text_embedding`, `rerank`, `/v1/embeddings` and `/v1/rerank`, computing what
   the model's recorded declarations say even when the package lacks its
-  sentence-transformers files. Runtimes advertise the capabilities when
-  Transformers and Jinja are installed; reinstall or repair a Torch runtime to
-  add the routes.
+  sentence-transformers files. A runtime advertises them when Transformers
+  and Jinja are installed. Each Torch install carries its own copy of the
+  sidecar, so a runtime installed before this release needs a new Torch
+  install to gain the routes.
 - Cross-encoder rerankers published as text classifiers (for example
   bge-reranker-v2-m3) are recorded as rerankers: a GGUF ranking head without
   a decision head, or a `*ForSequenceClassification` config with one label,
@@ -60,6 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Torch runtime installs no longer fail on a slow connection because a stage
   ran longer than an hour. A stage now fails only after 30 minutes with no
   new downloaded bytes and no install-log output, and the error says so.
+- A failed Torch install no longer makes the next start refuse the library
+  ("instance is already running" with a dead pid). The failure was reported a
+  second time at shutdown, which left the instance registered. Leftovers from
+  a failed Torch install are durably marked and cleaned at the next start.
+- On Linux, file identities recorded for downloads and copied imports name
+  the filesystem by its UUID instead of its device number, which the kernel
+  can reassign at boot (an NVMe partition moved from 259:6 to 259:8).
+  Identities recorded before this change are translated when read, so records
+  from the current boot keep matching.
 
 ## [0.8.0] - 2026-11-08
 

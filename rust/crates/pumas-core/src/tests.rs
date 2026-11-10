@@ -393,6 +393,7 @@ async fn acquisition_integration_startup_retains_separate_pending_custody() {
         created_at: chrono::Utc::now().to_rfc3339(),
         known_sha256,
         huggingface_evidence: None,
+        error: None,
     };
     let mut client = HuggingFaceClient::new(temp.path().join("fixture-cache")).unwrap();
     client

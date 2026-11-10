@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   receipt and rehashes the payload. `unavailable_records` now carries the
   library's diagnosis `code` and a `recovery` when a repair exists
   ([ADR 0008](docs/adr/0008-retained-copied-publications.md)).
+- A failed download keeps its failure reason across restarts. Downloads that
+  failed before this change say so, instead of showing no reason.
 
 ## [0.8.0] - 2026-11-08
 

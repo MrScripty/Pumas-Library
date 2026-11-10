@@ -11,6 +11,7 @@ pub struct OnnxModelConfig {
     config_path: PathBuf,
     embedding_dimensions: usize,
     input_token_limit: Option<OnnxInputTokenLimit>,
+    pad_token_id: i64,
 }
 
 /// The longest tokenized input a model accepts, as its config declares it.
@@ -39,11 +40,21 @@ impl OnnxModelConfig {
         })?;
         let embedding_dimensions = parse_embedding_dimensions(&config)?;
         let input_token_limit = parse_input_token_limit(&config)?;
+        let pad_token_id = match config.get("pad_token_id") {
+            None | Some(Value::Null) => 0,
+            Some(value) => value
+                .as_u64()
+                .and_then(|id| i64::try_from(id).ok())
+                .ok_or_else(|| {
+                    OnnxRuntimeError::validation("config", "config.json pad_token_id is invalid")
+                })?,
+        };
 
         Ok(Self {
             config_path,
             embedding_dimensions,
             input_token_limit,
+            pad_token_id,
         })
     }
 
@@ -53,6 +64,11 @@ impl OnnxModelConfig {
 
     pub fn embedding_dimensions(&self) -> usize {
         self.embedding_dimensions
+    }
+
+    /// The token id padding positions carry (masked out); 0 when undeclared.
+    pub fn pad_token_id(&self) -> i64 {
+        self.pad_token_id
     }
 
     /// The per-input token limit derived from the model's positional table

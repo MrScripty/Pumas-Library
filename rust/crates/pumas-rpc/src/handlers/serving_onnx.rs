@@ -360,11 +360,18 @@ async fn validate_onnx_serve_request<'a>(
     };
     let library_root = state.api.model_library().library_root().to_path_buf();
     let provider_model_id = onnx_provider_request_model_id(request, &state.provider_registry);
+    let task = match onnx_session_task(state, &request.model_id).await? {
+        Ok(task) => task,
+        Err(error) => return Ok(Err(OnnxServeBoundaryError::InvalidLoadRequest(error))),
+    };
     let load_request = match OnnxLoadRequest::parse(
         library_root,
         &onnx_path,
         provider_model_id.as_str(),
-        OnnxLoadOptions::default(),
+        OnnxLoadOptions {
+            task,
+            ..OnnxLoadOptions::default()
+        },
     ) {
         Ok(load_request) => load_request,
         Err(error) => return Ok(Err(OnnxServeBoundaryError::InvalidLoadRequest(error))),
@@ -374,6 +381,34 @@ async fn validate_onnx_serve_request<'a>(
         load_request,
         gateway_alias: effective_gateway_alias_from_config(request),
     }))
+}
+
+/// The session task the model's record calls for: its type and recorded
+/// sentence-transformers declarations.
+async fn onnx_session_task(
+    state: &AppState,
+    model_id: &str,
+) -> pumas_library::Result<Result<pumas_library::onnx_runtime::OnnxSessionTask, OnnxRuntimeError>> {
+    let Some(record) = state.api.model_library().get_model(model_id).await? else {
+        return Ok(Ok(Default::default()));
+    };
+    let declarations = match record.metadata.get("sentence_transformers") {
+        None | Some(Value::Null) => None,
+        Some(value) => match serde_json::from_value(value.clone()) {
+            Ok(declared) => Some(declared),
+            Err(_) => {
+                return Ok(Err(OnnxRuntimeError::validation(
+                    "model",
+                    "the model's recorded sentence-transformers declarations are unreadable; \
+                     resolve them again",
+                )))
+            }
+        },
+    };
+    Ok(pumas_library::onnx_runtime::OnnxSessionTask::for_model(
+        &record.model_type,
+        declarations.as_ref(),
+    ))
 }
 
 fn validate_onnx_unserve_request(

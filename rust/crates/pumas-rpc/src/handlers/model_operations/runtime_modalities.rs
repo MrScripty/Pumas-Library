@@ -68,7 +68,10 @@ pub(super) async fn observe(
     let model_type = hints.model_type;
     match served.provider {
         RuntimeProviderId::LlamaCpp => llama_cpp(state, served, hints).await,
-        RuntimeProviderId::OnnxRuntime => fixed([Modality::Text], [Modality::Vector]),
+        RuntimeProviderId::OnnxRuntime => fixed(
+            [Modality::Text],
+            [pooled_output(model_type, Modality::Vector)],
+        ),
         RuntimeProviderId::Torch if model_type == Some("audio") => {
             fixed([Modality::Audio], [Modality::Text])
         }

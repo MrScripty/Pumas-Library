@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use super::{
     FakeOnnxEmbeddingBackend, OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxEmbeddingResponse,
-    OnnxLoadRequest, OnnxModelId, OnnxOperationLease, OnnxRuntimeError, OnnxRuntimeSession,
-    OnnxSessionStatus,
+    OnnxLoadRequest, OnnxModelId, OnnxOperationLease, OnnxRerankRequest, OnnxRerankResponse,
+    OnnxRuntimeError, OnnxRuntimeSession, OnnxSessionStatus,
 };
 
 #[derive(Debug)]
@@ -96,6 +96,18 @@ impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
             Self::Real(backend) => backend.embed_leased(request, admission, lease).await,
         }
     }
+
+    async fn rerank_leased(
+        &self,
+        request: OnnxRerankRequest,
+        admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        match self {
+            Self::Fake(backend) => backend.rerank_leased(request, admission, lease).await,
+            Self::Real(backend) => backend.rerank_leased(request, admission, lease).await,
+        }
+    }
 }
 
 /// ONNX Runtime sessions keyed by model id.
@@ -165,6 +177,29 @@ impl RealOnnxEmbeddingBackend {
                 .lock()
                 .map_err(|_| OnnxRuntimeError::backend("ONNX session lock poisoned"))?
                 .embed(request)
+        })
+        .await
+    }
+
+    async fn rerank_holding(
+        &self,
+        request: OnnxRerankRequest,
+        admission: Option<&AtomicBool>,
+        lease: Option<OnnxOperationLease>,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        let session = self
+            .sessions()?
+            .get(&request.model_id)
+            .map(|loaded| loaded.session.clone())
+            .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?;
+        if let Some(marker) = admission {
+            marker.store(true, Ordering::Release);
+        }
+        run_blocking(lease, move || {
+            session
+                .lock()
+                .map_err(|_| OnnxRuntimeError::backend("ONNX session lock poisoned"))?
+                .rerank(request)
         })
         .await
     }
@@ -254,6 +289,15 @@ impl OnnxEmbeddingBackend for RealOnnxEmbeddingBackend {
         lease: OnnxOperationLease,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
         self.embed_holding(request, admission, Some(lease)).await
+    }
+
+    async fn rerank_leased(
+        &self,
+        request: OnnxRerankRequest,
+        admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        self.rerank_holding(request, admission, Some(lease)).await
     }
 }
 

@@ -514,6 +514,122 @@ async fn openai_proxy_routes_onnx_embeddings_in_process() {
     );
 }
 
+async fn load_onnx_cross_encoder(temp_dir: &TempDir, state: &AppState) {
+    let model_root = temp_dir.path().join("onnx-cross-encoder");
+    std::fs::create_dir_all(&model_root).unwrap();
+    std::fs::write(model_root.join("model.onnx"), b"fake").unwrap();
+    let request = OnnxLoadRequest::parse(
+        &model_root,
+        "model.onnx",
+        "embeddings/nomic",
+        OnnxLoadOptions {
+            task: pumas_library::OnnxSessionTask::Rerank,
+            ..OnnxLoadOptions::cpu(4).unwrap()
+        },
+    )
+    .unwrap();
+    state.onnx_session_manager.load(request).await.unwrap();
+}
+
+#[tokio::test]
+async fn openai_proxy_reranks_with_an_onnx_cross_encoder_most_relevant_first() {
+    let (temp_dir, state) = gateway_test_state().await;
+    load_onnx_cross_encoder(&temp_dir, &state).await;
+    record_onnx_served_model(&state).await;
+
+    let (status, body) = openai_proxy_json(
+        state.clone(),
+        "/v1/rerank",
+        json!({
+            "model": "nomic",
+            "query": "red apple pie",
+            "documents": ["green pear", "red apple pie recipe", "an apple"],
+            "top_n": 2
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body.get("model").and_then(Value::as_str), Some("nomic"));
+    let indexes: Vec<u64> = body["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|result| result["index"].as_u64().unwrap())
+        .collect();
+    assert_eq!(indexes, [1, 2]);
+    assert!(body
+        .pointer("/usage/prompt_tokens")
+        .and_then(Value::as_u64)
+        .is_some());
+
+    // The session computes rerank scores only; an embedding request is refused
+    // with the reason.
+    let (status, body) = openai_proxy_json(
+        state.clone(),
+        "/v1/embeddings",
+        json!({"model": "nomic", "input": "hello"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("cross-encoder")
+                || message.contains("not embeddings")
+                || message.contains("not rerank")),
+        "{body}"
+    );
+
+    for (invalid, reason) in [
+        (
+            json!({"model": "nomic", "query": "q", "documents": [{"text": "x"}]}),
+            "must be a string",
+        ),
+        (
+            json!({"model": "nomic", "query": "q", "documents": ["x"], "top_n": 0}),
+            "positive integer",
+        ),
+        (
+            json!({"model": "nomic", "query": "q", "documents": ["x"], "return_documents": true}),
+            "not supported",
+        ),
+        (
+            json!({"model": "nomic", "query": " ", "documents": ["x"]}),
+            "nonblank",
+        ),
+    ] {
+        let (status, body) = openai_proxy_json(state.clone(), "/v1/rerank", invalid).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body.pointer("/error/message")
+                .and_then(Value::as_str)
+                .is_some_and(|message| message.contains(reason)),
+            "{reason}: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn openai_proxy_refuses_rerank_on_an_onnx_embedding_session_with_the_reason() {
+    let (temp_dir, state) = gateway_test_state().await;
+    load_onnx_session(&temp_dir, &state).await;
+    record_onnx_served_model(&state).await;
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/rerank",
+        json!({"model": "nomic", "query": "q", "documents": ["x"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("embeddings, not rerank scores")),
+        "{body}"
+    );
+}
+
 #[tokio::test]
 async fn openai_proxy_smokes_real_onnx_embedding_fixture() {
     let Some(load_request) = optional_real_fixture_load_request("embeddings/nomic") else {

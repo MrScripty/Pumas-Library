@@ -4,12 +4,18 @@ pub(super) struct TokenTensors {
     pub input_ids: Vec<i64>,
     pub attention_mask: Vec<i64>,
     pub token_type_ids: Vec<i64>,
+    /// Positions 0..n of each input's tokens, 0 for padding.
+    pub position_ids: Vec<i64>,
     pub batch_size: usize,
     pub sequence_len: usize,
 }
 
 impl TokenTensors {
-    pub fn from_tokenized_batch(tokenized: &OnnxTokenizedBatch) -> Result<Self, OnnxRuntimeError> {
+    /// Right-pad every input to the longest one with `pad_id` (masked out).
+    pub fn from_tokenized_batch(
+        tokenized: &OnnxTokenizedBatch,
+        pad_id: i64,
+    ) -> Result<Self, OnnxRuntimeError> {
         let batch_size = tokenized.inputs.len();
         if batch_size == 0 {
             return Err(OnnxRuntimeError::validation(
@@ -29,10 +35,12 @@ impl TokenTensors {
         let mut input_ids = Vec::with_capacity(value_count);
         let mut attention_mask = Vec::with_capacity(value_count);
         let mut token_type_ids = Vec::with_capacity(value_count);
+        let mut position_ids = Vec::with_capacity(value_count);
 
         for input in &tokenized.inputs {
             if input.input_ids.len() != input.token_count
                 || input.attention_mask.len() != input.token_count
+                || input.type_ids.len() != input.token_count
             {
                 return Err(OnnxRuntimeError::backend(
                     "ONNX tokenized input length mismatch",
@@ -40,19 +48,24 @@ impl TokenTensors {
             }
             input_ids.extend_from_slice(&input.input_ids);
             attention_mask.extend_from_slice(&input.attention_mask);
-            token_type_ids.extend(std::iter::repeat_n(0, input.token_count));
+            token_type_ids.extend_from_slice(&input.type_ids);
+            let positions = i64::try_from(input.token_count)
+                .map_err(|_| OnnxRuntimeError::backend("ONNX input position overflow"))?;
+            position_ids.extend(0..positions);
             let padding = sequence_len.checked_sub(input.token_count).ok_or_else(|| {
                 OnnxRuntimeError::backend("ONNX tokenized input padding underflow")
             })?;
-            input_ids.extend(std::iter::repeat_n(0, padding));
+            input_ids.extend(std::iter::repeat_n(pad_id, padding));
             attention_mask.extend(std::iter::repeat_n(0, padding));
             token_type_ids.extend(std::iter::repeat_n(0, padding));
+            position_ids.extend(std::iter::repeat_n(0, padding));
         }
 
         Ok(Self {
             input_ids,
             attention_mask,
             token_type_ids,
+            position_ids,
             batch_size,
             sequence_len,
         })

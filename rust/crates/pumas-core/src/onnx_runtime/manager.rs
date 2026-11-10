@@ -13,8 +13,8 @@ use tokio::{
 };
 
 use super::{
-    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    OnnxSessionStatus,
+    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest, OnnxModelId, OnnxRerankRequest,
+    OnnxRerankResponse, OnnxRuntimeError, OnnxSessionStatus,
 };
 
 /// One admitted operation's share of [`OnnxSessionManager`]'s concurrency limit.
@@ -85,6 +85,25 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
         let result = self.embed_with_admission(request, admission).await;
         drop(lease);
         result
+    }
+
+    /// Score rerank pairs on a cross-encoder session while `lease` is held for
+    /// as long as the work may run. Backends without cross-encoder support
+    /// refuse with the reason.
+    async fn rerank_leased(
+        &self,
+        request: OnnxRerankRequest,
+        _admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        drop(lease);
+        Err(OnnxRuntimeError::validation(
+            "model",
+            format!(
+                "this ONNX backend cannot rerank with {}",
+                request.model_id.as_str()
+            ),
+        ))
     }
 }
 
@@ -158,6 +177,16 @@ where
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
         let lease = OnnxOperationLease::new(self.operation_permit().await?);
         self.backend.embed_leased(request, admission, lease).await
+    }
+
+    /// Score rerank pairs; waiting for capacity is not admission.
+    pub async fn rerank_with_admission(
+        &self,
+        request: OnnxRerankRequest,
+        admission: Option<&AtomicBool>,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        let lease = OnnxOperationLease::new(self.operation_permit().await?);
+        self.backend.rerank_leased(request, admission, lease).await
     }
 
     /// Controlled test custody of the real operation queue; never inference evidence.

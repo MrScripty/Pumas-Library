@@ -26,6 +26,7 @@ mod tokenizer;
 pub use config::{OnnxInputTokenLimit, OnnxModelConfig};
 pub use fake::FakeOnnxEmbeddingBackend;
 pub use manager::{OnnxEmbeddingBackend, OnnxOperationLease, OnnxSessionManager};
+pub use output::LOGITS_OUTPUT;
 pub use postprocess::{
     OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
     OnnxOutputTensorSelection,
@@ -172,6 +173,80 @@ pub struct OnnxLoadOptions {
     pub execution_provider: OnnxExecutionProvider,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding_dimensions: Option<usize>,
+    /// What the session computes; embeddings unless the model is a
+    /// cross-encoder.
+    #[serde(default)]
+    pub task: OnnxSessionTask,
+}
+
+/// What an ONNX session computes from its graph's output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OnnxSessionTask {
+    /// Pooled token vectors. Without a declared pooling, mean pooling and
+    /// L2 normalization apply.
+    Embedding {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pooling: Option<OnnxEmbeddingPooling>,
+        normalize: bool,
+    },
+    /// One relevance logit per `(query, document)` pair (cross-encoder).
+    Rerank,
+}
+
+impl OnnxSessionTask {
+    /// The task a library model's ONNX graph serves: a cross-encoder for
+    /// rerankers, otherwise embeddings pooled and normalized as the model's
+    /// sentence-transformers declarations say (ADR 0007).
+    pub fn for_model(
+        model_type: &str,
+        declarations: Option<&crate::model_library::declarations::SentenceTransformersDeclarations>,
+    ) -> Result<Self, OnnxRuntimeError> {
+        use crate::model_library::declarations::{Pooling, SentenceTransformersKind};
+        let cross_encoder = model_type == "reranker"
+            || declarations.is_some_and(|declared| {
+                declared.model_kind == SentenceTransformersKind::CrossEncoder
+            });
+        if cross_encoder {
+            if declarations.is_some_and(|declared| declared.logit_score.is_some()) {
+                return Err(OnnxRuntimeError::validation(
+                    "model",
+                    "this reranker scores from language-model logits (LogitScore); its ONNX graph \
+                     has no relevance output, so serve it through llama.cpp or Torch",
+                ));
+            }
+            return Ok(Self::Rerank);
+        }
+        let Some(declared) = declarations else {
+            return Ok(Self::default());
+        };
+        let pooling = match declared.pooling {
+            None => None,
+            Some(Pooling::Mean) => Some(OnnxEmbeddingPooling::Mean),
+            Some(Pooling::Cls) => Some(OnnxEmbeddingPooling::Cls),
+            Some(Pooling::LastToken) => Some(OnnxEmbeddingPooling::LastToken),
+            Some(Pooling::Max) => Some(OnnxEmbeddingPooling::Max),
+            Some(other) => {
+                return Err(OnnxRuntimeError::validation(
+                    "model",
+                    format!("the model declares {other:?} pooling, which the ONNX adapter does not implement"),
+                ))
+            }
+        };
+        Ok(Self::Embedding {
+            pooling: pooling.or(Some(OnnxEmbeddingPooling::Mean)),
+            normalize: declared.normalize,
+        })
+    }
+}
+
+impl Default for OnnxSessionTask {
+    fn default() -> Self {
+        Self::Embedding {
+            pooling: None,
+            normalize: true,
+        }
+    }
 }
 
 impl OnnxLoadOptions {
@@ -180,6 +255,7 @@ impl OnnxLoadOptions {
         Ok(Self {
             execution_provider: OnnxExecutionProvider::Cpu,
             embedding_dimensions: Some(embedding_dimensions),
+            task: OnnxSessionTask::default(),
         })
     }
 }
@@ -189,6 +265,7 @@ impl Default for OnnxLoadOptions {
         Self {
             execution_provider: OnnxExecutionProvider::Cpu,
             embedding_dimensions: None,
+            task: OnnxSessionTask::default(),
         }
     }
 }
@@ -223,6 +300,76 @@ pub struct OnnxEmbeddingRequest {
     pub input: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dimensions: Option<usize>,
+}
+
+/// Score each document's relevance to the query with a cross-encoder session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct OnnxRerankRequest {
+    pub model_id: OnnxModelId,
+    pub query: String,
+    pub documents: Vec<String>,
+}
+
+impl OnnxRerankRequest {
+    /// Check the request against the adapter's fixed limits: every pair
+    /// repeats the query, so the bound covers the query once per document.
+    pub fn parse(
+        model_id: impl AsRef<str>,
+        query: String,
+        documents: Vec<String>,
+    ) -> Result<Self, OnnxRuntimeError> {
+        let model_id = OnnxModelId::parse(model_id)?;
+        if query.trim().is_empty() || documents.iter().any(|document| document.trim().is_empty()) {
+            return Err(OnnxRuntimeError::validation(
+                "documents",
+                "the query and every document must be nonblank",
+            ));
+        }
+        if documents.is_empty() || documents.len() > MAX_EMBEDDING_INPUTS {
+            return Err(OnnxRuntimeError::validation(
+                "documents",
+                format!("rerank accepts 1 to {MAX_EMBEDDING_INPUTS} documents"),
+            ));
+        }
+        let query_chars = query.chars().count();
+        let total = documents.iter().try_fold(0usize, |total, document| {
+            total
+                .checked_add(query_chars)
+                .and_then(|total| total.checked_add(document.chars().count()))
+        });
+        if total.is_none_or(|total| total > MAX_EMBEDDING_INPUT_CHARS) {
+            return Err(OnnxRuntimeError::validation(
+                "documents",
+                format!(
+                    "rerank pairs may total at most {MAX_EMBEDDING_INPUT_CHARS} characters \
+                     (the query counts once per document)"
+                ),
+            ));
+        }
+        Ok(Self {
+            model_id,
+            query,
+            documents,
+        })
+    }
+}
+
+/// One document's raw relevance logit, by its position in the request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct OnnxRerankScore {
+    pub index: usize,
+    pub relevance_score: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct OnnxRerankResponse {
+    pub model: String,
+    /// In document order; ordering by relevance is the caller's.
+    pub results: Vec<OnnxRerankScore>,
+    pub usage: OnnxEmbeddingUsage,
 }
 
 /// Fixed limits of the in-process ONNX embedding adapter.
@@ -272,6 +419,8 @@ pub struct OnnxSessionStatus {
     pub execution_provider: OnnxExecutionProvider,
     pub embedding_dimensions: usize,
     pub state: OnnxSessionState,
+    #[serde(default)]
+    pub task: OnnxSessionTask,
     /// The per-input token limit derived from the model config
     /// (`max_position_embeddings` or `n_positions`), when it declares one.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -292,10 +292,11 @@ impl ProviderBehavior {
             provider_modes: vec![RuntimeProviderMode::OnnxServe],
             device_modes: vec![RuntimeDeviceMode::Auto, RuntimeDeviceMode::Cpu],
             local_artifact_formats: vec![ExecutableArtifactFormat::Onnx],
-            serving_tasks: vec![ServingTask::Embedding],
+            serving_tasks: vec![ServingTask::Embedding, ServingTask::Reranking],
             openai_endpoints: vec![
                 OpenAiGatewayEndpoint::Models,
                 OpenAiGatewayEndpoint::Embeddings,
+                OpenAiGatewayEndpoint::Rerank,
             ],
             launch_kinds: vec![ProviderLaunchKind::InProcessRuntime],
             managed_launch_strategies: vec![ProviderManagedLaunchStrategy {

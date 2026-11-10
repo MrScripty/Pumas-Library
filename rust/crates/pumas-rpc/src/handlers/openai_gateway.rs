@@ -1,7 +1,7 @@
 //! OpenAI-compatible gateway handlers backed by Pumas serving state.
 
 use super::gateway_stream::{self, GenerationCancellation, GenerationTransport};
-use super::openai_gateway_onnx::handle_onnx_embedding;
+use super::openai_gateway_onnx::handle_onnx_request;
 use crate::contract::PublicError;
 use crate::http_transport::RequestDisconnect;
 use crate::provider_clients::ProviderHttp;
@@ -415,7 +415,7 @@ pub(super) async fn dispatch_openai(
     }
 
     if served.provider == RuntimeProviderId::OnnxRuntime {
-        return handle_onnx_embedding(
+        return handle_onnx_request(
             &state,
             &served,
             requested_model.as_str(),

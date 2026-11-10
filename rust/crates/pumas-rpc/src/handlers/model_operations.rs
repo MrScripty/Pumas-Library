@@ -693,6 +693,9 @@ async fn describe(
                 }),
             _ => None,
         };
+    // A loaded ONNX session computes exactly one task, chosen from the model's
+    // record when it was served.
+    let onnx_task = onnx_session.as_ref().map(|session| session.task);
     let runtime_ready = match served.provider {
         RuntimeProviderId::OnnxRuntime => onnx_session.is_some(),
         RuntimeProviderId::Torch => match served.endpoint_url.as_ref() {
@@ -851,7 +854,12 @@ async fn describe(
                     vec![InputFormat::Rerank],
                     vec![OutputFormat::RelevanceScores],
                     Some(OpenAiGatewayEndpoint::Rerank),
-                    vec![bound(OptionName::TopN, 1., u32::MAX as f64)],
+                    rerank_bounds(
+                        served.provider,
+                        onnx_session
+                            .as_ref()
+                            .and_then(|session| session.max_input_tokens),
+                    ),
                 ),
                 Capability::MultimodalEmbedding => (
                     SemanticTask::MultimodalEmbedding,
@@ -903,6 +911,16 @@ async fn describe(
             Capability::Decision if decision::candidate_task(task) && !runtime_ready => Some(true),
             Capability::Decision => Some(decision_model),
             _ if decision_model => Some(false),
+            _ if onnx_task.is_some() => Some(matches!(
+                (capability, onnx_task),
+                (
+                    Capability::TextEmbedding,
+                    Some(pumas_library::OnnxSessionTask::Embedding { .. })
+                ) | (
+                    Capability::Rerank,
+                    Some(pumas_library::OnnxSessionTask::Rerank)
+                )
+            )),
             _ => semantics_of(capability),
         };
         let reason = if capability == Capability::AudioClassification {
@@ -1060,7 +1078,10 @@ fn semantic_match(
             _ => false,
         });
     }
-    if provider == RuntimeProviderId::OnnxRuntime && capability == Capability::TextEmbedding {
+    if provider == RuntimeProviderId::OnnxRuntime
+        && capability == Capability::TextEmbedding
+        && model_type != Some("reranker")
+    {
         return Some(true);
     }
     if provider == RuntimeProviderId::Torch && capability == Capability::ImageGeneration {
@@ -1074,6 +1095,29 @@ fn semantic_match(
         None => None,
     }
 }
+/// The in-process ONNX runtime scores at most its fixed document and
+/// character limits, plus the model's per-pair token limit; proxied providers
+/// report their own limits when a request exceeds them.
+fn rerank_bounds(provider: RuntimeProviderId, max_pair_tokens: Option<usize>) -> Vec<OptionBound> {
+    if provider != RuntimeProviderId::OnnxRuntime {
+        return vec![bound(OptionName::TopN, 1., u32::MAX as f64)];
+    }
+    let limits = pumas_library::OnnxEmbeddingRequest::LIMITS;
+    let mut bounds = vec![
+        bound(OptionName::TopN, 1., limits.max_inputs as f64),
+        bound(OptionName::InputCount, 1., limits.max_inputs as f64),
+        bound(
+            OptionName::InputCharacters,
+            0.,
+            limits.max_input_chars as f64,
+        ),
+    ];
+    if let Some(max_pair_tokens) = max_pair_tokens {
+        bounds.push(bound(OptionName::InputTokens, 1., max_pair_tokens as f64));
+    }
+    bounds
+}
+
 /// The in-process ONNX runtime has fixed batch and tokenizer limits, plus the
 /// loaded model's own per-input token limit when its config declares one.
 /// Proxied providers enforce their own (context and batch size) and report

@@ -6,9 +6,17 @@ pub enum OnnxOutputTensorSelection {
     Named(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OnnxEmbeddingPooling {
+    /// Average of attended token vectors.
     Mean,
+    /// The first token's vector.
+    Cls,
+    /// The last attended token's vector (inputs are right-padded).
+    LastToken,
+    /// Element-wise maximum over attended token vectors.
+    Max,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +28,17 @@ pub struct OnnxEmbeddingPostprocessConfig {
 }
 
 impl OnnxEmbeddingPostprocessConfig {
+    /// Pool and normalize as a model declares.
+    pub fn declared(pooling: OnnxEmbeddingPooling, l2_normalize: bool) -> Self {
+        Self {
+            output_tensor: OnnxOutputTensorSelection::FirstFloatingTensor,
+            pooling,
+            apply_layer_norm: false,
+            l2_normalize,
+        }
+    }
+
+    /// The behaviour for packages that declare no pooling.
     pub fn mean_pool_l2() -> Self {
         Self {
             output_tensor: OnnxOutputTensorSelection::FirstFloatingTensor,
@@ -77,13 +96,12 @@ impl OnnxEmbeddingPostprocessor {
             .iter()
             .zip(&tokenized.inputs)
             .map(|(token_embeddings, tokenized_input)| {
-                let mut pooled = match self.config.pooling {
-                    OnnxEmbeddingPooling::Mean => mean_pool(
-                        token_embeddings,
-                        &tokenized_input.attention_mask,
-                        self.source_dimensions,
-                    )?,
-                };
+                let mut pooled = pool(
+                    self.config.pooling,
+                    token_embeddings,
+                    &tokenized_input.attention_mask,
+                    self.source_dimensions,
+                )?;
                 if self.config.apply_layer_norm {
                     apply_layer_norm(&mut pooled);
                 }
@@ -94,6 +112,53 @@ impl OnnxEmbeddingPostprocessor {
                 Ok(pooled)
             })
             .collect()
+    }
+}
+
+fn pool(
+    pooling: OnnxEmbeddingPooling,
+    token_embeddings: &[Vec<f32>],
+    attention_mask: &[i64],
+    source_dimensions: usize,
+) -> Result<Vec<f32>, OnnxRuntimeError> {
+    if token_embeddings.len() != attention_mask.len()
+        || token_embeddings
+            .iter()
+            .any(|embedding| embedding.len() != source_dimensions)
+    {
+        return Err(OnnxRuntimeError::validation(
+            "output",
+            "ONNX output tokens do not match the attention mask and session dimensions",
+        ));
+    }
+    let attended = || {
+        token_embeddings
+            .iter()
+            .zip(attention_mask)
+            .filter(|(_, mask)| **mask != 0)
+            .map(|(embedding, _)| embedding)
+    };
+    let none_attended = || {
+        OnnxRuntimeError::validation(
+            "input",
+            "tokenized embedding input must contain at least one attended token",
+        )
+    };
+    match pooling {
+        OnnxEmbeddingPooling::Mean => {
+            mean_pool(token_embeddings, attention_mask, source_dimensions)
+        }
+        OnnxEmbeddingPooling::Cls => attended().next().cloned().ok_or_else(none_attended),
+        OnnxEmbeddingPooling::LastToken => attended().next_back().cloned().ok_or_else(none_attended),
+        OnnxEmbeddingPooling::Max => attended()
+            .cloned()
+            .reduce(|mut maximum, embedding| {
+                for (held, value) in maximum.iter_mut().zip(embedding) {
+                    *held = held.max(value);
+                }
+                maximum
+            })
+            .ok_or_else(none_attended),
     }
 }
 
@@ -178,6 +243,7 @@ mod tests {
             .into_iter()
             .map(|attention_mask| OnnxTokenizedInput {
                 input_ids: vec![1; attention_mask.len()],
+                type_ids: vec![0; attention_mask.len()],
                 token_count: attention_mask.len(),
                 attention_mask,
             })
@@ -186,6 +252,26 @@ mod tests {
             inputs,
             total_tokens,
         }
+    }
+
+    #[test]
+    fn declared_pooling_reads_the_first_last_or_largest_attended_tokens() {
+        let hidden_states = vec![vec![vec![1.0, 9.0], vec![3.0, -2.0], vec![50.0, 50.0]]];
+        let tokenized = tokenized_batch(vec![vec![1, 1, 0]]);
+        let pooled = |pooling| {
+            OnnxEmbeddingPostprocessor::new(
+                OnnxEmbeddingPostprocessConfig::declared(pooling, false),
+                2,
+            )
+            .unwrap()
+            .postprocess_hidden_states(&hidden_states, &tokenized, None)
+            .unwrap()
+            .remove(0)
+        };
+        assert_eq!(pooled(OnnxEmbeddingPooling::Cls), vec![1.0, 9.0]);
+        assert_eq!(pooled(OnnxEmbeddingPooling::LastToken), vec![3.0, -2.0]);
+        assert_eq!(pooled(OnnxEmbeddingPooling::Max), vec![3.0, 9.0]);
+        assert_eq!(pooled(OnnxEmbeddingPooling::Mean), vec![2.0, 3.5]);
     }
 
     #[test]

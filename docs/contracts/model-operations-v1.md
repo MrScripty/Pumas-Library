@@ -138,8 +138,9 @@ text generation, and image-to-text if it declares image input.
 `decision` is offered only when llama.cpp reports the model as a native
 decision model (`decisions` output modality); such models offer no text
 generation. `rerank` is offered for models recorded as rerankers
-(`text-ranking`) served by llama.cpp; serving refuses a reranker GGUF without
-a ranking head (`cls.output.weight`). A causal-LM reranker GGUF without one can
+(`text-ranking`) served by llama.cpp or, for cross-encoder ONNX graphs with a
+single relevance logit, by ONNX Runtime; serving refuses a reranker GGUF
+without a ranking head (`cls.output.weight`). A causal-LM reranker GGUF without one can
 be given a head by the `gguf_to_ranking_gguf` conversion
 ([ADR 0006](../adr/0006-derived-ranking-heads.md)); its scores are
 `σ(ℓ_true − ℓ_false)` (or `σ(ℓ_true)` for a one-token contract), which orders
@@ -189,6 +190,14 @@ window when the runtime reports one. Text options are optional positive
 accept optional positive `dimensions`; when the provider ignores it (llama.cpp,
 Ollama), Pumas keeps the leading values and renormalizes (Matryoshka
 truncation), and a request for more dimensions than the model produces fails.
+ONNX Runtime pools and normalizes embeddings as the model's recorded
+sentence-transformers declarations say (mean, CLS, last token or max; see
+[ADR 0007](../adr/0007-model-declarations.md)); a model with none recorded is
+mean-pooled and L2-normalized. A served ONNX model computes either embeddings
+or rerank scores, chosen from its record when it is served, and the other
+capability is unavailable. ONNX rerank scores are the cross-encoder's raw
+logits; its descriptor reports the document (`input_count`), character and
+per-pair token (`input_tokens`) limits.
 The in-process ONNX adapter has fixed batch, length and dimension limits,
 which its descriptor reports, plus the loaded model's own per-input token
 limit (`input_tokens`, including special tokens) when the model config declares

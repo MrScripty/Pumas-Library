@@ -176,3 +176,87 @@ fn shape_dimension(value: i64, name: &'static str) -> Result<usize, OnnxRuntimeE
         OnnxRuntimeError::validation("output", format!("ONNX output {name} dimension is invalid"))
     })
 }
+
+/// Name of the cross-encoder score output exported by Transformers.
+pub const LOGITS_OUTPUT: &str = "logits";
+
+/// One relevance logit per input pair, from a `[batch, 1]` (or `[batch]`)
+/// `logits` output, or the first floating output when none is named so.
+pub(super) fn extract_scores(
+    outputs: &ort::session::SessionOutputs<'_>,
+    expected_batch: usize,
+) -> Result<Vec<f32>, OnnxRuntimeError> {
+    let (name, value) = match outputs.get(LOGITS_OUTPUT) {
+        Some(value) => (LOGITS_OUTPUT.to_string(), value.view()),
+        None => outputs
+            .iter()
+            .find(|(_, value)| is_floating_tensor(value.dtype()))
+            .map(|(name, value)| (name.to_string(), value))
+            .ok_or_else(|| {
+                OnnxRuntimeError::validation(
+                    "output",
+                    "ONNX Runtime did not return a floating score output",
+                )
+            })?,
+    };
+    let (shape, values) = float_values(value, &name)?;
+    let single_label = match shape.len() {
+        1 => true,
+        2 => shape_dimension(shape[1], "labels")? == 1,
+        _ => false,
+    };
+    if !single_label || shape_dimension(shape[0], "batch")? != expected_batch {
+        return Err(OnnxRuntimeError::validation(
+            "output",
+            format!(
+                "ONNX output '{name}' must hold one relevance logit per pair, shape [batch, 1]"
+            ),
+        ));
+    }
+    if values.len() != expected_batch || values.iter().any(|value| !value.is_finite()) {
+        return Err(OnnxRuntimeError::validation(
+            "output",
+            format!("ONNX output '{name}' must hold one finite logit per pair"),
+        ));
+    }
+    Ok(values)
+}
+
+fn float_values(value: ValueRef<'_>, name: &str) -> Result<(Vec<i64>, Vec<f32>), OnnxRuntimeError> {
+    let failed = || {
+        OnnxRuntimeError::validation("output", format!("ONNX output '{name}' extraction failed"))
+    };
+    match value.dtype() {
+        ValueType::Tensor {
+            ty: TensorElementType::Float32,
+            ..
+        } => {
+            let (shape, values) = value.try_extract_tensor::<f32>().map_err(|_| failed())?;
+            Ok((shape.to_vec(), values.to_vec()))
+        }
+        ValueType::Tensor {
+            ty: TensorElementType::Float16,
+            ..
+        } => {
+            let (shape, values) = value.try_extract_tensor::<f16>().map_err(|_| failed())?;
+            Ok((
+                shape.to_vec(),
+                values.iter().map(|value| value.to_f32()).collect(),
+            ))
+        }
+        ValueType::Tensor {
+            ty: TensorElementType::Bfloat16,
+            ..
+        } => {
+            let (shape, values) = value.try_extract_tensor::<bf16>().map_err(|_| failed())?;
+            Ok((
+                shape.to_vec(),
+                values.iter().map(|value| value.to_f32()).collect(),
+            ))
+        }
+        _ => Err(OnnxRuntimeError::validation(
+            "output",
+            format!("ONNX output '{name}' is not a supported floating tensor"),
+        )),
+    }
+}

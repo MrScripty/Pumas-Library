@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Completed downloads are resolved automatically; `resolve_model_declarations`
   (optional `repo_id`) resolves any library model
   ([ADR 0007](docs/adr/0007-model-declarations.md)).
+- ONNX Runtime embeds with the pooling (mean, CLS, last token, max) and
+  normalization a model declares, accepts graphs that take `position_ids` and
+  segment ids, and reranks with cross-encoder graphs (one relevance logit per
+  pair) through `rerank` and the gateway's `/v1/rerank`. Graphs needing inputs
+  the adapter cannot supply are refused at load with their names, and ONNX
+  validation errors now carry their reason.
 - `start_model_conversion` direction `gguf_to_ranking_gguf` derives a llama.cpp
   ranking head into a copy of a causal-LM reranker GGUF that shipped without
   one (for example zerank-2 and some Qwen3-Reranker quantizations), from the

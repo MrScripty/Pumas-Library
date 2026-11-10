@@ -695,3 +695,134 @@ fn session_manager_requires_positive_concurrency_limit() {
 fn execution_provider_has_stable_log_label() {
     assert_eq!(OnnxExecutionProvider::Cpu.as_str(), "cpu");
 }
+
+mod task_and_rerank_requests {
+    use super::super::{
+        OnnxEmbeddingPooling, OnnxRerankRequest, OnnxRuntimeErrorCode, OnnxSessionTask,
+        MAX_EMBEDDING_INPUTS, MAX_EMBEDDING_INPUT_CHARS,
+    };
+    use crate::model_library::declarations::{
+        DeclarationSource, LogitScore, Pooling, SentenceTransformersDeclarations,
+        SentenceTransformersKind,
+    };
+
+    fn declared(
+        kind: SentenceTransformersKind,
+        pooling: Option<Pooling>,
+        normalize: bool,
+        logit: bool,
+    ) -> SentenceTransformersDeclarations {
+        SentenceTransformersDeclarations {
+            source: DeclarationSource::Package,
+            model_kind: kind,
+            modules: Vec::new(),
+            pooling,
+            normalize,
+            logit_score: logit.then(|| LogitScore {
+                true_token_id: 1,
+                true_token: "yes".into(),
+                false_token_id: None,
+                false_token: None,
+            }),
+            activation: None,
+            chat_template: None,
+            chat_template_options: Default::default(),
+            special_tokens: Default::default(),
+            prompts: Default::default(),
+            default_prompt_name: None,
+            max_seq_length: None,
+        }
+    }
+
+    #[test]
+    fn the_task_follows_the_model_record() {
+        use SentenceTransformersKind::*;
+        assert_eq!(
+            OnnxSessionTask::for_model("embedding", None).unwrap(),
+            OnnxSessionTask::default()
+        );
+        assert_eq!(
+            OnnxSessionTask::for_model("reranker", None).unwrap(),
+            OnnxSessionTask::Rerank
+        );
+        assert_eq!(
+            OnnxSessionTask::for_model(
+                "decision",
+                Some(&declared(CrossEncoder, None, false, false))
+            )
+            .unwrap(),
+            OnnxSessionTask::Rerank
+        );
+        assert_eq!(
+            OnnxSessionTask::for_model(
+                "embedding",
+                Some(&declared(
+                    SentenceTransformer,
+                    Some(Pooling::LastToken),
+                    true,
+                    false
+                ))
+            )
+            .unwrap(),
+            OnnxSessionTask::Embedding {
+                pooling: Some(OnnxEmbeddingPooling::LastToken),
+                normalize: true
+            }
+        );
+        assert_eq!(
+            OnnxSessionTask::for_model(
+                "embedding",
+                Some(&declared(SentenceTransformer, None, false, false))
+            )
+            .unwrap(),
+            OnnxSessionTask::Embedding {
+                pooling: Some(OnnxEmbeddingPooling::Mean),
+                normalize: false
+            }
+        );
+        let causal = OnnxSessionTask::for_model(
+            "reranker",
+            Some(&declared(CrossEncoder, None, false, true)),
+        )
+        .unwrap_err();
+        assert_eq!(causal.code, OnnxRuntimeErrorCode::Validation);
+        assert!(causal.message.contains("LogitScore"));
+        let weighted = OnnxSessionTask::for_model(
+            "embedding",
+            Some(&declared(
+                SentenceTransformer,
+                Some(Pooling::WeightedMean),
+                true,
+                false,
+            )),
+        )
+        .unwrap_err();
+        assert!(weighted.message.contains("WeightedMean"));
+    }
+
+    #[test]
+    fn rerank_requests_are_bounded_with_the_query_counted_per_document() {
+        assert!(OnnxRerankRequest::parse("m", "q".into(), vec!["d".into()]).is_ok());
+        let reason = |result: Result<OnnxRerankRequest, super::super::OnnxRuntimeError>| {
+            result.unwrap_err().message
+        };
+        assert!(reason(OnnxRerankRequest::parse("m", "q".into(), vec![])).contains("1 to"));
+        assert!(reason(OnnxRerankRequest::parse(
+            "m",
+            "q".into(),
+            vec!["d".into(); MAX_EMBEDDING_INPUTS + 1]
+        ))
+        .contains("1 to"));
+        assert!(
+            reason(OnnxRerankRequest::parse("m", "q".into(), vec![" ".into()]))
+                .contains("nonblank")
+        );
+        let query = "q".repeat(MAX_EMBEDDING_INPUT_CHARS / 2);
+        assert!(reason(OnnxRerankRequest::parse(
+            "m",
+            query,
+            vec!["d".into(), "e".into()]
+        ))
+        .contains("once per document"));
+    }
+}

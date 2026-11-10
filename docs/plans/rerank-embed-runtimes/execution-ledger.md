@@ -141,3 +141,18 @@ remains pending the reference safetensors and a served session.
     stayed. I removed it by hand after a backup (`registry-backup-2026-11-10b.db`).
     Telling a failure whose effects were settled from one whose effects were
     not needs a typed installer error; that is still open.
+- **Open items closed (2026-11-10):**
+  - **Linux volume identity** is now the filesystem UUID from udev by-uuid,
+    with the device number as fallback. Records that hold a device number are
+    translated when read. Pinned and legacy-record tests pass.
+  - **A failed Torch install no longer fails shutdown or keeps the registry
+    row.** A test extending `torch_direct_install_enters_stage…` asserts that
+    shutdown succeeds after a failed install. It failed before the change.
+    The native-install custody gate is unchanged.
+  - **Torch text serving on v2.14.0** is refused with the capability reason.
+    That runtime carries the sidecar copy from before the text routes, so the
+    checks wait for the v2.15.0 install. The changelog no longer mentions a
+    "repair" operation, because none exists.
+  - **Pending live check after the next restart:** in-flight downloads keep
+    their custody under the new volume IDs, and a graceful shutdown removes
+    the registry row.

@@ -119,3 +119,25 @@ remains pending the reference safetensors and a served session.
   on this branch: the smaller limit applies, and load refusals carry their
   reason. The loader then embeds with ONNX Runtime 1.24.2. A dev backend
   needs `ORT_DYLIB_PATH`; packaged builds ship the library.
+- **Library errors fixed (2026-11-10, user report):**
+  - **Two stranded copy-imports.** The cause was a metadata refresh that
+    overlapped the import's hash pass, so the final index commit conflicted.
+    Fixed on this branch (ADR 0008). Running `finish_retained_import` on them
+    still refused: their receipts recorded device 259:6, and the NVMe
+    partition is 259:8 since the 11-09 reboot (Linux file identity is
+    `st_dev` plus inode). Their payloads hashed equal to their receipts. They
+    were deleted and re-imported from their own files through Pumas, and the
+    catalog now shows 116 models and no `unavailable_records`. Moving Linux
+    identity to the filesystem's stable ID is a separate, later change.
+  - **Five LFM3 downloads in error with no reason.** The reason was not
+    persisted (fixed; records from before the fix now say so), and they had
+    failed on the HF CDN query reordering (#126). All were resumed.
+  - **The Torch v2.15.0 install failed** with "exceeded the installation
+    deadline" (a flat one hour per stage) while still downloading at about
+    80 KB/s. A stage now fails only after 30 minutes without bytes or log
+    output. The install was restarted.
+  - **Registry row left behind on a graceful shutdown.** The failed install
+    remained an owned-task error, so shutdown was "incomplete" and the row
+    stayed. I removed it by hand after a backup (`registry-backup-2026-11-10b.db`).
+    Telling a failure whose effects were settled from one whose effects were
+    not needs a typed installer error; that is still open.

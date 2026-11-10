@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Interrupted Hugging Face downloads resume again. Hugging Face's CDN returns
+  the signed URL's parameters in a different order on each redirect, which
+  made every resume fail with "HTTP continuation representation or resource
+  changed".
+
 ## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,

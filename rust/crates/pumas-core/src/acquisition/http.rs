@@ -487,10 +487,12 @@ fn same_http_resource(provider: &str, left: &str, right: &str) -> bool {
         if !github && !hf {
             return None;
         }
-        // Preserve the original encoding/order of representation parameters.
-        // In particular, versionId, response overrides, and unknown parameters
-        // are not authentication material and must never be discarded.
-        let retained = url
+        // Preserve the original encoding of representation parameters. In
+        // particular, versionId, response overrides, and unknown parameters
+        // are not authentication material and must never be discarded. Their
+        // order carries no meaning and Hugging Face's CDN reorders them on
+        // each redirect, so pairs are compared as a sorted multiset.
+        let mut retained = url
             .query()
             .into_iter()
             .flat_map(|query| query.split('&'))
@@ -517,6 +519,7 @@ fn same_http_resource(provider: &str, left: &str, right: &str) -> bool {
                 !grant
             })
             .collect::<Vec<_>>();
+        retained.sort_unstable();
         let query = retained.join("&");
         url.set_query((!retained.is_empty()).then_some(query.as_str()));
         Some(url.into())
@@ -1654,6 +1657,17 @@ mod tests {
             let original = format!("{prefix}?versionId=v1&{auth}=old");
             let refreshed = format!("{prefix}?versionId=v1&{auth}=new");
             assert!(same_http_resource(provider, &original, &refreshed));
+            // The CDN reorders parameters on each redirect.
+            assert!(same_http_resource(
+                provider,
+                &format!("{prefix}?xip=a&versionId=v1&{auth}=old"),
+                &format!("{prefix}?{auth}=new&versionId=v1&xip=a")
+            ));
+            assert!(!same_http_resource(
+                provider,
+                &format!("{prefix}?xip=a&versionId=v1&{auth}=old"),
+                &format!("{prefix}?{auth}=new&versionId=v1&xip=b")
+            ));
             assert!(!same_http_resource(
                 provider,
                 &original,

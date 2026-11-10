@@ -3283,7 +3283,7 @@ exit 9
                     };
                     format!(
                         r#"#!/bin/sh
-if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file'; then
+if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from gguf.quants import dequantize; from jinja2.sandbox import ImmutableSandboxedEnvironment; from safetensors import safe_open; from safetensors.numpy import save_file'; then
  printf 'probe\n' >> "$0.probes"
  printf 'private-probe-diagnostic\n' >&2
  {terminal}

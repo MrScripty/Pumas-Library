@@ -22,3 +22,36 @@
 | Prism-0.8B contract files | infgrad/Prism-Qwen3.5-Reranker-0.8B | `modules.json`, `config_sentence_transformers.json`, `sentence_bert_config.json` | KB | pending |
 
 Free space before M0: `/media/jeremy/OrangeCream` 76 GB.
+
+### M0 notes (2026-11-09)
+
+- Sixteen concurrent downloads at about 4 MB/s total; at 21:49Z every
+  in-flight resume was refused with `HTTP continuation representation or
+  resource changed` (signed CDN redirect changed). Single resumes succeed; a
+  queue keeps four active. Full-repo downloads with non-LFS files
+  (`Qwen/Qwen3-Reranker-0.6B`, `BAAI/bge-reranker-v2-m3`) cannot resume
+  (no receipt for partial non-LFS files) and are restarted after deleting the
+  partial package once no download holds the library.
+- `gpustack/bge-reranker-v2-m3-GGUF` and its ONNX/safetensors siblings were
+  classified `decision` (HF `text-classification`, `*ForSequenceClassification`):
+  M4 classification fix.
+- `mykor/harrier-oss-v1-270m-GGUF` declares `gemma3.pooling_type = 3` (last
+  token); llama.cpp uses it without a `--pooling` flag. Its record has no
+  `base_model`.
+
+## M1 structural evidence
+
+Derivation script on `mradermacher/Qwen3-Reranker-0.6B-GGUF` Q8_0 (headless)
+with the `LogitScore` contract of `Qwen/Qwen3-Reranker-0.6B` (true 9693
+`yes`, false 2152 `no`, its `chat_template.jinja`), compared with
+`ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` (head from llama.cpp's converter):
+
+| Property | Derived | ggml-org |
+| --- | --- | --- |
+| `cls.output.weight` rows | F32, cosine 1.0 and max abs diff 0.0 vs dequantized reference | Q8_0 |
+| `qwen3.pooling_type` | 4 (rank) | 4 |
+| classifier labels | `yes`, `no` | `yes`, `no` |
+| `tokenizer.chat_template.rerank` | identical bytes | converter's hard-coded template |
+
+This is structural evidence; A1's score agreement with sentence-transformers
+remains pending the reference safetensors and a served session.

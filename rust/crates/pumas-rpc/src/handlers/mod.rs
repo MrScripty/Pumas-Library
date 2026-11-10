@@ -16,6 +16,7 @@ mod openai_gateway;
 mod openai_gateway_images;
 #[cfg(feature = "inference-plugins")]
 mod openai_gateway_onnx;
+mod openai_gateway_torch_text;
 #[cfg(feature = "inference-plugins")]
 mod plugins;
 mod process;

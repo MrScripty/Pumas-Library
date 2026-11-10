@@ -81,6 +81,8 @@ fn embedded_sidecar_materializes_outside_the_checkout_without_a_package_lock() {
         "audio_input.py",
         "audio_contract.py",
         "loaders/cohere_asr_loader.py",
+        "text_api.py",
+        "loaders/text_encoder_loader.py",
         "openai_api.py",
         "validation.py",
         "loaders/__init__.py",

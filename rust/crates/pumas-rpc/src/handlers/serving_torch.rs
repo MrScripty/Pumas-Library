@@ -50,6 +50,17 @@ pub(super) async fn serve_torch_model(
     {
         return serve_torch_audio_model(state, request, operation).await;
     }
+    if let Some(kind) = record
+        .as_ref()
+        .and_then(|record| TextEncoderKind::for_model_type(&record.model_type))
+    {
+        let declarations = record
+            .as_ref()
+            .and_then(|record| record.metadata.get("sentence_transformers"))
+            .filter(|declared| !declared.is_null())
+            .cloned();
+        return serve_torch_text_model(state, request, operation, kind, declarations).await;
+    }
     let repository = record
         .as_ref()
         .and_then(|record| record.metadata.get("repo_id").and_then(Value::as_str));
@@ -359,6 +370,143 @@ async fn serve_torch_audio_model(
         &client,
         &slot,
         TORCH_AUDIO_TRANSCRIPTION_CAPABILITY,
+    )
+    .await
+}
+
+/// A text encoder the Torch sidecar serves: its slot type and capability.
+#[derive(Clone, Copy)]
+struct TextEncoderKind {
+    slot_type: &'static str,
+    capability: &'static str,
+    operation: &'static str,
+}
+
+impl TextEncoderKind {
+    fn for_model_type(model_type: &str) -> Option<Self> {
+        match model_type {
+            "embedding" => Some(Self {
+                slot_type: pumas_app_manager::torch_client::TORCH_TEXT_EMBEDDING_MODEL_TYPE,
+                capability: pumas_app_manager::torch_client::TORCH_TEXT_EMBEDDING_CAPABILITY,
+                operation: "embeddings",
+            }),
+            "reranker" => Some(Self {
+                slot_type: pumas_app_manager::torch_client::TORCH_TEXT_RERANK_MODEL_TYPE,
+                capability: pumas_app_manager::torch_client::TORCH_RERANK_CAPABILITY,
+                operation: "rerank scores",
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// The package directory holding a library model's Transformers files.
+async fn package_dir(state: &AppState, model_id: &str) -> Result<PathBuf, String> {
+    let descriptor = state
+        .api
+        .resolve_model_execution_descriptor(model_id)
+        .await
+        .map_err(|error| format!("The model's files could not be resolved: {error}"))?;
+    let entry = PathBuf::from(descriptor.entry_path);
+    match tokio::fs::metadata(&entry).await {
+        Ok(metadata) if metadata.is_dir() => Ok(entry),
+        Ok(_) => entry
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "The model has no package directory".to_string()),
+        Err(_) => Err("The model's files are missing from the library".into()),
+    }
+}
+
+/// Serve a text embedder or reranker through the managed Torch runtime. What
+/// it computes comes from the model's recorded sentence-transformers
+/// declarations (ADR 0007), passed to the sidecar with the load.
+async fn serve_torch_text_model(
+    state: &AppState,
+    request: ServeModelRequest,
+    operation: &pumas_library::serving::ServingLoadOperation,
+    kind: TextEncoderKind,
+    declarations: Option<Value>,
+) -> pumas_library::Result<Value> {
+    let fail = |code, message: &str| serving_error(code, message, &request);
+    let package = match package_dir(state, &request.model_id).await {
+        Ok(package) => package,
+        Err(reason) => {
+            return non_critical_failure_response(
+                state,
+                fail(ModelServeErrorCode::ModelNotExecutable, &reason),
+            )
+            .await;
+        }
+    };
+    let (owned, client) = match start_torch_runtime(state, &request).await? {
+        Ok(started) => started,
+        Err(refusal) => return Ok(refusal),
+    };
+    if let Err(error) = client.verify_runtime(kind.capability).await {
+        tracing::warn!(%error, "Selected Torch runtime cannot serve {}", kind.operation);
+        let reason = format!(
+            "Selected Torch runtime cannot serve {}; it needs Transformers and Jinja, which a Torch install with a Transformers adapter provides",
+            kind.operation
+        );
+        return non_critical_failure_response(
+            state,
+            fail(ModelServeErrorCode::ProviderLoadFailed, &reason),
+        )
+        .await;
+    }
+    let slots = client.list_slots().await?;
+    if slots.iter().any(|slot| slot.model_name == request.model_id) {
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::ProviderLoadFailed,
+                "This model already occupies a Torch slot; unload it before loading again",
+            ),
+        )
+        .await;
+    }
+    let slot = match client
+        .load_text_encoder(
+            &package.to_string_lossy(),
+            &request.model_id,
+            &audio_device(request.config.device_mode),
+            kind.slot_type,
+            declarations.as_ref(),
+        )
+        .await
+    {
+        Ok(slot) if slot.state == SlotState::Ready => slot,
+        Ok(slot) => {
+            tracing::warn!(?slot, "Torch text encoder load did not become ready");
+            return non_critical_failure_response(
+                state,
+                fail(
+                    ModelServeErrorCode::ProviderLoadFailed,
+                    "The model did not become ready in this Torch runtime; inspect its runtime log",
+                ),
+            )
+            .await;
+        }
+        Err(error) => {
+            // The sidecar's reason names what is missing (an architecture the
+            // installed Transformers does not know, unusable declarations).
+            let reason = format!("The model could not load in this Torch runtime: {error}");
+            return non_critical_failure_response(
+                state,
+                fail(ModelServeErrorCode::ProviderLoadFailed, &reason),
+            )
+            .await;
+        }
+    };
+    publish_torch_slot(
+        state,
+        &request,
+        operation,
+        &owned,
+        &client,
+        &slot,
+        kind.capability,
     )
     .await
 }

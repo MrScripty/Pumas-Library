@@ -138,9 +138,17 @@ text generation, and image-to-text if it declares image input.
 `decision` is offered only when llama.cpp reports the model as a native
 decision model (`decisions` output modality); such models offer no text
 generation. `rerank` is offered for models recorded as rerankers
-(`text-ranking`) served by llama.cpp or, for cross-encoder ONNX graphs with a
-single relevance logit, by ONNX Runtime; serving refuses a reranker GGUF
-without a ranking head (`cls.output.weight`). A causal-LM reranker GGUF without one can
+(`text-ranking`) served by llama.cpp, by ONNX Runtime (cross-encoder graphs
+with a single relevance logit) or by Torch; serving refuses a reranker GGUF
+without a ranking head (`cls.output.weight`). Torch serves text embedders and
+rerankers from local Safetensors packages when its runtime advertises the
+`text_embedding`/`rerank` capabilities (an install with Transformers and
+Jinja): what it computes comes from the model's recorded sentence-transformers
+declarations (causal `LogitScore` scoring under the declared template,
+sequence-classifier logits otherwise, declared pooling and normalization for
+embedders), and an architecture the installed Transformers does not know is
+refused at load with the runtime's reason. Torch rerank scores apply the
+model's declared activation. A causal-LM reranker GGUF without one can
 be given a head by the `gguf_to_ranking_gguf` conversion
 ([ADR 0006](../adr/0006-derived-ranking-heads.md)); its scores are
 `σ(ℓ_true − ℓ_false)` (or `σ(ℓ_true)` for a one-token contract), which orders

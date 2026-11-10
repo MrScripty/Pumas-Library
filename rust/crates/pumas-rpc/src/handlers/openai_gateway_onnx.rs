@@ -84,10 +84,13 @@ async fn handle_onnx_rerank(
 
 const RERANK_FIELDS: &[&str] = &["model", "query", "documents", "top_n"];
 
-fn parse_rerank_request(
-    served: &ServedModelStatus,
+/// The `query`, `documents` and optional `top_n` of a Jina/Cohere-style rerank
+/// body, for in-process and authenticated adapters. Unknown fields and
+/// non-string documents are refused, naming `adapter`.
+pub(super) fn parse_rerank_fields(
     body: &Value,
-) -> Result<(OnnxRerankRequest, Option<usize>), GatewayRequestError> {
+    adapter: &str,
+) -> Result<(String, Vec<String>, Option<usize>), GatewayRequestError> {
     let object = body
         .as_object()
         .ok_or_else(|| GatewayRequestError::invalid_request("rerank request must be an object"))?;
@@ -96,7 +99,7 @@ fn parse_rerank_request(
         .find(|key| !RERANK_FIELDS.contains(&key.as_str()))
     {
         return Err(GatewayRequestError::invalid_request(format!(
-            "rerank request field `{unknown}` is not supported by the ONNX adapter"
+            "rerank request field `{unknown}` is not supported by the {adapter} adapter"
         )));
     }
     let query = object
@@ -111,9 +114,9 @@ fn parse_rerank_request(
         .iter()
         .map(|document| {
             document.as_str().map(str::to_string).ok_or_else(|| {
-                GatewayRequestError::invalid_request(
-                    "the ONNX adapter reranks text documents; each document must be a string",
-                )
+                GatewayRequestError::invalid_request(format!(
+                    "the {adapter} adapter reranks text documents; each document must be a string"
+                ))
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -129,18 +132,28 @@ fn parse_rerank_request(
                 })?,
         ),
     };
+    Ok((query, documents, top_n))
+}
+
+fn parse_rerank_request(
+    served: &ServedModelStatus,
+    body: &Value,
+) -> Result<(OnnxRerankRequest, Option<usize>), GatewayRequestError> {
+    let (query, documents, top_n) = parse_rerank_fields(body, "ONNX")?;
     let request = OnnxRerankRequest::parse(served.model_id.as_str(), query, documents)
         .map_err(|error| GatewayRequestError::invalid_request(error.message))?;
     Ok((request, top_n))
 }
 
-fn rerank_response(
-    response: OnnxRerankResponse,
+/// llama.cpp's `/v1/rerank` shape: most relevant first (ties keep document
+/// order), cut to `top_n`.
+pub(super) fn sorted_rerank_response(
     requested_model: &str,
+    mut results: Vec<(usize, f64)>,
+    prompt_tokens: Value,
     top_n: Option<usize>,
 ) -> Value {
-    let mut results = response.results;
-    results.sort_by(|left, right| right.relevance_score.total_cmp(&left.relevance_score));
+    results.sort_by(|left, right| right.1.total_cmp(&left.1));
     if let Some(top_n) = top_n {
         results.truncate(top_n);
     }
@@ -149,13 +162,27 @@ fn rerank_response(
         "object": "list",
         "results": results
             .into_iter()
-            .map(|result| json!({"index": result.index, "relevance_score": result.relevance_score}))
+            .map(|(index, score)| json!({"index": index, "relevance_score": score}))
             .collect::<Vec<_>>(),
-        "usage": {
-            "prompt_tokens": response.usage.prompt_tokens,
-            "total_tokens": response.usage.total_tokens,
-        },
+        "usage": {"prompt_tokens": prompt_tokens.clone(), "total_tokens": prompt_tokens},
     })
+}
+
+fn rerank_response(
+    response: OnnxRerankResponse,
+    requested_model: &str,
+    top_n: Option<usize>,
+) -> Value {
+    sorted_rerank_response(
+        requested_model,
+        response
+            .results
+            .into_iter()
+            .map(|result| (result.index, f64::from(result.relevance_score)))
+            .collect(),
+        json!(response.usage.prompt_tokens),
+        top_n,
+    )
 }
 
 async fn handle_onnx_embedding(
@@ -213,14 +240,14 @@ async fn handle_onnx_embedding(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct GatewayRequestError {
+pub(super) struct GatewayRequestError {
     status: StatusCode,
     code: ModelServeErrorCode,
     message: String,
 }
 
 impl GatewayRequestError {
-    fn invalid_request(message: impl Into<String>) -> Self {
+    pub(super) fn invalid_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             code: ModelServeErrorCode::InvalidRequest,
@@ -228,7 +255,7 @@ impl GatewayRequestError {
         }
     }
 
-    fn into_response(self) -> Response {
+    pub(super) fn into_response(self) -> Response {
         openai_error_response_with_code(self.status, self.code, self.message)
     }
 }
@@ -244,7 +271,9 @@ fn parse_openai_embedding_request(
         .map_err(|error| GatewayRequestError::invalid_request(error.to_string()))
 }
 
-fn parse_openai_embedding_input(input: Option<&Value>) -> Result<Vec<String>, GatewayRequestError> {
+pub(super) fn parse_openai_embedding_input(
+    input: Option<&Value>,
+) -> Result<Vec<String>, GatewayRequestError> {
     match input {
         Some(Value::String(value)) => Ok(vec![value.clone()]),
         Some(Value::Array(values)) => values
@@ -266,7 +295,7 @@ fn parse_openai_embedding_input(input: Option<&Value>) -> Result<Vec<String>, Ga
     }
 }
 
-fn parse_openai_embedding_dimensions(
+pub(super) fn parse_openai_embedding_dimensions(
     dimensions: Option<&Value>,
 ) -> Result<Option<usize>, GatewayRequestError> {
     match dimensions {
@@ -286,14 +315,14 @@ fn parse_openai_embedding_dimensions(
     }
 }
 
-fn validate_openai_embedding_encoding(
+pub(super) fn validate_openai_embedding_encoding(
     encoding_format: Option<&Value>,
 ) -> Result<(), GatewayRequestError> {
     match encoding_format {
         Some(Value::String(value)) if value == "float" => Ok(()),
         Some(Value::Null) | None => Ok(()),
         Some(_) => Err(GatewayRequestError::invalid_request(
-            "ONNX Runtime embeddings currently support only float encoding",
+            "embeddings support only float encoding",
         )),
     }
 }

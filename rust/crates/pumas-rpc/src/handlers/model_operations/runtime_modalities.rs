@@ -75,6 +75,10 @@ pub(super) async fn observe(
         RuntimeProviderId::Torch if model_type == Some("audio") => {
             fixed([Modality::Audio], [Modality::Text])
         }
+        RuntimeProviderId::Torch if matches!(model_type, Some("embedding" | "reranker")) => fixed(
+            [Modality::Text],
+            [pooled_output(model_type, Modality::Vector)],
+        ),
         RuntimeProviderId::Torch => fixed([Modality::Text], [Modality::Image]),
         _ => fixed(
             [Modality::Text],

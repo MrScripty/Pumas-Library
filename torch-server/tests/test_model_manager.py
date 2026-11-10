@@ -57,7 +57,7 @@ class _FakeDeviceManager:
 
 
 class _TestModelManager(ModelManager):
-    async def _load_model(self, model_path, device, model_type):
+    async def _load_model(self, model_path, device, model_type, declarations=None):
         return LoadedModel(
             model=_FakeModel(),
             tokenizer=object(),

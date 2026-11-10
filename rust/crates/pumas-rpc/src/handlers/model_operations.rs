@@ -523,7 +523,7 @@ async fn dispatch_audio(
     served: &ServedModelStatus,
     body: serde_json::Value,
 ) -> Response {
-    use pumas_app_manager::torch_client::TorchAudioError;
+    use pumas_app_manager::torch_client::TorchOperationError;
     let id = Some(request.request_id.clone());
     let unavailable = |message: &str| {
         error(
@@ -578,42 +578,44 @@ async fn dispatch_audio(
             },
         })
         .into_response(),
-        Err(TorchAudioError::InvalidRequest(reason)) => error(
+        Err(TorchOperationError::InvalidRequest(reason)) => error(
             StatusCode::BAD_REQUEST,
             id,
             Rejection::new(ErrorCode::InvalidRequest, reason),
             false,
         ),
-        Err(TorchAudioError::ModelUnavailable) => {
+        Err(TorchOperationError::ModelUnavailable) => {
             unavailable("the audio model is not loaded in its Torch runtime")
         }
-        Err(TorchAudioError::UnsupportedModel) => {
+        Err(TorchOperationError::UnsupportedModel) => {
             unavailable("the served Torch model does not transcribe audio")
         }
-        Err(TorchAudioError::RuntimeBusy) => {
+        Err(TorchOperationError::RuntimeBusy) => {
             unavailable("the Torch runtime is busy with another operation on this device; retry")
         }
-        Err(TorchAudioError::Transport | TorchAudioError::Cancelled) => {
+        Err(TorchOperationError::Transport | TorchOperationError::Cancelled) => {
             error(StatusCode::BAD_GATEWAY, id, ErrorCode::TransportLost, true)
         }
-        Err(TorchAudioError::InvalidBackendResult) => error(
+        Err(TorchOperationError::InvalidBackendResult) => error(
             StatusCode::BAD_GATEWAY,
             id,
             ErrorCode::InvalidProviderResult,
             true,
         ),
-        Err(failure @ (TorchAudioError::OutOfMemory | TorchAudioError::BackendFailure)) => error(
-            StatusCode::BAD_GATEWAY,
-            id,
-            Rejection::new(
-                ErrorCode::ProviderFailure,
-                format!(
-                    "the Torch runtime failed to transcribe ({}); inspect its runtime log",
-                    failure.code()
+        Err(failure @ (TorchOperationError::OutOfMemory | TorchOperationError::BackendFailure)) => {
+            error(
+                StatusCode::BAD_GATEWAY,
+                id,
+                Rejection::new(
+                    ErrorCode::ProviderFailure,
+                    format!(
+                        "the Torch runtime failed to transcribe ({}); inspect its runtime log",
+                        failure.code()
+                    ),
                 ),
-            ),
-            true,
-        ),
+                true,
+            )
+        }
     }
 }
 

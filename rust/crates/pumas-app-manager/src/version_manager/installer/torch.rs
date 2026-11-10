@@ -1161,6 +1161,14 @@ pub(crate) fn write_embedded_torch_sidecar(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/audio_contract.py"),
         ),
         (
+            "text_api.py",
+            include_str!("../../../../../../torch-server/text_api.py"),
+        ),
+        (
+            "loaders/text_encoder_loader.py",
+            include_str!("../../../../../../torch-server/loaders/text_encoder_loader.py"),
+        ),
+        (
             "loaders/cohere_asr_loader.py",
             include_str!("../../../../../../torch-server/loaders/cohere_asr_loader.py"),
         ),

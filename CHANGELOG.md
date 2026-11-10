@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   pair) through `rerank` and the gateway's `/v1/rerank`. Graphs needing inputs
   the adapter cannot supply are refused at load with their names, and ONNX
   validation errors now carry their reason.
+- Torch serves text embedders and rerankers from local Safetensors packages
+  (for example Prism-Qwen3.5-Reranker, bge-reranker-v2-m3, harrier) through
+  `text_embedding`, `rerank`, `/v1/embeddings` and `/v1/rerank`, computing what
+  the model's recorded declarations say even when the package lacks its
+  sentence-transformers files. Runtimes advertise the capabilities when
+  Transformers and Jinja are installed; reinstall or repair a Torch runtime to
+  add the routes.
 - Cross-encoder rerankers published as text classifiers (for example
   bge-reranker-v2-m3) are recorded as rerankers: a GGUF ranking head without
   a decision head, or a `*ForSequenceClassification` config with one label,

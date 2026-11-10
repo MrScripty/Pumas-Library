@@ -224,7 +224,9 @@ async fn read_report(path: &Path) -> Result<DerivationReport> {
 }
 
 /// The derived reranker keeps the source's declarations: it scores by the
-/// same contract, and the record names where that contract was read.
+/// same contract, and the record names where that contract was read. It does
+/// not claim the source's repository: it is not a file that repository
+/// publishes, and its lineage is `conversion_source` and `base_model`.
 fn derived_metadata(source_model_id: &str, source: &ModelMetadata) -> ModelMetadata {
     ModelMetadata {
         model_id: source.model_id.clone(),
@@ -247,7 +249,6 @@ fn derived_metadata(source_model_id: &str, source: &ModelMetadata) -> ModelMetad
         schema_version: source.schema_version,
         pipeline_tag: Some("text-ranking".into()),
         task_type_primary: Some("text-ranking".into()),
-        repo_id: source.repo_id.clone(),
         base_model: source.base_model.clone(),
         selected_artifact_quant: source.selected_artifact_quant.clone(),
         sentence_transformers: source.sentence_transformers.clone(),

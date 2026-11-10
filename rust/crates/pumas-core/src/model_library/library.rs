@@ -6407,7 +6407,9 @@ fn annotate_and_dedupe_records_by_artifact(records: &mut Vec<ModelRecord>) {
     let mut passthrough = Vec::new();
 
     for record in records.drain(..) {
-        if record_is_download_incomplete(&record) {
+        // A conversion output is a new artifact derived from its source, never
+        // a second copy of the source's publication, whatever lineage it names.
+        if record_is_download_incomplete(&record) || record_is_conversion_output(&record) {
             passthrough.push(record);
             continue;
         }
@@ -6489,6 +6491,12 @@ fn record_duplicate_preference_score(record: &ModelRecord) -> i64 {
     let type_known = usize::from(model_type != "unknown") as i64;
     let complete_bonus = usize::from(!download_incomplete) as i64;
     (path_known * 10_000) + (type_known * 1_000) + (complete_bonus * 100)
+}
+
+/// Conversion outputs are recorded with `match_source` "conversion"; the
+/// index projection keeps that field, not `conversion_source` itself.
+fn record_is_conversion_output(record: &ModelRecord) -> bool {
+    record.metadata.get("match_source").and_then(Value::as_str) == Some("conversion")
 }
 
 fn record_is_download_incomplete(record: &ModelRecord) -> bool {
@@ -11227,6 +11235,64 @@ mod tests {
                 .get(INTEGRITY_ISSUE_DUPLICATE_REPO_ID_COUNT)
                 .and_then(Value::as_u64),
             Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_models_keeps_a_conversion_output_beside_its_source() {
+        let (_, library) = setup_library().await;
+        let source_dir = library.build_model_path("reranker", "qwen3", "source");
+        let derived_dir = library.build_model_path("reranker", "qwen3", "source-ranking");
+        // Different bytes: the derived file is not a hash duplicate either.
+        for (dir, content) in [
+            (&source_dir, b"source".as_slice()),
+            (&derived_dir, b"derived"),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("model-Q8_0.gguf"), content).unwrap();
+        }
+        let source = ModelMetadata {
+            model_id: Some("reranker/qwen3/source".to_string()),
+            model_type: Some("reranker".to_string()),
+            family: Some("qwen3".to_string()),
+            cleaned_name: Some("source".to_string()),
+            repo_id: Some("example/source-gguf".to_string()),
+            selected_artifact_quant: Some("Q8_0".to_string()),
+            ..Default::default()
+        };
+        // An output recorded with its source's lineage, as derived ranking
+        // heads once were, is still its own model.
+        let derived = ModelMetadata {
+            model_id: Some("reranker/qwen3/source-ranking".to_string()),
+            cleaned_name: Some("source-ranking".to_string()),
+            match_source: Some("conversion".to_string()),
+            conversion_source: Some(crate::conversion::ConversionSource {
+                source_model_id: "reranker/qwen3/source".to_string(),
+                source_format: "gguf".to_string(),
+                source_quant: Some("Q8_0".to_string()),
+                target_format: "gguf".to_string(),
+                target_quant: Some("Q8_0".to_string()),
+                was_dequantized: false,
+                conversion_date: "2026-11-10T00:00:00Z".to_string(),
+            }),
+            ..source.clone()
+        };
+        library.save_metadata(&source_dir, &source).await.unwrap();
+        library.save_metadata(&derived_dir, &derived).await.unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+        library.index_model_dir(&derived_dir).await.unwrap();
+
+        let mut ids = library
+            .list_models()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|model| normalize_path_separators(&model.id))
+            .collect::<Vec<_>>();
+        ids.sort();
+        assert_eq!(
+            ids,
+            ["reranker/qwen3/source", "reranker/qwen3/source-ranking"]
         );
     }
 

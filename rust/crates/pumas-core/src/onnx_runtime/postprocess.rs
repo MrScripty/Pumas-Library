@@ -149,7 +149,9 @@ fn pool(
             mean_pool(token_embeddings, attention_mask, source_dimensions)
         }
         OnnxEmbeddingPooling::Cls => attended().next().cloned().ok_or_else(none_attended),
-        OnnxEmbeddingPooling::LastToken => attended().next_back().cloned().ok_or_else(none_attended),
+        OnnxEmbeddingPooling::LastToken => {
+            attended().next_back().cloned().ok_or_else(none_attended)
+        }
         OnnxEmbeddingPooling::Max => attended()
             .cloned()
             .reduce(|mut maximum, embedding| {

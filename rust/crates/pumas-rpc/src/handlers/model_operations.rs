@@ -1074,7 +1074,13 @@ fn semantic_match(
                 matches!(task, "image-to-text" | "image_to_text" | "image->text")
                     || vision_language_task(task)
             }
-            Capability::Rerank => text_ranking_task(task),
+            // Cross-encoder rerankers are published as text classifiers; the
+            // recorded type comes from their single-logit head.
+            Capability::Rerank => {
+                text_ranking_task(task)
+                    || (model_type == Some("reranker")
+                        && matches!(task, "text-classification" | "text_classification"))
+            }
             _ => false,
         });
     }

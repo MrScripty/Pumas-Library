@@ -28,6 +28,9 @@ struct ConfigSignals {
     has_vision_config: bool,
     has_vlm_task_hint: bool,
     has_vision_task_hint: bool,
+    /// A `*ForSequenceClassification` head with exactly one label: one
+    /// relevance logit per input, as cross-encoder rerankers export.
+    single_logit_classifier: bool,
 }
 
 /// Resolve model type from rule tables using source metadata signals.
@@ -64,9 +67,66 @@ pub fn resolve_model_type_with_rules(
             review_reasons,
         });
     }
+    // A GGUF ranking head without a decision head is what llama.cpp serves
+    // through its rerank endpoint; that file fact outranks task tags too.
+    if gguf_declares_ranking_head(model_dir) {
+        return Ok(head_resolution(
+            ModelType::Reranker,
+            "model-type-gguf-ranking-head",
+            &medium_hints,
+        ));
+    }
     let name_hint = model_dir.file_name().and_then(|name| name.to_str());
     let signals = load_config_signals(model_dir, huggingface_evidence);
+    if signals.single_logit_classifier {
+        return Ok(head_resolution(
+            ModelType::Reranker,
+            "model-type-single-logit-classifier",
+            &medium_hints,
+        ));
+    }
     resolve_model_type_from_inputs(index, signals, medium_hints, name_hint)
+}
+
+/// A resolution from the model's head. A task tag naming another category is
+/// recorded for review but does not change the result.
+fn head_resolution(
+    model_type: ModelType,
+    source: &str,
+    medium_hints: &[ModelType],
+) -> ModelTypeResolution {
+    let (confidence, review_reasons) = if medium_hints.iter().any(|hint| *hint != model_type) {
+        (
+            0.75,
+            vec![
+                "model-type-hint-conflict".to_string(),
+                "model-type-low-confidence".to_string(),
+            ],
+        )
+    } else {
+        (0.95, Vec::new())
+    };
+    ModelTypeResolution {
+        model_type,
+        source: source.to_string(),
+        confidence,
+        review_reasons,
+    }
+}
+
+/// A top-level, non-projector GGUF of the package carries a ranking head
+/// (`cls.output.weight`) in any of its shards.
+fn gguf_declares_ranking_head(model_dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(model_dir) else {
+        return false;
+    };
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        name.ends_with(".gguf")
+            && !name.contains("mmproj")
+            && entry.file_type().is_ok_and(|kind| kind.is_file())
+            && crate::model_library::gguf_package_has_ranking_head(&entry.path()) == Some(true)
+    })
 }
 
 /// The model's primary GGUF (a top-level `.gguf` that is not a projector)
@@ -286,7 +346,7 @@ fn load_config_signals(
         return signals;
     };
 
-    let architectures = config
+    let architectures: Vec<String> = config
         .get("architectures")
         .and_then(|v| v.as_array())
         .map(|arr| {
@@ -307,6 +367,14 @@ fn load_config_signals(
         .join("config_sentence_transformers.json")
         .is_file();
     let has_sentence_transformers_modules = detect_sentence_transformers_modules(model_dir);
+    let single_logit_classifier = architectures
+        .iter()
+        .any(|architecture: &String| architecture.ends_with("ForSequenceClassification"))
+        && (config
+            .get("id2label")
+            .and_then(|labels| labels.as_object())
+            .is_some_and(|labels| labels.len() == 1)
+            || config.get("num_labels").and_then(|labels| labels.as_u64()) == Some(1));
     let has_vision_config = config.get("vision_config").is_some()
         || config.get("vision_encoder").is_some()
         || config.get("image_encoder").is_some()
@@ -320,6 +388,7 @@ fn load_config_signals(
         has_vision_config,
         has_vlm_task_hint: false,
         has_vision_task_hint: false,
+        single_logit_classifier,
     };
     merge_huggingface_evidence_into_signals(&mut signals, huggingface_evidence);
     signals
@@ -946,6 +1015,110 @@ mod tests {
     fn write_config(model_dir: &Path, config: serde_json::Value) {
         let content = serde_json::to_string_pretty(&config).unwrap();
         std::fs::write(model_dir.join("config.json"), content).unwrap();
+    }
+
+    /// A GGUF header with string keys and the named tensors.
+    fn write_gguf(path: &Path, keys: &[(&str, &str)], tensors: &[&str]) {
+        fn string(bytes: &mut Vec<u8>, value: &str) {
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&(tensors.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(keys.len() as u64).to_le_bytes());
+        for (key, value) in keys {
+            string(&mut bytes, key);
+            bytes.extend_from_slice(&8_u32.to_le_bytes());
+            string(&mut bytes, value);
+        }
+        for name in tensors {
+            string(&mut bytes, name);
+            bytes.extend_from_slice(&2_u32.to_le_bytes());
+            bytes.extend_from_slice(&1024_u64.to_le_bytes());
+            bytes.extend_from_slice(&1_u64.to_le_bytes());
+            bytes.extend_from_slice(&0_u32.to_le_bytes());
+            bytes.extend_from_slice(&0_u64.to_le_bytes());
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn a_gguf_ranking_head_makes_a_reranker_despite_a_classification_tag() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_gguf(
+            &model_dir.path().join("bge-reranker-v2-m3-Q8_0.gguf"),
+            &[("general.architecture", "bert")],
+            &["token_embd.weight", "cls.output.weight"],
+        );
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-classification"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-gguf-ranking-head");
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-hint-conflict".to_string()));
+    }
+
+    #[test]
+    fn a_declared_decision_head_still_outranks_its_ranking_head() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_gguf(
+            &model_dir.path().join("Laya-Q8_0.gguf"),
+            &[
+                ("general.architecture", "modern-bert"),
+                ("modern-bert.decision.type", "laya"),
+            ],
+            &["token_embd.weight", "cls.output.weight"],
+        );
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
+        assert_eq!(resolved.model_type, ModelType::Decision);
+    }
+
+    #[test]
+    fn a_single_logit_sequence_classifier_is_a_reranker() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["XLMRobertaForSequenceClassification"],
+                "model_type": "xlm-roberta",
+                "id2label": {"0": "LABEL_0"}
+            }),
+        );
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-classification"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-single-logit-classifier");
+
+        let labels = TempDir::new().unwrap();
+        write_config(
+            labels.path(),
+            serde_json::json!({
+                "architectures": ["XLMRobertaForSequenceClassification"],
+                "model_type": "xlm-roberta",
+                "id2label": {"0": "negative", "1": "positive"}
+            }),
+        );
+        let resolved =
+            resolve_model_type_with_rules(&index, labels.path(), None, None, None).unwrap();
+        assert_ne!(resolved.model_type, ModelType::Reranker);
     }
 
     #[test]

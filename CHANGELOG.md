@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   pair) through `rerank` and the gateway's `/v1/rerank`. Graphs needing inputs
   the adapter cannot supply are refused at load with their names, and ONNX
   validation errors now carry their reason.
+- Cross-encoder rerankers published as text classifiers (for example
+  bge-reranker-v2-m3) are recorded as rerankers: a GGUF ranking head without
+  a decision head, or a `*ForSequenceClassification` config with one label,
+  decides the category over a `text-classification` tag, and such a tag no
+  longer blocks `rerank` for a recorded reranker.
 - `start_model_conversion` direction `gguf_to_ranking_gguf` derives a llama.cpp
   ranking head into a copy of a causal-LM reranker GGUF that shipped without
   one (for example zerank-2 and some Qwen3-Reranker quantizations), from the

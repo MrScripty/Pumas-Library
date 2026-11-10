@@ -57,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ([ADR 0008](docs/adr/0008-retained-copied-publications.md)).
 - A failed download keeps its failure reason across restarts. Downloads that
   failed before this change say so, instead of showing no reason.
+- Torch runtime installs no longer fail on a slow connection because a stage
+  ran longer than an hour. A stage now fails only after 30 minutes with no
+  new downloaded bytes and no install-log output, and the error says so.
 
 ## [0.8.0] - 2026-11-08
 

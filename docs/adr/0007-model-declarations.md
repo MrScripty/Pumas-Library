@@ -55,8 +55,12 @@ files may lack `modules.json`.
   are bounded by Hugging Face's size facts and LFS digests. Only the record is
   kept.
 - **Resolution happens once, off the serving path.**
-  - A reactor resolves each completed download that has no record. It is
-    best-effort: a failure is logged and never fails the download.
+  - A reactor follows the library's update feed and resolves each model that
+    becomes complete without a record, whether a download, an import or a
+    conversion completed it. It is best-effort: a failure is logged and
+    retried on the model's next change, and never fails the operation. (A
+    download's record exists from the moment it starts, so completion is the
+    change that clears `download_incomplete`, not the model being added.)
   - `resolve_model_declarations` resolves on request, and replaces the record.
   - Ranking-head derivation resolves at admission when the record is missing.
 

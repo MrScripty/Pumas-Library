@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   tokens, prompt template, prompts) are recorded in model metadata as
   `sentence_transformers`, resolved from the model's package or lineage (its
   source repository, then its single base model) at an immutable commit.
-  Completed downloads are resolved automatically; `resolve_model_declarations`
+  Models are resolved automatically when they become complete (downloads,
+  imports and conversions); `resolve_model_declarations`
   (optional `repo_id`) resolves any library model
   ([ADR 0007](docs/adr/0007-model-declarations.md)).
 - ONNX Runtime embeds with the pooling (mean, CLS, last token, max) and

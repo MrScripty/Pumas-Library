@@ -729,9 +729,9 @@ impl PumasApiBuilder {
         let runtime_provider_adapters = crate::runtime_profiles::RuntimeProviderAdapters::builtin();
         let hf_client = hf_client.map(Arc::new);
         if let Some(client) = hf_client.clone() {
-            // Completed downloads record their sentence-transformers
+            // Models that become complete record their sentence-transformers
             // declarations; best-effort, aborted at shutdown (ADR 0007).
-            runtime_tasks.spawn(super::declarations::react_to_downloads(
+            runtime_tasks.spawn(super::declarations::react_to_library_updates(
                 model_library.clone(),
                 client,
                 self.launcher_root.join("launcher-data").join("tmp"),

@@ -6,8 +6,9 @@
 //! its files are read at one immutable commit outside the library and only
 //! the validated record is kept, in the model's metadata.
 //!
-//! Completed downloads are resolved automatically by a reactor that observes
-//! download snapshots; it never replaces a record that already exists.
+//! Models that become complete are resolved automatically by a reactor that
+//! follows the library's update feed; it never replaces a record that already
+//! exists.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use crate::model_library::declarations::{
     self, DeclarationSource, SentenceTransformersDeclarations,
 };
 use crate::model_library::{HuggingFaceClient, ModelLibrary};
-use crate::models::{DownloadStatus, ModelMetadata};
+use crate::models::ModelMetadata;
 use crate::{PumasApi, PumasError, Result};
 
 /// Outcome of resolving a model's declarations.
@@ -230,42 +231,95 @@ fn single_base_model(metadata: &ModelMetadata) -> Option<String> {
 /// Resolve declarations for each newly completed download that has none.
 /// Runs until the download channel closes; failures are logged per model and
 /// never affect the download.
-pub(super) async fn react_to_downloads(
+/// Whether a library change leaves `record` a complete model without
+/// declarations. A download's record exists from the moment it starts, so
+/// "added" is not completion: completion is a later metadata change that
+/// clears `download_incomplete`.
+fn wants_declarations(
+    event: &crate::models::ModelLibraryUpdateEvent,
+    record: &crate::index::ModelRecord,
+) -> bool {
+    use crate::models::ModelLibraryChangeKind as Change;
+    matches!(
+        event.change_kind,
+        Change::ModelAdded | Change::MetadataModified
+    ) && record
+        .metadata
+        .get("download_incomplete")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+        && record
+            .metadata
+            .get("sentence_transformers")
+            .is_none_or(serde_json::Value::is_null)
+}
+
+/// Resolve declarations for each model that becomes complete without them,
+/// whatever made it complete: a download, an import or a conversion.
+/// Best-effort: a failure is logged and retried on the model's next change.
+pub(super) async fn react_to_library_updates(
     library: Arc<ModelLibrary>,
     client: Arc<HuggingFaceClient>,
     scratch: PathBuf,
 ) {
-    let mut updates = client.subscribe_download_updates();
-    let mut seen = HashSet::new();
+    let resolver_library = library.clone();
+    react_to_library_updates_with(library, move |model_id| {
+        let library = resolver_library.clone();
+        let client = client.clone();
+        let scratch = scratch.clone();
+        async move { resolve(&library, Some(&client), &scratch, &model_id, None).await }
+    })
+    .await
+}
+
+async fn react_to_library_updates_with<F, Fut>(library: Arc<ModelLibrary>, resolve_model: F)
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<DeclarationResolution>>,
+{
+    let mut updates = library.index().subscribe_model_library_update_events();
+    // Models whose declarations are recorded or known to be absent this run.
+    let mut settled = HashSet::new();
     loop {
-        let snapshot = match updates.recv().await {
-            Ok(update) => update.snapshot,
+        let event = match updates.recv().await {
+            Ok(event) => event,
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         };
-        for download in snapshot.downloads {
-            if download.status != DownloadStatus::Completed || !seen.insert(download.download_id) {
+        if settled.contains(&event.model_id) {
+            continue;
+        }
+        let record = match library.get_model(&event.model_id).await {
+            Ok(Some(record)) => record,
+            Ok(None) => continue,
+            Err(error) => {
+                tracing::warn!("Declarations for {} not checked: {error}", event.model_id);
                 continue;
             }
-            let Some(model_id) = download.library_model_id else {
-                continue;
-            };
-            match library.get_model(&model_id).await {
-                Ok(Some(record)) if record.metadata.get("sentence_transformers").is_none() => {}
-                Ok(_) => continue,
-                Err(error) => {
-                    tracing::warn!("Declarations for {model_id} not checked: {error}");
-                    continue;
-                }
+        };
+        if !wants_declarations(&event, &record) {
+            if record
+                .metadata
+                .get("sentence_transformers")
+                .is_some_and(|value| !value.is_null())
+            {
+                settled.insert(event.model_id);
             }
-            match resolve(&library, Some(&client), &scratch, &model_id, None).await {
-                Ok(DeclarationResolution::Resolved { .. }) => {
-                    tracing::info!("Recorded sentence-transformers declarations for {model_id}");
-                }
-                Ok(DeclarationResolution::NotDeclared { .. }) => {}
-                Err(error) => {
-                    tracing::warn!("Declarations for {model_id} not resolved: {error}");
-                }
+            continue;
+        }
+        match resolve_model(event.model_id.clone()).await {
+            Ok(DeclarationResolution::Resolved { .. }) => {
+                tracing::info!(
+                    "Recorded sentence-transformers declarations for {}",
+                    event.model_id
+                );
+                settled.insert(event.model_id);
+            }
+            Ok(DeclarationResolution::NotDeclared { .. }) => {
+                settled.insert(event.model_id);
+            }
+            Err(error) => {
+                tracing::warn!("Declarations for {} not resolved: {error}", event.model_id);
             }
         }
     }
@@ -274,6 +328,61 @@ pub(super) async fn react_to_downloads(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_reactor_resolves_a_download_when_it_completes_not_when_it_starts() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Arc::new(ModelLibrary::new(temp.path()).await.unwrap());
+        let calls = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let observed = calls.clone();
+        let reactor = tokio::spawn(react_to_library_updates_with(library.clone(), move |id| {
+            observed.lock().unwrap().push(id);
+            async {
+                Ok(DeclarationResolution::NotDeclared {
+                    searched: Vec::new(),
+                })
+            }
+        }));
+        tokio::task::yield_now().await;
+
+        let dir = library.build_model_path("embedding", "acme", "encoder");
+        std::fs::create_dir_all(&dir).unwrap();
+        let metadata = ModelMetadata {
+            model_id: Some("embedding/acme/encoder".into()),
+            model_type: Some("embedding".into()),
+            family: Some("acme".into()),
+            cleaned_name: Some("encoder".into()),
+            ..Default::default()
+        };
+        // The download starts: its record is indexed while bytes are partial.
+        std::fs::write(dir.join("model.safetensors.part"), b"partial").unwrap();
+        library.save_metadata(&dir, &metadata).await.unwrap();
+        library.index_model_dir(&dir).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            calls.lock().unwrap().is_empty(),
+            "a started download is not complete"
+        );
+
+        // It completes.
+        std::fs::rename(
+            dir.join("model.safetensors.part"),
+            dir.join("model.safetensors"),
+        )
+        .unwrap();
+        library.index_model_dir(&dir).await.unwrap();
+        // A later change to the settled model does not resolve it again.
+        let mut renamed = metadata.clone();
+        renamed.official_name = Some("Encoder".into());
+        library.save_metadata(&dir, &renamed).await.unwrap();
+        library.index_model_dir(&dir).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        reactor.abort();
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec!["embedding/acme/encoder".to_string()]
+        );
+    }
 
     #[test]
     fn lineage_searches_the_source_then_its_single_base_model() {

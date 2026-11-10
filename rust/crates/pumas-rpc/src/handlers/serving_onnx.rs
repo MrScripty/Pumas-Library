@@ -12,7 +12,7 @@ use pumas_library::models::{
 };
 use pumas_library::{
     ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    ProviderRegistry,
+    OnnxRuntimeErrorCode, ProviderRegistry,
 };
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -72,7 +72,10 @@ pub(super) async fn serve_onnx_model(
                 state,
                 serving_error(
                     ModelServeErrorCode::InvalidRequest,
-                    "ONNX Runtime rejected the selected model load request",
+                    format!(
+                        "ONNX Runtime rejected the selected model load request: {}",
+                        error.message
+                    ),
                     &request,
                 ),
             )
@@ -106,13 +109,14 @@ pub(super) async fn serve_onnx_model(
                 provider_model_id = %provider_model_id,
                 profile_id = %request.config.profile_id.as_str(),
                 error_code = ?error.code,
+                error = %error.message,
                 "ONNX session load failed"
             );
             return non_critical_failure_response(
                 state,
                 serving_error(
                     ModelServeErrorCode::ProviderLoadFailed,
-                    "ONNX Runtime could not load the selected model",
+                    onnx_load_failure_message(&error),
                     &request,
                 ),
             )
@@ -514,6 +518,21 @@ fn onnx_provider_request_model_id(
                 .provider_request_model_id(library_model_id, request.config.model_alias.as_deref())
         })
         .unwrap_or_else(|| library_model_id.to_string())
+}
+
+/// Why a load failed, for the caller. Validation refusals are Pumas-authored
+/// and carry their reason; backend failures keep ONNX Runtime's internals in
+/// the log.
+fn onnx_load_failure_message(error: &OnnxRuntimeError) -> String {
+    match error.code {
+        OnnxRuntimeErrorCode::Validation => {
+            format!(
+                "ONNX Runtime could not load the selected model: {}",
+                error.message
+            )
+        }
+        _ => "ONNX Runtime could not load the selected model; inspect the Pumas log".to_string(),
+    }
 }
 
 #[cfg(test)]

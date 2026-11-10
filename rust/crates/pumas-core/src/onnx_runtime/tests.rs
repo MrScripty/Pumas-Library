@@ -300,9 +300,17 @@ fn model_config_derives_the_input_token_limit_from_positions() {
     .unwrap()
     .unwrap();
     assert_eq!(roberta.max_tokens, 512);
-    assert!(
-        limit(r#"{"hidden_size": 8, "max_position_embeddings": 512, "n_positions": 1024}"#)
-            .is_err()
+    // A trained length below the advertised context (nomic_bert) limits
+    // inputs to the smaller, which exceeds neither declaration.
+    let both = limit(r#"{"hidden_size": 8, "max_position_embeddings": 2048, "n_positions": 8192}"#)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (both.max_tokens, both.source),
+        (
+            2048,
+            "max_position_embeddings and n_positions (the smaller)"
+        )
     );
     assert!(limit(r#"{"hidden_size": 8, "max_position_embeddings": "512"}"#).is_err());
 }

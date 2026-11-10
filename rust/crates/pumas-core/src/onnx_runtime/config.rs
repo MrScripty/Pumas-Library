@@ -85,12 +85,12 @@ fn parse_input_token_limit(
     let max_position_embeddings = optional_positive(config, "max_position_embeddings")?;
     let n_positions = optional_positive(config, "n_positions")?;
     let (positions, source) = match (max_position_embeddings, n_positions) {
-        (Some(left), Some(right)) if left != right => {
-            return Err(OnnxRuntimeError::validation(
-                "config",
-                "config.json max_position_embeddings and n_positions must agree",
-            ))
-        }
+        // Some configs record the trained length and the advertised context
+        // separately (nomic_bert: 2048 and 8192). The smaller exceeds neither.
+        (Some(left), Some(right)) if left != right => (
+            left.min(right),
+            "max_position_embeddings and n_positions (the smaller)",
+        ),
         (Some(positions), _) => (positions, "max_position_embeddings"),
         (None, Some(positions)) => (positions, "n_positions"),
         (None, None) => return Ok(None),

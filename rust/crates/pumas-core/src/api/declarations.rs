@@ -89,6 +89,11 @@ async fn blocking<T: Send + 'static>(
 }
 
 /// Resolve and record one model's declarations.
+fn package_file_missing(error: &PumasError) -> bool {
+    matches!(error, PumasError::Io { source: Some(source), .. }
+        if source.kind() == std::io::ErrorKind::NotFound)
+}
+
 pub(super) async fn resolve(
     library: &Arc<ModelLibrary>,
     client: Option<&HuggingFaceClient>,
@@ -115,9 +120,26 @@ pub(super) async fn resolve(
     };
 
     let mut searched = Vec::new();
-    let resolved = if repo_id.is_none() && has_package {
+    let package = if repo_id.is_none() && has_package {
         let dir = model_dir.clone();
-        Some(blocking(move || declarations::read_package(&dir, DeclarationSource::Package)).await?)
+        match blocking(move || declarations::read_package(&dir, DeclarationSource::Package)).await {
+            Ok(declared) => Some(declared),
+            // A download that selected only some files can carry modules.json
+            // without the module files it names; its lineage still publishes
+            // the full package (ADR 0007).
+            Err(error) if package_file_missing(&error) => {
+                tracing::info!(
+                    "The package of {model_id} is incomplete ({error}); searching its lineage"
+                );
+                None
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+    let resolved = if package.is_some() {
+        package
     } else {
         let candidates = lineage(repo_id, &metadata);
         if candidates.is_empty() {

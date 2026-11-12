@@ -289,16 +289,51 @@ fn module_file(path: &str) -> Result<String> {
     Ok(format!("{path}/config.json"))
 }
 
+/// `pooling_mode` names, as newer sentence-transformers packages write them.
+const POOLING_MODE_NAMES: &[(&str, Pooling)] = &[
+    ("mean", Pooling::Mean),
+    ("cls", Pooling::Cls),
+    ("max", Pooling::Max),
+    ("mean_sqrt_len_tokens", Pooling::MeanSqrtLen),
+    ("weightedmean", Pooling::WeightedMean),
+    ("lasttoken", Pooling::LastToken),
+];
+
+/// Read the Pooling module's mode: the `pooling_mode` name newer packages
+/// write, or the `pooling_mode_*` flags older ones do. When both are present
+/// they must agree.
 fn read_pooling(config: &Value) -> Result<Pooling> {
     let enabled: Vec<Pooling> = POOLING_MODES
         .iter()
         .filter(|(key, _)| config.get(*key).and_then(Value::as_bool) == Some(true))
         .map(|(_, mode)| *mode)
         .collect();
-    match enabled.as_slice() {
-        [mode] => Ok(*mode),
-        [] => Err(unsupported("the Pooling module enables no pooling mode")),
-        _ => Err(unsupported(
+    let named = match config.get("pooling_mode") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) => Some(
+            POOLING_MODE_NAMES
+                .iter()
+                .find(|(known, _)| known.eq_ignore_ascii_case(name.trim()))
+                .map(|(_, mode)| *mode)
+                .ok_or_else(|| {
+                    unsupported(format!("the Pooling module names an unknown mode {name:?}"))
+                })?,
+        ),
+        Some(_) => {
+            return Err(unsupported(
+                "the Pooling module's pooling_mode is not a name",
+            ))
+        }
+    };
+    match (named, enabled.as_slice()) {
+        (Some(mode), []) => Ok(mode),
+        (Some(mode), [flag]) if *flag == mode => Ok(mode),
+        (Some(_), _) => Err(unsupported(
+            "the Pooling module's pooling_mode and pooling_mode_* flags disagree",
+        )),
+        (None, [mode]) => Ok(*mode),
+        (None, []) => Err(unsupported("the Pooling module enables no pooling mode")),
+        (None, _) => Err(unsupported(
             "the Pooling module combines several pooling modes",
         )),
     }
@@ -479,6 +514,53 @@ mod tests {
         assert_eq!(
             declared.activation.as_deref(),
             Some("torch.nn.modules.linear.Identity")
+        );
+    }
+
+    #[test]
+    fn pooling_is_read_from_the_named_mode_newer_packages_write() {
+        // EmbeddingGemma 2 and Qwen3-VL-Embedding write these.
+        assert_eq!(
+            read_pooling(
+                &json!({"embedding_dimension":768,"pooling_mode":"mean","include_prompt":true})
+            )
+            .unwrap(),
+            Pooling::Mean
+        );
+        assert_eq!(
+            read_pooling(&json!({"embedding_dimension":2048,"pooling_mode":"lasttoken"})).unwrap(),
+            Pooling::LastToken
+        );
+        // Both forms present must agree.
+        assert_eq!(
+            read_pooling(&json!({"pooling_mode":"cls","pooling_mode_cls_token":true})).unwrap(),
+            Pooling::Cls
+        );
+        let refusal = |config| read_pooling(&config).unwrap_err().to_string();
+        assert!(
+            refusal(json!({"pooling_mode":"mean","pooling_mode_cls_token":true}))
+                .contains("disagree")
+        );
+        assert!(refusal(json!({"pooling_mode":"attention"})).contains("unknown mode"));
+        assert!(refusal(json!({"pooling_mode":3})).contains("not a name"));
+        assert!(refusal(json!({})).contains("enables no pooling mode"));
+    }
+
+    #[test]
+    fn a_package_missing_a_module_file_reports_the_file_as_missing() {
+        // modules.json names 1_Pooling, but a partial download lacks its config.
+        let dir = package(&[(
+            "modules.json",
+            json!([
+                {"path":"","type":"sentence_transformers.models.Transformer"},
+                {"path":"1_Pooling","type":"sentence_transformers.models.Pooling"}
+            ]),
+        )]);
+        let error = read_package(dir.path(), DeclarationSource::Package).unwrap_err();
+        assert!(
+            matches!(&error, PumasError::Io { source: Some(source), .. }
+                if source.kind() == std::io::ErrorKind::NotFound),
+            "{error:?}"
         );
     }
 

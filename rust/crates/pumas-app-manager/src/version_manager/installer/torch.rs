@@ -1379,6 +1379,31 @@ fn installed_source(url: &str) -> String {
         )
 }
 
+/// The install selection a wheel set serves: release, build, Python,
+/// dependency profile, platform, package-version choice and wheel role. A
+/// later resolution of the same selection supersedes its unfinished sets.
+/// Opting into verified package versions is a different selection: it can
+/// resolve different wheels, and switching between the two choices must not
+/// supersede the other's partial downloads.
+fn torch_wheel_selection(
+    tag: &str,
+    build: &str,
+    minor: &str,
+    adapter: &str,
+    verified_constraints: Option<&str>,
+    role: &str,
+) -> String {
+    let version_choice = verified_constraints.map_or_else(
+        || "current".to_owned(),
+        |constraints| format!("verified-{:x}", Sha256::digest(constraints.as_bytes())),
+    );
+    format!(
+        "{tag}|{build}|python{minor}|{adapter}|{}-{}|{version_choice}|{role}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )
+}
+
 /// The resolver's selected official Torch wheel, before acquisition.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2281,12 +2306,13 @@ impl VersionInstaller {
         // The install selection a wheel set serves. A later resolution of the
         // same selection supersedes its unfinished sets that it no longer names.
         let wheel_selection = |role: &str| {
-            format!(
-                "{}|{build}|python{minor}|{}|{}-{}|{role}",
-                selection.tag,
-                selection.adapter,
-                std::env::consts::OS,
-                std::env::consts::ARCH
+            torch_wheel_selection(
+                &selection.tag,
+                build,
+                minor,
+                &selection.adapter,
+                selection.verified_constraints.as_deref(),
+                role,
             )
         };
 
@@ -3657,6 +3683,27 @@ mod managed_python_provenance_tests {
             error.contains("differs from its manifest: member.py"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn verified_version_choice_is_its_own_wheel_selection() {
+        let select = |constraints: Option<&str>, role: &str| {
+            torch_wheel_selection("v2.9.1", "cu130", "3.12", "flux2", constraints, role)
+        };
+        let current = select(None, "dependencies");
+        let verified = select(Some("transformers==4.57.6\n"), "dependencies");
+        // Toggling recorded versions must not supersede the other choice.
+        assert_ne!(current, verified);
+        assert_ne!(
+            verified,
+            select(Some("transformers==4.57.7\n"), "dependencies")
+        );
+        // Retrying the same choice resumes the same selection.
+        assert_eq!(
+            verified,
+            select(Some("transformers==4.57.6\n"), "dependencies")
+        );
+        assert_ne!(current, select(None, "torch"));
     }
 
     #[test]

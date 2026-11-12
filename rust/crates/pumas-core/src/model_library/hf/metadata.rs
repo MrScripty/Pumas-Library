@@ -265,12 +265,36 @@ impl HuggingFaceClient {
         repo_id: &str,
         revision: &DownloadRevision,
     ) -> Result<RepoFileTree> {
+        self.repo_files_at_revision(repo_id, revision, true).await
+    }
+
+    /// Fetch the tree from the Hub, bypassing a cached entry, and cache it.
+    /// Used when a cached entry lacks the regular-file hashes a caller needs.
+    pub(crate) async fn refresh_repo_files_at_revision(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+    ) -> Result<RepoFileTree> {
+        self.repo_files_at_revision(repo_id, revision, false).await
+    }
+
+    async fn repo_files_at_revision(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+        use_cache: bool,
+    ) -> Result<RepoFileTree> {
         // The ID names both the cache file and the authenticated API path.
         validate_hf_repo_id(repo_id)?;
         // Check cache first
         let cache_repo_id = revision_cache_key(repo_id, revision);
         let cache_file = self.get_cache_path(&cache_repo_id, "files");
-        if let Some(cached) = read_repo_file_tree_cache(cache_file.clone()).await? {
+        let cached = if use_cache {
+            read_repo_file_tree_cache(cache_file.clone()).await?
+        } else {
+            None
+        };
+        if let Some(cached) = cached {
             // Reject entries from an older cache format (e.g. pre-recursive)
             if cached.cache_version >= REPO_FILE_TREE_VERSION
                 && repo_file_tree_cache_is_fresh(&cache_file).await?

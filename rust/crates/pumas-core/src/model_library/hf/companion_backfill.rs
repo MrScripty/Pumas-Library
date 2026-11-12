@@ -167,10 +167,19 @@ impl HuggingFaceClient {
                 Err(error) => return Err(error),
             },
         };
-        let tree = match self
+        let cached = self
             .get_repo_files_at_revision(&target.repo_id, &revision)
-            .await
-        {
+            .await;
+        // A tree cached before regular-file hashes were recorded is refetched:
+        // regular companions are verified against their Git blob ids.
+        let tree = match cached {
+            Ok(tree) if tree.regular_file_details.len() < tree.regular_files.len() => {
+                self.refresh_repo_files_at_revision(&target.repo_id, &revision)
+                    .await
+            }
+            other => other,
+        };
+        let tree = match tree {
             Ok(tree) => tree,
             Err(PumasError::NotFound { .. }) => {
                 return Ok(skipped(

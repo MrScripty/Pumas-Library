@@ -743,8 +743,11 @@ pub struct RegularFileInfo {
 /// Current cache format version for [`RepoFileTree`].
 /// Bump when the tree fetch logic changes (e.g. switching to recursive listing)
 /// so that stale entries are treated as cache misses.
-/// Version 3 records regular-file sizes and Git blob ids.
-pub const REPO_FILE_TREE_VERSION: u32 = 3;
+///
+/// Regular-file details were added without a bump: an older entry stays
+/// valid for downloads and recovery, which need only names and LFS hashes.
+/// Consumers that need those details refetch when they are missing.
+pub const REPO_FILE_TREE_VERSION: u32 = 2;
 
 /// Repository file tree from HuggingFace.
 #[derive(Debug, Clone, Serialize, Deserialize)]

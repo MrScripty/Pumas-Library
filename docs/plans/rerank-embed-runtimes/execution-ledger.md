@@ -202,3 +202,16 @@ remains pending the reference safetensors and a served session.
   worktree's target was 79 GB, 52 GB of it incremental cache, which I removed.
   The main checkout's `rust/target` is 317 GB and `worktrees/integration` is
   48 GB; neither is mine.
+- **Cross-runtime checks (2026-11-12), against the Torch references:**
+  - harrier GGUF (llama.cpp): cosine 0.9993–0.9998.
+  - harrier ONNX (fp16, pre-pooled `sentence_embedding`): cosine ≥ 0.9995
+    once pooled outputs are read (`f402c09c`).
+  - bge ONNX (INT8): same order on both oracle sets, within about 0.5 logit.
+  - bge GGUF (Q8_0): same order except one near-tie (−3.30/−3.56 vs Torch
+    −3.29/−3.08).
+  - Voodisss Qwen3-Reranker-4B Q4_K_M (its own head): matches the derived 4B
+    Q8_0 head; the only order difference is a 0.019 vs 0.018 near-tie.
+- **LFM3 / modality primitives S4:** see the modality-primitives plan. All
+  four remaining models pass their live checks.
+- **Library change by the user:** five Qwen3.5/3.6 GGUFs were deleted
+  through Pumas at 08:11–08:13 to free disk space (user-confirmed).

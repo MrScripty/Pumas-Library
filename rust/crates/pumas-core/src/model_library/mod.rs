@@ -24,10 +24,12 @@
 pub(crate) mod artifact_identity;
 mod artifact_load_target;
 pub(crate) mod companion_files;
+pub mod declarations;
 mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;
 mod download_recovery;
+pub(crate) use download_recovery::stable_volume;
 mod download_resolution;
 pub use download_resolution::{
     DownloadLocalAcceptance, DownloadLocalCandidate, DownloadLocationReport,
@@ -111,7 +113,7 @@ pub use library::{
     PackageFactsCacheMigrationDryRunItem, PackageFactsCacheMigrationDryRunReport,
     PackageFactsCacheMigrationExecutionItem, PackageFactsCacheMigrationExecutionReport,
     PackageFactsCacheMigrationPlannedWork, PackageFactsCacheMigrationValidationReport,
-    ReclassifyResult,
+    ReclassifyResult, RetainedImportOutcome,
 };
 pub use link_registry::LinkRegistry;
 pub use mapper::ModelMapper;

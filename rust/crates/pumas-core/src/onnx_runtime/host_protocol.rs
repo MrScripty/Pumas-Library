@@ -53,6 +53,8 @@ pub const UNLOAD_PATH: &str = "/v1/sessions/unload";
 pub const SESSIONS_PATH: &str = "/v1/sessions";
 /// Embed with a loaded model.
 pub const EMBED_PATH: &str = "/v1/embeddings";
+/// Score rerank pairs with a loaded cross-encoder.
+pub const RERANK_PATH: &str = "/v1/rerank";
 
 /// Random token for ONNX hosts launched by this backend process.
 ///
@@ -88,6 +90,10 @@ pub struct OnnxHostLoadRequest {
     pub model_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding_dimensions: Option<usize>,
+    /// What the session computes (pooling, normalization, cross-encoder
+    /// scoring and its activation), from the model's declarations.
+    #[serde(default)]
+    pub task: super::OnnxSessionTask,
 }
 
 /// Unload request sent to a host.

@@ -103,6 +103,14 @@ const SIDECAR_FILES: &[(&str, &str)] = &[
         include_str!("../../../../../torch-server/audio_contract.py"),
     ),
     (
+        "text_api.py",
+        include_str!("../../../../../torch-server/text_api.py"),
+    ),
+    (
+        "loaders/text_encoder_loader.py",
+        include_str!("../../../../../torch-server/loaders/text_encoder_loader.py"),
+    ),
+    (
         "openai_api.py",
         include_str!("../../../../../torch-server/openai_api.py"),
     ),

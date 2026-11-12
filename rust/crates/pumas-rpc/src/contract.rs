@@ -432,6 +432,13 @@ pub(crate) enum RpcCommand {
     DeleteModelWithCascade {
         model_id: String,
     },
+    ResolveModelDeclarations {
+        model_id: String,
+        repo_id: Option<String>,
+    },
+    FinishRetainedImport {
+        model_id: String,
+    },
     GetFileLinkCount {
         file_path: String,
     },
@@ -646,6 +653,8 @@ impl RpcCommand {
             Self::RemoveOrphanedLinks { .. } => "remove_orphaned_links",
             Self::GetLinksForModel { .. } => "get_links_for_model",
             Self::DeleteModelWithCascade { .. } => "delete_model_with_cascade",
+            Self::ResolveModelDeclarations { .. } => "resolve_model_declarations",
+            Self::FinishRetainedImport { .. } => "finish_retained_import",
             Self::GetFileLinkCount { .. } => "get_file_link_count",
             Self::CheckFilesWritable { .. } => "check_files_writable",
             Self::SetModelLinkExclusion { .. } => "set_model_link_exclusion",
@@ -792,6 +801,8 @@ pub(crate) enum RpcOutcome {
     RemoveOrphanedLinks(RemoveOrphanedLinksOutcome),
     LinksForModel(Box<LinksForModelResponse>),
     DeleteModel(DeleteModelResponse),
+    ModelDeclarations(ModelDeclarationsOutcome),
+    FinishRetainedImport(FinishRetainedImportOutcome),
     FileLinkCount(FileLinkCountOutcome),
     FilesWritable(Box<FilesWritableOutcome>),
     LinkExclusionMutation(BaseResponse),
@@ -922,6 +933,8 @@ impl RpcOutcome {
             Self::RemoveOrphanedLinks(value) => serde_json::to_value(value),
             Self::LinksForModel(value) => serde_json::to_value(value),
             Self::DeleteModel(value) => serde_json::to_value(value),
+            Self::ModelDeclarations(value) => serde_json::to_value(value),
+            Self::FinishRetainedImport(value) => serde_json::to_value(value),
             Self::FileLinkCount(value) => serde_json::to_value(value),
             Self::FilesWritable(value) => serde_json::to_value(value),
             Self::LinkExclusionMutation(value) => serde_json::to_value(value),
@@ -1248,6 +1261,51 @@ pub(crate) struct FileWritableOutcome {
 impl FileWritableOutcome {
     pub(crate) fn new(path: String, writable: bool) -> Self {
         Self { path, writable }
+    }
+}
+
+/// `finish_retained_import`: whether the index now acknowledges the Ready
+/// publication, or already did.
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct FinishRetainedImportOutcome {
+    success: bool,
+    outcome: FinishedRetainedImport,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FinishedRetainedImport {
+    Acknowledged,
+    AlreadyReady,
+}
+
+impl FinishRetainedImportOutcome {
+    pub(crate) fn new(outcome: pumas_library::model_library::RetainedImportOutcome) -> Self {
+        use pumas_library::model_library::RetainedImportOutcome as Outcome;
+        Self {
+            success: true,
+            outcome: match outcome {
+                Outcome::Acknowledged => FinishedRetainedImport::Acknowledged,
+                Outcome::AlreadyReady => FinishedRetainedImport::AlreadyReady,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct ModelDeclarationsOutcome {
+    success: bool,
+    resolution: pumas_library::DeclarationResolution,
+}
+
+impl ModelDeclarationsOutcome {
+    pub(crate) fn new(resolution: pumas_library::DeclarationResolution) -> Self {
+        Self {
+            success: true,
+            resolution,
+        }
     }
 }
 
@@ -1832,6 +1890,84 @@ impl From<pumas_library::models::ModelLookupReport> for ModelLookupOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+    /// Records the catalog could not project, each with its reason. One bad
+    /// record never hides the rest of the library.
+    unavailable_records: Vec<UnavailableCatalogRecord>,
+}
+
+/// A library record left out of a catalog projection, and why.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct UnavailableCatalogRecord {
+    model_id: String,
+    reason: String,
+    /// The library's own diagnosis code when it recorded one (for example
+    /// `import_publication_finalization_pending`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    /// The operation that can repair the record, when one exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery: Option<CatalogRecordRecovery>,
+}
+
+/// A supported repair for a record the catalog left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CatalogRecordRecovery {
+    /// `finish_retained_import`: Ready on disk, final index commit never
+    /// acknowledged.
+    FinishRetainedImport,
+}
+
+/// The copied-publication diagnosis the library recorded for a record, as
+/// `(code, message)`. Those gates are what leave a record unprojectable;
+/// other validation errors describe projectable models.
+fn recorded_diagnosis(metadata: &Value) -> Option<(String, String)> {
+    let error = metadata.get("validation_errors")?.as_array()?.first()?;
+    let code = error.get("code")?.as_str()?;
+    code.starts_with("import_publication").then(|| {
+        Some((
+            code.to_string(),
+            error.get("message")?.as_str()?.to_string(),
+        ))
+    })?
+}
+
+impl UnavailableCatalogRecord {
+    /// The library's recorded diagnosis outranks the projection error it
+    /// causes: a retained publication is reported as such, not as the
+    /// missing projection field it leaves behind.
+    fn new(model_id: &str, diagnosis: Option<(String, String)>, error: &PumasError) -> Self {
+        let recovery = diagnosis
+            .as_ref()
+            .filter(|(code, _)| code == "import_publication_finalization_pending")
+            .map(|_| CatalogRecordRecovery::FinishRetainedImport);
+        let (code, reason) = match diagnosis {
+            Some((code, message)) => (Some(bounded_report_text(&code)), message),
+            None => (None, error.to_string()),
+        };
+        Self {
+            model_id: bounded_report_text(model_id),
+            reason: bounded_report_text(&reason),
+            code,
+            recovery,
+        }
+    }
+}
+
+/// Report text that fits the catalog's identifier bound, cut on a character
+/// boundary.
+fn bounded_report_text(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= MAX_IDENTIFIER_BYTES {
+        return trimmed.to_string();
+    }
+    let mut end = MAX_IDENTIFIER_BYTES;
+    while !trimmed.is_char_boundary(end) {
+        end -= 1;
+    }
+    trimmed[..end].to_string()
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -3885,30 +4021,54 @@ fn invalid_catalog_record(model_id: &str, reason: &str) -> PumasError {
 }
 
 impl ModelsOutcome {
+    /// Project every valid record. A record that cannot be projected, or that
+    /// repeats an earlier record's ID, is left out and reported with its
+    /// reason, so one bad record never hides the rest of the library.
     pub(crate) fn from_records(
         records: Vec<ModelRecord>,
         library_root: &Path,
     ) -> Result<Self, PumasError> {
         let mut models = BTreeMap::new();
+        let mut unavailable_records = Vec::new();
         for record in records {
             let model_id = record.id.clone();
-            let recovery = issue_download_recovery_ticket(library_root, &record)?;
-            let catalog_model = CatalogModel::from_record(record, recovery)?;
-            if catalog_model.id != model_id {
-                return Err(invalid_catalog_record(
-                    &model_id,
-                    "map key does not match record id",
-                ));
-            }
-            if models.insert(model_id.clone(), catalog_model).is_some() {
-                return Err(PumasError::Other(format!(
-                    "Model catalog contains duplicate ID: {model_id}"
-                )));
+            let diagnosis = recorded_diagnosis(&record.metadata);
+            let projected = issue_download_recovery_ticket(library_root, &record)
+                .and_then(|recovery| CatalogModel::from_record(record, recovery))
+                .and_then(|catalog_model| {
+                    if catalog_model.id != model_id {
+                        return Err(invalid_catalog_record(
+                            &model_id,
+                            "map key does not match record id",
+                        ));
+                    }
+                    if models.contains_key(&model_id) {
+                        return Err(invalid_catalog_record(
+                            &model_id,
+                            "the catalog contains this ID more than once",
+                        ));
+                    }
+                    Ok(catalog_model)
+                });
+            match projected {
+                Ok(catalog_model) => {
+                    models.insert(model_id, catalog_model);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        model_id = %model_id,
+                        %error,
+                        "Model catalog left out a record it could not project"
+                    );
+                    unavailable_records
+                        .push(UnavailableCatalogRecord::new(&model_id, diagnosis, &error));
+                }
             }
         }
         Ok(Self {
             success: true,
             models,
+            unavailable_records,
         })
     }
 }
@@ -3928,6 +4088,8 @@ pub(crate) struct CatalogSearchOutcome {
     total_count: u64,
     query_time_ms: f64,
     query: String,
+    /// Matching records the catalog could not project, each with its reason.
+    unavailable_records: Vec<UnavailableCatalogRecord>,
 }
 
 impl CatalogSearchOutcome {
@@ -3949,21 +4111,31 @@ impl CatalogSearchOutcome {
             .iter()
             .map(|record| record.id.clone())
             .collect::<Vec<_>>();
-        let mut projected = ModelsOutcome::from_records(search.models, root)?.models;
-        let models = order
-            .into_iter()
-            .map(|id| {
-                projected
-                    .remove(&id)
-                    .ok_or_else(|| invalid_domain_outcome("catalog search identity"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let ModelsOutcome {
+            models: mut projected,
+            unavailable_records,
+            ..
+        } = ModelsOutcome::from_records(search.models, root)?;
+        let reported = |id: &str| {
+            unavailable_records
+                .iter()
+                .any(|record| record.model_id == id)
+        };
+        let mut models = Vec::with_capacity(order.len());
+        for id in order {
+            match projected.remove(&id) {
+                Some(model) => models.push(model),
+                None if reported(&id) => {}
+                None => return Err(invalid_domain_outcome("catalog search identity")),
+            }
+        }
         Ok(Self {
             success: true,
             models,
             total_count,
             query_time_ms: search.query_time_ms,
             query: search.query,
+            unavailable_records,
         })
     }
 }
@@ -6440,6 +6612,15 @@ struct ModelIdParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ResolveModelDeclarationsParams {
+    #[serde(alias = "modelId")]
+    model_id: String,
+    #[serde(default, alias = "repoId")]
+    repo_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FilePathParams {
     #[serde(alias = "filePath")]
     file_path: String,
@@ -6906,6 +7087,20 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         "get_links_for_model" => parse_params::<ModelIdParams>(params).and_then(|params| {
             validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
                 .map(|model_id| RpcCommand::GetLinksForModel { model_id })
+        }),
+        "resolve_model_declarations" => parse_params::<ResolveModelDeclarationsParams>(params)
+            .and_then(|params| {
+                let model_id =
+                    validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)?;
+                let repo_id = params
+                    .repo_id
+                    .map(|repo| validate_bounded_non_empty("repo_id", repo, MAX_IDENTIFIER_BYTES))
+                    .transpose()?;
+                Ok(RpcCommand::ResolveModelDeclarations { model_id, repo_id })
+            }),
+        "finish_retained_import" => parse_params::<ModelIdParams>(params).and_then(|params| {
+            validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
+                .map(|model_id| RpcCommand::FinishRetainedImport { model_id })
         }),
         "delete_model_with_cascade" => parse_params::<ModelIdParams>(params).and_then(|params| {
             validate_bounded_non_empty("model_id", params.model_id, MAX_IDENTIFIER_BYTES)
@@ -7599,6 +7794,7 @@ fn parse_conversion_direction(value: &str) -> Result<ConversionDirection, Public
         "safetensors_to_sherry_qat" | "SafetensorsToSherryQat" => {
             Ok(ConversionDirection::SafetensorsToSherryQat)
         }
+        "gguf_to_ranking_gguf" | "GgufToRankingGguf" => Ok(ConversionDirection::GgufToRankingGguf),
         _ => Err(PublicError::invalid_params_because(
             "`direction` is not a supported conversion direction",
         )),
@@ -7847,8 +8043,17 @@ mod tests {
         }
     }
 
+    /// The projection, failing on the first record it left out, so record
+    /// validation tests see each rejection's reason.
+    fn strict(outcome: ModelsOutcome) -> Result<ModelsOutcome, PumasError> {
+        match outcome.unavailable_records.first() {
+            Some(record) => Err(PumasError::Other(record.reason.clone())),
+            None => Ok(outcome),
+        }
+    }
+
     fn models_outcome(records: Vec<ModelRecord>) -> Result<ModelsOutcome, PumasError> {
-        ModelsOutcome::from_records(records, Path::new("/models"))
+        ModelsOutcome::from_records(records, Path::new("/models")).and_then(strict)
     }
 
     fn managed_models_outcome(mut records: Vec<ModelRecord>) -> Result<ModelsOutcome, PumasError> {
@@ -7860,7 +8065,7 @@ mod tests {
                 record.path = model_dir.canonicalize().unwrap().display().to_string();
             }
         }
-        ModelsOutcome::from_records(records, temp.path())
+        ModelsOutcome::from_records(records, temp.path()).and_then(strict)
     }
 
     fn admission_error(body: &[u8]) -> RpcAdmissionError {
@@ -8193,6 +8398,21 @@ mod tests {
             _ => panic!("wrong admitted conversion command"),
         }
 
+        let ranking = AdmittedRpcRequest::decode(&request(
+            "start_model_conversion",
+            Some(json!({
+                "model_id": "reranker/acme/model-gguf",
+                "direction": "gguf_to_ranking_gguf",
+            })),
+        ))
+        .unwrap();
+        match ranking.command {
+            RpcCommand::StartModelConversion { request } => {
+                assert_eq!(request.direction, ConversionDirection::GgufToRankingGguf);
+            }
+            _ => panic!("wrong admitted conversion command"),
+        }
+
         let backend = AdmittedRpcRequest::decode(&request(
             "setup_quantization_backend",
             Some(json!({"backend": "llama_cpp"})),
@@ -8234,6 +8454,24 @@ mod tests {
                     "direction": "gguf_to_safetensors",
                     "unexpected": true,
                 }),
+            ),
+            (
+                "start_model_conversion",
+                json!({
+                    "model_id": "model",
+                    "direction": "gguf_to_ranking_gguf",
+                    "scoring_contract_repo": "acme/model",
+                }),
+            ),
+            ("resolve_model_declarations", json!({})),
+            ("resolve_model_declarations", json!({"model_id": " "})),
+            (
+                "resolve_model_declarations",
+                json!({"model_id": "m", "repo_id": " "}),
+            ),
+            (
+                "resolve_model_declarations",
+                json!({"model_id": "m", "unexpected": true}),
             ),
             ("get_conversion_progress", json!({"conversion_id": "  "})),
             (
@@ -9139,10 +9377,22 @@ mod tests {
                             "otherModelIds": ["llm/acme/model-copy"]
                         }
                     }
-                }
+                },
+                "unavailable_records": []
             })
         );
-        assert!(ModelsOutcome::from_records(vec![model.clone(), model], temp.path()).is_err());
+        let repeated =
+            ModelsOutcome::from_records(vec![model.clone(), model], temp.path()).unwrap();
+        assert_eq!(repeated.models.len(), 1);
+        assert_eq!(
+            repeated.unavailable_records,
+            vec![UnavailableCatalogRecord {
+                model_id: "llm/acme/model".into(),
+                reason: "Invalid model catalog record llm/acme/model: the catalog contains this ID more than once".into(),
+                code: None,
+                recovery: None,
+            }]
+        );
 
         let refreshed = RpcOutcome::ModelIndexRefresh(ModelIndexRefreshOutcome::new(48))
             .into_value()
@@ -9186,6 +9436,97 @@ mod tests {
             PumasError::Other(message)
                 if message == "Invalid model catalog record llm/acme/model: related availability is not boolean"
         ));
+    }
+
+    #[test]
+    fn a_retained_publication_is_reported_with_its_diagnosis_and_repair() {
+        let metadata = json!({
+            "dependency_bindings": null,
+            "download_incomplete": false,
+            "download_has_part_files": false,
+            "download_missing_expected_files": 0,
+            "download_progress": null,
+            "validation_errors": [{
+                "code": "import_publication_finalization_pending",
+                "message": "The copied publication is Ready on disk, but its final index commit was never acknowledged",
+                "path": "/models/audio/acme/retained"
+            }]
+        });
+        let outcome = ModelsOutcome::from_records(
+            vec![catalog_record("audio/acme/retained", metadata)],
+            Path::new("/models"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&outcome).unwrap()["unavailable_records"],
+            json!([{
+                "model_id": "audio/acme/retained",
+                "reason": "The copied publication is Ready on disk, but its final index commit was never acknowledged",
+                "code": "import_publication_finalization_pending",
+                "recovery": "finish_retained_import"
+            }])
+        );
+    }
+
+    #[test]
+    fn one_malformed_record_is_reported_without_hiding_the_rest_of_the_catalog() {
+        let valid_metadata = json!({
+            "dependency_bindings": [],
+            "download_incomplete": false,
+            "download_has_part_files": false,
+            "download_missing_expected_files": 0,
+            "download_progress": null
+        });
+        let mut malformed = valid_metadata.clone();
+        malformed["dependency_bindings"] = Value::Null;
+        let records = vec![
+            catalog_record("llm/acme/first", valid_metadata.clone()),
+            catalog_record("audio/acme/malformed", malformed),
+            catalog_record("llm/acme/second", valid_metadata),
+        ];
+        let outcome = ModelsOutcome::from_records(records.clone(), Path::new("/models")).unwrap();
+        let value = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(
+            value["models"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            ["llm/acme/first", "llm/acme/second"]
+        );
+        assert_eq!(
+            value["unavailable_records"],
+            json!([{
+                "model_id": "audio/acme/malformed",
+                "reason": "Invalid model catalog record audio/acme/malformed: dependency_bindings is missing or not an array"
+            }])
+        );
+
+        let search = CatalogSearchOutcome::from_search(
+            pumas_library::index::SearchResult {
+                total_count: records.len(),
+                models: records,
+                query_time_ms: 0.5,
+                query: "acme".into(),
+            },
+            Path::new("/models"),
+        )
+        .unwrap();
+        let value = serde_json::to_value(search).unwrap();
+        assert_eq!(
+            value["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|model| model["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["llm/acme/first", "llm/acme/second"]
+        );
+        assert_eq!(
+            value["unavailable_records"][0]["model_id"],
+            "audio/acme/malformed"
+        );
+        assert_eq!(value["total_count"], 3);
     }
 
     #[test]
@@ -9298,7 +9639,7 @@ mod tests {
         for record in invalid_records {
             assert!(
                 managed_models_outcome(vec![record]).is_err(),
-                "invalid catalog record must fail the whole outcome"
+                "invalid catalog record must be left out with its reason"
             );
         }
     }

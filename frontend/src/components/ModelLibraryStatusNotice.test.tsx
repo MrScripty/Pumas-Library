@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelLibraryDiagnostics } from '../hooks/useModels';
 import { ModelLibraryStatusNotice } from './ModelLibraryStatusNotice';
 
-const clean: ModelLibraryDiagnostics = { loadError: null, scanError: null, searchError: null, snapshotWrittenAt: null };
+const clean: ModelLibraryDiagnostics = { loadError: null, scanError: null, searchError: null, snapshotWrittenAt: null, unavailableRecords: [] };
 
 describe('ModelLibraryStatusNotice', () => {
   it('renders nothing for a ready library without failures', () => {
@@ -11,6 +11,23 @@ describe('ModelLibraryStatusNotice', () => {
       <ModelLibraryStatusNotice libraryLoadStatus="ready" diagnostics={clean} hasVisibleModels downloadListError={null} />
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('lists records the backend left out, with their reasons, beside the loaded library', () => {
+    render(
+      <ModelLibraryStatusNotice
+        libraryLoadStatus="ready"
+        diagnostics={{
+          ...clean,
+          unavailableRecords: [{ model_id: 'audio/acme/broken', reason: 'dependency_bindings is missing' }],
+        }}
+        hasVisibleModels
+        downloadListError={null}
+      />
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '1 library record could not be shown:audio/acme/broken: dependency_bindings is missing'
+    );
   });
 
   it('shows the backend reason when the library is unavailable', () => {

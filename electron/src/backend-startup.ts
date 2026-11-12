@@ -6,19 +6,21 @@
  * may come from another build, so unknown fields are ignored and an unknown
  * reason is treated as `backend-unavailable`.
  */
-import { decodeStartupFailureFrame } from './desktop-contract';
+import { decodeStartupFailureFrame, type LauncherRootStaleInstance } from './desktop-contract';
 
 const STARTUP_FAILURE_PREFIX = 'PUMAS_STARTUP_FAILURE=';
 const MAX_STARTUP_LINE_LENGTH = 1024;
 const SUPPORTED_FRAME_VERSION = 1;
 
-export type BackendStartupFailureReason = 'migration-required' | 'backend-unavailable';
+export type BackendStartupFailureReason = 'migration-required' | 'backend-unavailable' | 'stale-instance';
 
 export class BackendStartupError extends Error {
   constructor(
     readonly reason: BackendStartupFailureReason,
     /** The backend's explanation, when it gave one. */
-    readonly detail?: string
+    readonly detail?: string,
+    /** With `stale-instance`: the entry the user may release. */
+    readonly staleInstance?: LauncherRootStaleInstance
   ) {
     super(detail ? `Library backend could not start: ${detail}` : 'Library backend could not start');
     this.name = 'BackendStartupError';
@@ -30,6 +32,7 @@ export class BackendStartupFailureReader {
   private oversized = false;
   reason: BackendStartupFailureReason = 'backend-unavailable';
   detail: string | undefined;
+  staleInstance: LauncherRootStaleInstance | undefined;
 
   push(chunk: string): void {
     for (const character of chunk) {
@@ -59,7 +62,18 @@ export class BackendStartupFailureReader {
     const decoded = decodeStartupFailureFrame(value);
     if (decoded.status !== 'valid' || decoded.value.version !== SUPPORTED_FRAME_VERSION) return;
     const frame = decoded.value;
-    this.reason = frame.reason === 'migration-required' ? 'migration-required' : 'backend-unavailable';
+    const stale = frame.reason === 'stale-instance' ? frame.stale_instance : undefined;
+    this.reason = frame.reason === 'migration-required' ? 'migration-required'
+      : stale ? 'stale-instance' : 'backend-unavailable';
     this.detail = typeof frame.detail === 'string' ? frame.detail : undefined;
+    this.staleInstance = stale
+      ? {
+          pid: stale.pid,
+          startedAt: stale.started_at,
+          ...(typeof stale.version === 'string' ? { version: stale.version } : {}),
+          leaseChecked: stale.lease_checked,
+          survivingProcesses: stale.surviving_processes.map(({ pid, record }) => ({ pid, record })),
+        }
+      : undefined;
   }
 }

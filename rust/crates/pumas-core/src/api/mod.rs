@@ -10,6 +10,7 @@ pub use catalog::{
     CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
 };
 mod conversion;
+mod declarations;
 mod hf;
 pub(crate) mod instance_shutdown;
 #[cfg(test)]
@@ -49,6 +50,7 @@ mod status_telemetry;
 mod system;
 
 pub use builder::PumasApiBuilder;
+pub use declarations::DeclarationResolution;
 pub(crate) use reconciliation::{
     reconcile_on_demand, reconcile_required_model_index, start_intent_reconciliation,
     start_model_library_watcher, ReconcileScope, ReconciliationCoordinator, WatcherWriteSuppressor,

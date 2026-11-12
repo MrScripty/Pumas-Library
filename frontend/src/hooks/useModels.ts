@@ -10,7 +10,7 @@ import { isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import { importAPI } from '../api/import';
 import type { ModelCategory } from '../types/apps';
-import type { CatalogModel } from '@pumas/desktop-contract';
+import type { CatalogModel, UnavailableCatalogRecord } from '@pumas/desktop-contract';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 import { groupCatalogModels } from '../utils/libraryModels';
@@ -42,7 +42,11 @@ export interface ModelLibraryDiagnostics {
   searchError: string | null;
   /** When the rows on screen come from the persisted startup snapshot, when it was written. */
   snapshotWrittenAt: string | null;
+  /** Library records the latest load or search left out, each with the backend's reason. */
+  unavailableRecords: ReadonlyArray<UnavailableCatalogRecord>;
 }
+
+const NO_UNAVAILABLE_RECORDS: ReadonlyArray<UnavailableCatalogRecord> = [];
 
 const API_UNAVAILABLE_REASON = 'The desktop backend is not available.';
 
@@ -79,6 +83,8 @@ export function useModels() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [unavailableRecords, setUnavailableRecords] =
+    useState<ReadonlyArray<UnavailableCatalogRecord>>(NO_UNAVAILABLE_RECORDS);
   const [isSearching, setIsSearching] = useState(false);
   const [isRevalidating, setIsRevalidating] = useState(false);
   const [searchQueryTime, setSearchQueryTime] = useState<number | null>(null);
@@ -122,6 +128,7 @@ export function useModels() {
 
       const freshModelGroups = groupCatalogModels(Object.values(result.models));
       setModelGroups(freshModelGroups);
+      setUnavailableRecords(result.unavailable_records);
       setSnapshotWrittenAt(null);
       if (!writeModelLibrarySnapshot(freshModelGroups, libraryScopeId)) {
         logger.debug('Model library startup snapshot could not be persisted');
@@ -258,6 +265,7 @@ export function useModels() {
           });
 
           setModelGroups(categorizedModels);
+          setUnavailableRecords(result.unavailable_records);
           setSnapshotWrittenAt(null);
           setSearchQueryTime(result.query_time_ms);
 
@@ -305,8 +313,8 @@ export function useModels() {
   }, []);
 
   const libraryDiagnostics = useMemo<ModelLibraryDiagnostics>(
-    () => ({ loadError, scanError, searchError, snapshotWrittenAt }),
-    [loadError, scanError, searchError, snapshotWrittenAt]
+    () => ({ loadError, scanError, searchError, snapshotWrittenAt, unavailableRecords }),
+    [loadError, scanError, searchError, snapshotWrittenAt, unavailableRecords]
   );
 
   return {

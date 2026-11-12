@@ -17,6 +17,7 @@ def load_model(
     model_path: str,
     device: torch.device,
     model_type: Optional[str] = None,
+    declarations: Optional[dict] = None,
 ) -> tuple[Any, Any, str]:
     """Load a model from a path, auto-detecting the format.
 
@@ -33,6 +34,15 @@ def load_model(
         from .cohere_asr_loader import load_cohere_asr
 
         return load_cohere_asr(path, device)
+
+    from .text_encoder_loader import TEXT_ENCODER_TYPES, load_text_encoder
+
+    if model_type in TEXT_ENCODER_TYPES:
+        return load_text_encoder(path, device, model_type, declarations)
+    if declarations is not None:
+        from validation import ModelLoadRefusal
+
+        raise ModelLoadRefusal("declarations apply only to text embedding and rerank models")
 
     _require_safetensors_weights(path)
     _refuse_unexecuted_custom_code(path)

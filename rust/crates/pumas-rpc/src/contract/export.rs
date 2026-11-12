@@ -836,6 +836,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         StatusTelemetryUpdateNotification,
         ModelDownloadUpdateOutcome,
         ModelsOutcome,
+        FinishRetainedImportOutcome,
         ModelLookupParams,
         ModelLookupOutcome,
         CatalogSearchOutcome,
@@ -1895,6 +1896,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "CheckVersionDependenciesOutcome"
             | "InstallVersionStarted"
             | "ModelsOutcome"
+            | "FinishRetainedImportOutcome"
             | "CatalogSearchOutcome"
             | "DownloadListOutcome"
             | "DownloadStartedSuccess"

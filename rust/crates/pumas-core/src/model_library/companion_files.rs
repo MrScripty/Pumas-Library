@@ -513,43 +513,86 @@ pub(crate) fn record_companions(
     inventory: &CompanionInventory,
     source: Option<&CompanionSource>,
 ) -> Result<bool> {
-    let mut changed = false;
-    if let Some(card) = inventory.model_card() {
-        let next = artifact_ref(
-            model_dir,
-            card,
-            source,
-            metadata.model_card_artifact.as_ref(),
-        )?;
-        if !artifact_refs_equal(metadata.model_card_artifact.as_ref(), &next) {
-            metadata.model_card_artifact = Some(next);
-            changed = true;
-        }
-    }
-    if let Some(license) = inventory.license() {
-        let next = artifact_ref(
-            model_dir,
+    let record = CompanionRecord::prepare(model_dir, metadata, inventory.clone(), source)?;
+    Ok(record.apply(metadata))
+}
+
+/// The companion fields of a model's metadata, computed from its stored
+/// files (blocking: the card and license are hashed) and applied later to a
+/// freshly read record, so a concurrent metadata write is never overwritten
+/// by a stale snapshot.
+#[derive(Debug, Clone)]
+pub(crate) struct CompanionRecord {
+    model_card: Option<MetadataArtifactRef>,
+    license: Option<MetadataArtifactRef>,
+    inventory: CompanionInventory,
+}
+
+impl CompanionRecord {
+    /// Hash the stored card and license. `previous` supplies source URLs to
+    /// keep when no source is given. Blocking.
+    pub(crate) fn prepare(
+        model_dir: &Path,
+        previous: &ModelMetadata,
+        inventory: CompanionInventory,
+        source: Option<&CompanionSource>,
+    ) -> Result<Self> {
+        let model_card = inventory
+            .model_card()
+            .map(|card| {
+                artifact_ref(
+                    model_dir,
+                    card,
+                    source,
+                    previous.model_card_artifact.as_ref(),
+                )
+            })
+            .transpose()?;
+        let license = inventory
+            .license()
+            .map(|license| {
+                artifact_ref(
+                    model_dir,
+                    license,
+                    source,
+                    previous.license_artifact.as_ref(),
+                )
+            })
+            .transpose()?;
+        Ok(Self {
+            model_card,
             license,
-            source,
-            metadata.license_artifact.as_ref(),
-        )?;
-        if !artifact_refs_equal(metadata.license_artifact.as_ref(), &next) {
-            metadata.license_artifact = Some(next);
-            changed = true;
-        }
+            inventory,
+        })
     }
 
-    let sources = custom_code_sources(metadata.custom_code_sources.as_deref(), inventory);
-    let next_sources = (!sources.is_empty()).then_some(sources);
-    if next_sources.is_some() && metadata.custom_code_sources != next_sources {
-        metadata.custom_code_sources = next_sources;
-        changed = true;
+    /// Write only the companion fields. Returns whether anything changed.
+    pub(crate) fn apply(&self, metadata: &mut ModelMetadata) -> bool {
+        let mut changed = false;
+        if let Some(next) = &self.model_card {
+            if !artifact_refs_equal(metadata.model_card_artifact.as_ref(), next) {
+                metadata.model_card_artifact = Some(next.clone());
+                changed = true;
+            }
+        }
+        if let Some(next) = &self.license {
+            if !artifact_refs_equal(metadata.license_artifact.as_ref(), next) {
+                metadata.license_artifact = Some(next.clone());
+                changed = true;
+            }
+        }
+        let sources = custom_code_sources(metadata.custom_code_sources.as_deref(), &self.inventory);
+        let next_sources = (!sources.is_empty()).then_some(sources);
+        if next_sources.is_some() && metadata.custom_code_sources != next_sources {
+            metadata.custom_code_sources = next_sources;
+            changed = true;
+        }
+        if names_custom_code(&self.inventory) && metadata.requires_custom_code != Some(true) {
+            metadata.requires_custom_code = Some(true);
+            changed = true;
+        }
+        changed
     }
-    if names_custom_code(inventory) && metadata.requires_custom_code != Some(true) {
-        metadata.requires_custom_code = Some(true);
-        changed = true;
-    }
-    Ok(changed)
 }
 
 #[cfg(test)]

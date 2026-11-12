@@ -561,6 +561,14 @@ async fn a_backfill_transfer_holds_no_library_mutation_grant() {
         .protect_metadata(&target)
         .expect("a backfill transfer must not hold the library-root grant");
     guard.finish_unstarted().unwrap();
+    // A metadata write made meanwhile survives the backfill's own write.
+    api.primary()
+        .model_library
+        .update_metadata(&model_dir, |metadata| {
+            metadata.notes = Some("written during the transfer".into());
+        })
+        .await
+        .unwrap();
     release.notify_one();
     let report = backfill.await.unwrap();
     assert_eq!(
@@ -569,6 +577,20 @@ async fn a_backfill_transfer_holds_no_library_mutation_grant() {
         "{report:?}"
     );
     assert!(model_dir.join("README.md").exists());
+    let metadata = api
+        .primary()
+        .model_library
+        .load_metadata(&model_dir)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        metadata.notes.as_deref(),
+        Some("written during the transfer")
+    );
+    assert_eq!(
+        metadata.model_card_artifact.unwrap().path.as_deref(),
+        Some("README.md")
+    );
 }
 
 #[tokio::test]

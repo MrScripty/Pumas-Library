@@ -16,8 +16,34 @@ impl PumasApi {
     /// same stable root through cleanup, publication and indexing. Contention
     /// becomes terminal failed progress, not an automatic retry. Direct backend
     /// calls, independent readiness probes and external tools are caller-coordinated.
+    ///
+    /// `GgufToRankingGguf` needs the model's `LogitScore` declaration; when it
+    /// has none recorded, its declarations are resolved first, and a lineage
+    /// that declares none is refused with what was searched.
     pub async fn start_conversion(&self, request: conversion::ConversionRequest) -> Result<String> {
         self.try_primary()?;
+        if request.direction == conversion::ConversionDirection::GgufToRankingGguf
+            && !self.has_logit_score_declaration(&request.model_id).await?
+        {
+            if let crate::DeclarationResolution::NotDeclared { searched } = self
+                .resolve_model_declarations(&request.model_id, None)
+                .await?
+            {
+                return Err(crate::PumasError::InvalidParams {
+                    message: format!(
+                        "{} declares no sentence-transformers package in its folder or lineage \
+                         (searched: {}); resolve its declarations naming the repository that \
+                         publishes them",
+                        request.model_id,
+                        if searched.is_empty() {
+                            "none recorded".into()
+                        } else {
+                            searched.join(", ")
+                        }
+                    ),
+                });
+            }
+        }
         self.primary()
             .conversion_manager
             .start_conversion(request)

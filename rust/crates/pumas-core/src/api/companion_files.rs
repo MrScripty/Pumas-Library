@@ -7,8 +7,8 @@
 //! `upstream_revision`) or the model directory name.
 
 use crate::model_library::companion_files::{
-    custom_code_sources, model_files, names_custom_code, record_companions, scan_companions,
-    CompanionKind, CompanionSource,
+    custom_code_sources, model_files, names_custom_code, scan_companions, CompanionKind,
+    CompanionRecord, CompanionSource,
 };
 use crate::model_library::{
     place_companions, CompanionBackfillTarget, CompanionFetchPlan, CompanionPlanOutcome,
@@ -471,35 +471,43 @@ async fn fetch_and_record(
     let place_dir = model_dir.to_path_buf();
     let files = plan.files.clone();
     let record_library = library.clone();
-    let (placed, updated, guard) = tokio::task::spawn_blocking(move || {
+    let (placed, record, guard) = tokio::task::spawn_blocking(move || {
         let mut guard = authority.protect_metadata(&target)?;
         guard.mark_started();
         let placed = place_companions(&place_dir, staged.dir(), &files)?;
-        let updated =
-            record_library.load_metadata(&place_dir)?.and_then(
-                |mut metadata| match scan_companions(&place_dir).and_then(|inventory| {
-                    record_companions(&place_dir, &mut metadata, &inventory, Some(&source))
+        // Hash the card and license now; the fields are applied below to a
+        // record read under the library write lock.
+        let record = record_library
+            .load_metadata(&place_dir)?
+            .and_then(|metadata| {
+                match scan_companions(&place_dir).and_then(|inventory| {
+                    CompanionRecord::prepare(&place_dir, &metadata, inventory, Some(&source))
                 }) {
-                    Ok(true) => Some(metadata),
-                    Ok(false) => None,
+                    Ok(record) => Some(record),
                     Err(error) => {
                         tracing::warn!(
                             "Recording companion files for {place_dir:?} failed: {error}"
                         );
                         None
                     }
-                },
-            );
+                }
+            });
         // The files are placed; the stage is no longer needed.
         if let Err(error) = staged.remove() {
             tracing::warn!("Failed to remove a placed companion stage: {error}");
         }
-        Ok::<_, PumasError>((placed, updated, guard))
+        Ok::<_, PumasError>((placed, record, guard))
     })
     .await
     .map_err(|error| PumasError::Other(format!("Companion placement failed: {error}")))??;
-    if let Some(metadata) = updated {
-        library.save_metadata(model_dir, &metadata).await?;
+    if let Some(record) = record {
+        // Re-read under the write lock and change only the companion fields,
+        // so a concurrent metadata write is never replaced by a stale copy.
+        library
+            .update_metadata(model_dir, move |metadata| {
+                record.apply(metadata);
+            })
+            .await?;
         library.index_model_dir(model_dir).await?;
     }
     guard.finish_success()?;

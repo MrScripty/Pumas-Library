@@ -116,14 +116,14 @@ def select_cpu_release(listing):
     )
     candidates = {}
     for release in versions:
-        tag = release.get("tag_name") if type(release) is dict else None
+        tag = release.get("tagName") if type(release) is dict else None
         match = CPU_TAG.fullmatch(tag) if isinstance(tag, str) else None
         if match and release.get("prerelease") is not True:
             candidates[tuple(int(part) for part in match.groups())] = tag
     package.require(
         candidates,
         "Pumas offers no stable +cpu ONNX Runtime release for this host; listed: "
-        f"{[item.get('tag_name') for item in versions[:20] if type(item) is dict]}",
+        f"{[item.get('tagName') for item in versions[:20] if type(item) is dict]}",
     )
     return candidates[max(candidates)]
 
@@ -426,8 +426,14 @@ def process_tree(root, parents):
     return tree
 
 
+SHARED_LIBRARY = re.compile(r"(\.so(\.[0-9]+)*|\.dylib|\.dll)\Z")
+
+
 def is_runtime_library(path):
-    return Path(path).name.lower().startswith(RUNTIME_LIBRARY_PREFIXES)
+    # ONNX Runtime also maps its own cache files (for example
+    # onnxruntime.db-shm in the user cache); only shared libraries count.
+    name = Path(path).name.lower()
+    return name.startswith(RUNTIME_LIBRARY_PREFIXES) and bool(SHARED_LIBRARY.search(name))
 
 
 def linux_mapped_runtimes(pid, proc=Path("/proc")):

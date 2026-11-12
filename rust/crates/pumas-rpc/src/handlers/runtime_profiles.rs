@@ -302,19 +302,38 @@ async fn confirm_onnx_host_ready(
     };
     let client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(ONNX_HOST_HEALTH_TIMEOUT)
+        .connect_timeout(ONNX_HOST_HEALTH_POLL)
         .build()
         .map_err(|error| PumasError::Other(format!("ONNX host health client: {error}")))?;
-    let health = async {
-        client
-            .get(format!("{}{HEALTH_PATH}", endpoint.trim_end_matches('/')))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<OnnxHostHealth>()
-            .await
-    }
-    .await;
+    let url = format!("{}{HEALTH_PATH}", endpoint.trim_end_matches('/'));
+    // The host listens only after loading its library and execution provider,
+    // which can take a while for GPU builds; poll until it answers.
+    let deadline = tokio::time::Instant::now() + ONNX_HOST_HEALTH_TIMEOUT;
+    let health = loop {
+        let attempt = async {
+            client
+                .get(&url)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<OnnxHostHealth>()
+                .await
+        }
+        .await;
+        match attempt {
+            Ok(health) => break Ok(health),
+            Err(error) if tokio::time::Instant::now() >= deadline => break Err(error),
+            Err(_) => {
+                if running_profile_endpoint(state, profile_id)?.is_none() {
+                    return Ok(Err(format!(
+                        "ONNX Runtime profile {} exited while starting; see its log",
+                        profile_id.as_str()
+                    )));
+                }
+                tokio::time::sleep(ONNX_HOST_HEALTH_POLL).await;
+            }
+        }
+    };
     Ok(match health {
         Ok(health) if health.ready => Ok(()),
         Ok(health) => Err(health
@@ -327,9 +346,12 @@ async fn confirm_onnx_host_ready(
     })
 }
 
-/// How long a just-launched ONNX host may take to answer its health check.
-/// It answers only after its runtime initialized, so this is not a load bound.
-const ONNX_HOST_HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// How long a just-launched ONNX host may take to start answering its health
+/// check. It answers only after its runtime initialized; this bounds startup,
+/// not model loads.
+const ONNX_HOST_HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+/// Interval between health polls of a starting ONNX host.
+const ONNX_HOST_HEALTH_POLL: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// The running ONNX host of an ONNX Runtime profile, launching the profile
 /// (with its pinned or the active version) when it is not running. `Err`

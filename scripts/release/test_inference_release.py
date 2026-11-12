@@ -26,6 +26,19 @@ STAGE_SPEC.loader.exec_module(desktop)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_only_shared_libraries_count_as_a_mapped_onnx_runtime(self):
+        # ONNX Runtime 1.31 maps its own cache database; it is not a library.
+        for name, expected in [
+            ("/x/onnx-runtime-versions/v1.31.1+cpu/lib/libonnxruntime.so", True),
+            ("/x/lib/libonnxruntime.so.1.31.1", True),
+            ("/x/lib/libonnxruntime.dylib", True),
+            ("C:/x/lib/onnxruntime.dll", True),
+            ("/home/u/.cache/Microsoft/DeveloperTools/.onnxruntime/onnxruntime.db-shm", False),
+            ("/x/onnxruntime.db", False),
+            ("/x/lib/libother.so", False),
+        ]:
+            self.assertEqual(support.is_runtime_library(name), expected, name)
+
     def test_desktop_staging_packages_only_the_backend_never_onnx_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -228,7 +241,7 @@ class ReleaseTests(unittest.TestCase):
 
 
 def release(tag, prerelease=False):
-    return {"tag_name": tag, "prerelease": prerelease}
+    return {"tagName": tag, "prerelease": prerelease}
 
 
 class FakeRpc:

@@ -48,6 +48,7 @@ pub mod models;
 pub mod network;
 #[cfg(feature = "onnx-runtime")]
 pub mod onnx_runtime;
+pub mod onnx_runtime_distribution;
 pub mod platform;
 pub mod plugins;
 pub mod process;

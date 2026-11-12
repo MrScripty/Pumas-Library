@@ -422,12 +422,69 @@ fn hash_native_tree(root: &Path) -> Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
-fn verify_llama_cpp_output(root: &Path, proof: &LlamaCppInstallReceiptV1) -> Result<()> {
-    let expected_launcher = if cfg!(windows) {
-        "bin/llama-server.exe"
-    } else {
-        "bin/llama-server"
-    };
+/// The runtimes installed from publisher-verified native release archives.
+///
+/// Both share acquisition, custody, receipts and recovery. They differ in the
+/// archive they select, how its contents are arranged, and the one regular file
+/// a receipt names as the runtime's entry point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeRuntime {
+    LlamaCpp,
+    OnnxRuntime,
+}
+
+impl NativeRuntime {
+    pub(crate) fn for_app(app_id: AppId) -> Result<Self> {
+        match app_id {
+            AppId::LlamaCpp => Ok(Self::LlamaCpp),
+            AppId::OnnxRuntime => Ok(Self::OnnxRuntime),
+            other => Err(PumasError::Config {
+                message: format!("{other} is not installed from a native release archive"),
+            }),
+        }
+    }
+
+    pub(crate) fn display_name(self) -> &'static str {
+        match self {
+            Self::LlamaCpp => "llama.cpp",
+            Self::OnnxRuntime => "ONNX Runtime",
+        }
+    }
+
+    /// The durable acquisition consumer identity. Persisted records name it,
+    /// so an existing value must never change.
+    pub(crate) fn consumer_owner(self) -> &'static str {
+        match self {
+            Self::LlamaCpp => "runtime.llama.cpp",
+            Self::OnnxRuntime => "runtime.onnx-runtime",
+        }
+    }
+
+    fn log_slug(self) -> &'static str {
+        match self {
+            Self::LlamaCpp => "llama-cpp",
+            Self::OnnxRuntime => "onnx-runtime",
+        }
+    }
+
+    /// The regular file a receipt names and hashes as the runtime entry point:
+    /// the llama.cpp server launcher, or the ONNX Runtime library the in-process
+    /// provider loads.
+    pub(crate) fn entry_relative_path(self) -> &'static str {
+        match self {
+            Self::LlamaCpp if cfg!(windows) => "bin/llama-server.exe",
+            Self::LlamaCpp => "bin/llama-server",
+            Self::OnnxRuntime => pumas_library::onnx_runtime_distribution::library_relative_path(),
+        }
+    }
+}
+
+fn verify_native_runtime_output(
+    runtime: NativeRuntime,
+    root: &Path,
+    proof: &NativeInstallReceiptV1,
+) -> Result<()> {
+    let expected_launcher = runtime.entry_relative_path();
     let root_metadata =
         std::fs::symlink_metadata(root).map_err(|error| PumasError::io_with_path(error, root))?;
     let launcher = root.join(expected_launcher);
@@ -721,7 +778,7 @@ fn cleanup_settled_native_workspace(custody: Arc<NativeInstallWorkspace>) -> Nat
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LlamaCppInstallReceiptV1 {
+struct NativeInstallReceiptV1 {
     schema_version: u32,
     tag: String,
     metadata: InstalledVersionMetadata,
@@ -731,21 +788,21 @@ struct LlamaCppInstallReceiptV1 {
     launcher_sha256: String,
 }
 
-struct PreparedLlamaCppInstall {
+struct PreparedNativeInstall {
     use_set: pumas_library::acquisition::AcquiredArtifactUse,
     stage: PathBuf,
     destination: PathBuf,
     custody: Arc<NativeInstallWorkspace>,
 }
 
-struct LlamaCppPublication {
+struct NativePublication {
     versions: PathBuf,
     app_id: AppId,
     manager: Arc<MetadataManager>,
     custody: Arc<NativeInstallWorkspace>,
     stage: PathBuf,
     destination: PathBuf,
-    proof: LlamaCppInstallReceiptV1,
+    proof: NativeInstallReceiptV1,
     #[cfg(test)]
     interrupt_after_native_rename: Option<Arc<AtomicBool>>,
     #[cfg(test)]
@@ -765,7 +822,7 @@ async fn send_install_progress(
     }
 }
 
-struct LlamaCppHttpAttemptHost {
+struct NativeHttpAttemptHost {
     cancelled_transfer_workspace: Option<Arc<NativeInstallWorkspace>>,
     cancel_flag: Arc<AtomicBool>,
     shutdown_flag: Arc<AtomicBool>,
@@ -776,7 +833,7 @@ struct LlamaCppHttpAttemptHost {
 }
 
 #[async_trait::async_trait]
-impl pumas_library::acquisition::HttpAttemptHost for LlamaCppHttpAttemptHost {
+impl pumas_library::acquisition::HttpAttemptHost for NativeHttpAttemptHost {
     async fn pause_requested(&self) {
         super::wait_for_install_cancel(self.cancel_flag.clone()).await;
     }
@@ -812,7 +869,7 @@ impl pumas_library::acquisition::HttpAttemptHost for LlamaCppHttpAttemptHost {
 }
 
 #[async_trait::async_trait]
-impl pumas_library::acquisition::AcquisitionHost for LlamaCppHttpAttemptHost {
+impl pumas_library::acquisition::AcquisitionHost for NativeHttpAttemptHost {
     fn cancelled_transfer_cleanup(&mut self) -> Option<Box<dyn FnOnce() -> Result<()> + Send>> {
         self.cancelled_transfer_workspace.take().map(|custody| {
             Box::new(move || custody.revoke_and_clear()) as Box<dyn FnOnce() -> Result<()> + Send>
@@ -1472,29 +1529,29 @@ impl VersionInstaller {
         }
     }
 
-    /// Configure direct llama.cpp installation with the existing shared
-    /// acquisition capability. Initializes the GitHub metadata client from this
-    /// installer's cache; creates no acquisition store, service, or downloader.
-    /// Reads retained records from that same store and reconciles native uses
-    /// before returning an installer that can admit new work. Recovery failure
-    /// drains this consumer scope before returning the error; the caller retains
-    /// the shared service's shutdown responsibility.
+    /// Configure direct native-archive installation (llama.cpp or ONNX Runtime)
+    /// with the existing shared acquisition capability. Initializes the GitHub
+    /// metadata client from this installer's cache; creates no acquisition
+    /// store, service, or downloader. Reads retained records from that same
+    /// store and reconciles native uses before returning an installer that can
+    /// admit new work. Recovery failure drains this consumer scope before
+    /// returning the error; the caller retains the shared service's shutdown
+    /// responsibility.
     /// External customer compatibility acceptance remains pending.
     pub async fn with_acquisition(
         mut self,
         acquisition: Arc<pumas_library::acquisition::AcquisitionService>,
     ) -> Result<Self> {
-        if self.app_id != AppId::LlamaCpp {
-            return Err(PumasError::Config {
-                message: "Shared artifact acquisition is currently supported for llama.cpp".into(),
-            });
-        }
+        let runtime = NativeRuntime::for_app(self.app_id).map_err(|_| PumasError::Config {
+            message: "Shared artifact acquisition is supported for llama.cpp and ONNX Runtime"
+                .into(),
+        })?;
         let cache = self
             .launcher_root
             .join("launcher-data")
             .join(PathsConfig::CACHE_DIR_NAME);
         let store = acquisition.store().clone();
-        let consumer = Arc::new(acquisition.open_consumer("runtime.llama.cpp")?);
+        let consumer = Arc::new(acquisition.open_consumer(runtime.consumer_owner())?);
         self.acquisition_consumer = Some(consumer.clone());
         let configured = async {
             let (client, records) = consumer
@@ -1503,7 +1560,7 @@ impl VersionInstaller {
                 })
                 .await?;
             self.github_client = Some(Arc::new(client));
-            self.reconcile_retained_llama_cpp(records.into_values().collect())
+            self.reconcile_retained_native_archives(records.into_values().collect())
                 .await
         }
         .await;
@@ -1557,10 +1614,11 @@ impl VersionInstaller {
 
     /// Reconcile historic native uses from the shared store before admitting
     /// new work. Publisher lookup cannot change a retained manifest or receipt.
-    pub(crate) async fn reconcile_retained_llama_cpp(
+    pub(crate) async fn reconcile_retained_native_archives(
         &self,
         records: Vec<pumas_library::acquisition::AcquisitionRecord>,
     ) -> Result<()> {
+        let runtime = NativeRuntime::for_app(self.app_id)?;
         let consumer = self
             .acquisition_consumer
             .as_ref()
@@ -1634,7 +1692,7 @@ impl VersionInstaller {
                         message: "Adopted native installation has no exact completion receipt"
                             .into(),
                     })?;
-                let proof: LlamaCppInstallReceiptV1 = serde_json::from_value(receipt.payload)
+                let proof: NativeInstallReceiptV1 = serde_json::from_value(receipt.payload)
                     .map_err(|error| PumasError::Validation {
                         field: "acquisition.consumer_recovery_required".into(),
                         message: format!("Adopted native receipt is malformed: {error}"),
@@ -1679,17 +1737,22 @@ impl VersionInstaller {
                         .map_err(|error| PumasError::io_with_path(error, &destination))?;
                     if !metadata.is_dir() || metadata.file_type().is_symlink() {
                         return Err(PumasError::InstallationFailed {
-                            message: "Adopted llama.cpp output is not a safe directory".into(),
+                            message: format!(
+                                "Adopted {} output is not a safe directory",
+                                runtime.display_name()
+                            ),
                         });
                     }
-                    Self::validate_llama_cpp_receipt(&tag_for_cleanup, &proof, &destination)?;
-                    verify_llama_cpp_output(&destination, &proof)?;
+                    Self::validate_native_receipt(runtime, &tag_for_cleanup, &proof, &destination)?;
+                    verify_native_runtime_output(runtime, &destination, &proof)?;
                     match manager.get_installed_version(&tag_for_cleanup, Some(app_id))? {
                         Some(installed) if metadata_matches(&installed, &proof.metadata) => {}
                         _ => {
                             return Err(PumasError::InstallationFailed {
-                                message: "Adopted llama.cpp metadata does not match its receipt"
-                                    .into(),
+                                message: format!(
+                                    "Adopted {} metadata does not match its receipt",
+                                    runtime.display_name()
+                                ),
                             })
                         }
                     }
@@ -1739,18 +1802,14 @@ impl VersionInstaller {
                     record.manifest,
                     workspace,
                     move |receipt, use_set| async move {
-                        let proof: LlamaCppInstallReceiptV1 =
-                            serde_json::from_value(receipt.payload).map_err(|error| {
-                                PumasError::Validation {
-                                    field: "acquisition.consumer_recovery_required".into(),
-                                    message: format!(
-                                        "Retained native receipt is malformed: {error}"
-                                    ),
-                                }
+                        let proof: NativeInstallReceiptV1 = serde_json::from_value(receipt.payload)
+                            .map_err(|error| PumasError::Validation {
+                                field: "acquisition.consumer_recovery_required".into(),
+                                message: format!("Retained native receipt is malformed: {error}"),
                             })?;
                         use_set
                             .run_blocking("reconcile retained native installation", move || {
-                                Self::reconcile_llama_cpp_installation(
+                                Self::reconcile_native_installation(
                                     &versions,
                                     &tag,
                                     app_id,
@@ -1905,17 +1964,13 @@ impl VersionInstaller {
     ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
-            AppId::LlamaCpp => {
-                self.install_llama_cpp_binary(tag, release, progress_tx)
-                    .await
+            AppId::LlamaCpp | AppId::OnnxRuntime => {
+                self.install_native_archive(tag, release, progress_tx).await
             }
             AppId::Torch => {
                 self.install_torch_runtime(tag, release, progress_tx, torch_selection)
                     .await
             }
-            AppId::OnnxRuntime => Err(PumasError::Other(
-                "ONNX Runtime is embedded and cannot be installed as a version".to_string(),
-            )),
         }
     }
 
@@ -2042,49 +2097,108 @@ impl VersionInstaller {
         result
     }
 
-    /// Install llama.cpp from upstream pre-built release archives.
-    async fn install_llama_cpp_binary(
+    /// Install llama.cpp or ONNX Runtime from upstream pre-built release archives.
+    async fn install_native_archive(
         &self,
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        let runtime = NativeRuntime::for_app(self.app_id)?;
         let _attempt =
             self.torch_attempt_lock
                 .try_lock()
                 .map_err(|_| PumasError::InstallationFailed {
-                    message: "llama.cpp installation already active".into(),
+                    message: format!("{} installation already active", runtime.display_name()),
                 })?;
         self.torch_control.start();
         let result = self
-            .install_llama_cpp_binary_inner(tag, release, progress_tx)
+            .install_native_archive_inner(runtime, tag, release, progress_tx)
             .await;
         self.torch_control.finish();
         result
     }
 
-    async fn install_llama_cpp_binary_inner(
+    fn select_native_asset<'a>(
         &self,
+        runtime: NativeRuntime,
+        tag: &str,
+        assets: &'a [GitHubAsset],
+    ) -> Result<&'a GitHubAsset> {
+        match runtime {
+            NativeRuntime::LlamaCpp => self.select_llama_cpp_asset(assets),
+            NativeRuntime::OnnxRuntime => Self::select_onnx_runtime_asset(tag, assets),
+        }
+    }
+
+    /// Select the ONNX Runtime CPU archive for this platform. A release that
+    /// does not export the C API Pumas requests is refused with its reason.
+    fn select_onnx_runtime_asset<'a>(
+        tag: &str,
+        assets: &'a [GitHubAsset],
+    ) -> Result<&'a GitHubAsset> {
+        use pumas_library::onnx_runtime_distribution as distribution;
+        if let Some(reason) = distribution::incompatibility_reason(tag) {
+            return Err(PumasError::InstallationFailed { message: reason });
+        }
+        let version =
+            distribution::release_version(tag).ok_or_else(|| PumasError::InstallationFailed {
+                message: format!("ONNX Runtime release {tag} does not have a semantic version"),
+            })?;
+        let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+        distribution::select_platform_archive(assets, &version, os, arch).ok_or_else(|| {
+            PumasError::InstallationFailed {
+                message: format!(
+                    "ONNX Runtime {version} publishes no CPU archive for {os}-{arch}; \
+                     expected one of {:?}",
+                    distribution::platform_archive_names(&version, os, arch)
+                ),
+            }
+        })
+    }
+
+    fn extract_native_archive_from(
+        runtime: NativeRuntime,
+        archive: File,
+        stage: &Path,
+        asset_name: &str,
+    ) -> Result<()> {
+        match runtime {
+            NativeRuntime::LlamaCpp => {
+                Self::extract_llama_cpp_binary_from(archive, stage, asset_name)
+            }
+            NativeRuntime::OnnxRuntime => {
+                Self::extract_onnx_runtime_from(archive, stage, asset_name)
+            }
+        }
+    }
+
+    async fn install_native_archive_inner(
+        &self,
+        runtime: NativeRuntime,
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        let runtime_name = runtime.display_name();
         let consumer = self
             .acquisition_consumer
             .clone()
             .ok_or_else(|| PumasError::Config {
-                message: "llama.cpp requires shared acquisition; configure with VersionInstaller::with_acquisition".into(),
+                message: format!("{runtime_name} requires shared acquisition; configure with VersionInstaller::with_acquisition"),
             })?;
         Self::validate_native_tag(tag)?;
-        info!("Starting llama.cpp binary installation for {}", tag);
+        info!("Starting {runtime_name} installation for {}", tag);
 
-        let asset = self.select_llama_cpp_asset(&release.assets)?;
+        let asset = self.select_native_asset(runtime, tag, &release.assets)?;
         let asset_name = asset.name.clone();
         let github = self
             .github_client
             .as_ref()
             .ok_or_else(|| PumasError::Config {
-                message: "llama.cpp requires the configured shared GitHub asset resolver".into(),
+                message: format!(
+                    "{runtime_name} requires the configured shared GitHub asset resolver"
+                ),
             })?;
         // GitHub discovery appends a runtime flavor to the upstream release
         // tag. Resolve the publisher release, while retaining the full local tag.
@@ -2096,7 +2210,7 @@ impl VersionInstaller {
             .resolve_release_asset(self.app_id.github_repo(), publisher_tag, &asset_name)
             .await
             .map_err(|error| PumasError::InstallationFailed {
-                message: format!("Could not verify llama.cpp release asset: {error}"),
+                message: format!("Could not verify {runtime_name} release asset: {error}"),
             })?;
         let manifest = selection.manifest().clone();
         let selected_file =
@@ -2104,20 +2218,21 @@ impl VersionInstaller {
                 .files()
                 .first()
                 .ok_or_else(|| PumasError::InstallationFailed {
-                    message: "Verified llama.cpp release selection has no file".into(),
+                    message: format!("Verified {runtime_name} release selection has no file"),
                 })?;
         let total_size = selected_file.expected_size();
         let download_url = selection.download_url().to_owned();
 
         info!(
-            "Selected publisher-verified llama.cpp asset: {} ({} bytes)",
+            "Selected publisher-verified {runtime_name} asset: {} ({} bytes)",
             asset_name,
             total_size.unwrap_or_default()
         );
 
         let log_dir = self.logs_dir();
         let log_path = log_dir.join(format!(
-            "install-llama-cpp-{}-{}.log",
+            "install-{}-{}-{}.log",
+            runtime.log_slug(),
             self.slugify_tag(tag),
             Utc::now().format("%Y%m%d-%H%M%S")
         ));
@@ -2168,21 +2283,19 @@ impl VersionInstaller {
                 manifest.clone(),
                 workspace.clone(),
                 move |receipt, use_set| async move {
-                    let proof: LlamaCppInstallReceiptV1 = serde_json::from_value(receipt.payload)
-                        .map_err(|error| {
-                        PumasError::Validation {
+                    let proof: NativeInstallReceiptV1 = serde_json::from_value(receipt.payload)
+                        .map_err(|error| PumasError::Validation {
                             field: "acquisition.consumer_receipt".into(),
-                            message: format!("llama.cpp receipt is malformed: {error}"),
-                        }
-                    })?;
+                            message: format!("{runtime_name} receipt is malformed: {error}"),
+                        })?;
                     if cancel_for_reconcile.load(Ordering::SeqCst)
                         || !control_for_reconcile.try_begin_publication()
                     {
                         return Err(VersionInstaller::cancellation_error());
                     }
                     use_set
-                        .run_blocking("reconcile verified llama.cpp installation", move || {
-                            Self::reconcile_llama_cpp_installation(
+                        .run_blocking("reconcile verified native installation", move || {
+                            Self::reconcile_native_installation(
                                 &versions_for_reconcile,
                                 &tag_for_reconcile,
                                 app_id,
@@ -2225,7 +2338,7 @@ impl VersionInstaller {
                             cause: Some(error.to_string()),
                         })?
                 };
-                let host = LlamaCppHttpAttemptHost {
+                let host = NativeHttpAttemptHost {
                     cancelled_transfer_workspace: Some(custody.clone()),
                     cancel_flag: self.cancel_flag.clone(),
                     shutdown_flag: self.shutdown_flag.clone(),
@@ -2300,16 +2413,17 @@ impl VersionInstaller {
                             let custody_for_extract = custody_for_prepare.clone();
                             let asset_name = asset_for_prepare.clone();
                             let extracted = use_set
-                                .run_blocking("extract publisher-verified llama.cpp archive", move || {
+                                .run_blocking("extract publisher-verified native archive", move || {
                                     custody_for_extract.grant.validate()?;
                                     if path_exists_sync(&stage_for_extract)? {
                                         return Err(PumasError::InstallationFailed {
-                                            message: "llama.cpp output stage already contains unresolved work".into(),
+                                            message: format!("{runtime_name} output stage already contains unresolved work"),
                                         });
                                     }
                                     std::fs::create_dir(&stage_for_extract)
                                         .map_err(|error| PumasError::io_with_path(error, &stage_for_extract))?;
-                                    VersionInstaller::extract_llama_cpp_binary_from(
+                                    VersionInstaller::extract_native_archive_from(
+                                        runtime,
                                         archive,
                                         &stage_for_extract,
                                         &asset_name,
@@ -2317,27 +2431,20 @@ impl VersionInstaller {
                                     sync_native_tree(&stage_for_extract)?;
                                     sync_native_directory(stage_for_extract.parent().ok_or_else(|| PumasError::Other("Native output parent absent".into()))?)?;
                                     let output_tree_sha256 = hash_native_tree(&stage_for_extract)?;
-                                    let launcher = stage_for_extract.join(if cfg!(windows) {
-                                        "bin/llama-server.exe"
-                                    } else {
-                                        "bin/llama-server"
-                                    });
+                                    let launcher =
+                                        stage_for_extract.join(runtime.entry_relative_path());
                                     let launcher_sha256 = hash_regular_file(&launcher)?;
                                     Ok((output_tree_sha256, launcher_sha256))
                                 })
                                 .await?;
                             let metadata_sha256 = hash_metadata(&metadata_for_prepare)?;
-                            let proof = LlamaCppInstallReceiptV1 {
+                            let proof = NativeInstallReceiptV1 {
                                 schema_version: 1,
                                 tag: tag_for_prepare,
                                 metadata: metadata_for_prepare,
                                 metadata_sha256,
                                 output_tree_sha256: extracted.0,
-                                launcher_relative_path: if cfg!(windows) {
-                                    "bin/llama-server.exe".into()
-                                } else {
-                                    "bin/llama-server".into()
-                                },
+                                launcher_relative_path: runtime.entry_relative_path().into(),
                                 launcher_sha256: extracted.1,
                             };
                             #[cfg(test)]
@@ -2363,7 +2470,7 @@ impl VersionInstaller {
                                 }
                                 return settled_result(Err(VersionInstaller::cancellation_error()), withdrawal);
                             }
-                            let prepared = PreparedLlamaCppInstall {
+                            let prepared = PreparedNativeInstall {
                                 use_set,
                                 stage,
                                 destination: destination.clone(),
@@ -2372,18 +2479,18 @@ impl VersionInstaller {
                             Ok((prepared, serde_json::to_value(proof)?))
                         },
                         move |prepared, issued| async move {
-                            let proof: LlamaCppInstallReceiptV1 =
+                            let proof: NativeInstallReceiptV1 =
                                 serde_json::from_value(issued.payload).map_err(|error| {
                                     PumasError::Validation {
                                         field: "acquisition.consumer_receipt".into(),
-                                        message: format!("llama.cpp publication receipt is malformed: {error}"),
+                                        message: format!("{runtime_name} publication receipt is malformed: {error}"),
                                     }
                                 })?;
                             prepared
                                 .use_set
-                                .run_blocking("publish verified llama.cpp installation", move || {
-                                    VersionInstaller::publish_llama_cpp_installation(
-                                        LlamaCppPublication {
+                                .run_blocking("publish verified native installation", move || {
+                                    VersionInstaller::publish_native_installation(
+                                        NativePublication {
                                             versions: versions_for_publish,
                                             app_id,
                                             manager: manager_for_publish,
@@ -2656,8 +2763,8 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn publish_llama_cpp_installation(publication: LlamaCppPublication) -> Result<()> {
-        let LlamaCppPublication {
+    fn publish_native_installation(publication: NativePublication) -> Result<()> {
+        let NativePublication {
             versions,
             app_id,
             manager,
@@ -2671,7 +2778,7 @@ impl VersionInstaller {
             park_after_native_rename_marker,
         } = publication;
         custody.grant.validate()?;
-        Self::validate_llama_cpp_receipt(&proof.tag, &proof, &stage)?;
+        Self::validate_native_receipt(NativeRuntime::for_app(app_id)?, &proof.tag, &proof, &stage)?;
         if manager
             .get_installed_version(&proof.tag, Some(app_id))?
             .is_some()
@@ -2731,37 +2838,51 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn reconcile_llama_cpp_installation(
+    fn reconcile_native_installation(
         versions: &Path,
         tag: &str,
         app_id: AppId,
         manager: &MetadataManager,
         custody: Arc<NativeInstallWorkspace>,
-        proof: LlamaCppInstallReceiptV1,
+        proof: NativeInstallReceiptV1,
     ) -> Result<()> {
         custody.grant.validate()?;
-        Self::validate_llama_cpp_receipt(tag, &proof, custody.path().join("output").as_path())?;
+        let runtime = NativeRuntime::for_app(app_id)?;
+        Self::validate_native_receipt(
+            runtime,
+            tag,
+            &proof,
+            custody.path().join("output").as_path(),
+        )?;
         let destination = versions.join(tag);
         let staged_output = custody.path().join("output");
         match std::fs::symlink_metadata(&destination) {
             Ok(metadata) => {
                 if !metadata.is_dir() || metadata.file_type().is_symlink() {
                     return Err(PumasError::InstallationFailed {
-                        message: "Retained llama.cpp destination is not a directory".into(),
+                        message: format!(
+                            "Retained {} destination is not a directory",
+                            runtime.display_name()
+                        ),
                     });
                 }
-                verify_llama_cpp_output(&destination, &proof)?;
+                verify_native_runtime_output(runtime, &destination, &proof)?;
                 if path_exists_sync(&staged_output)? {
                     return Err(PumasError::InstallationFailed {
-                        message: "Both staged and published llama.cpp output exist".into(),
+                        message: format!(
+                            "Both staged and published {} output exist",
+                            runtime.display_name()
+                        ),
                     });
                 }
                 match manager.get_installed_version(tag, Some(app_id))? {
                     Some(current) if metadata_matches(&current, &proof.metadata) => {}
                     Some(_) => {
                         return Err(PumasError::InstallationFailed {
-                            message: "Installed llama.cpp metadata conflicts with its receipt"
-                                .into(),
+                            message: format!(
+                                "Installed {} metadata conflicts with its receipt",
+                                runtime.display_name()
+                            ),
                         })
                     }
                     None => manager.update_installed_version(
@@ -2772,10 +2893,13 @@ impl VersionInstaller {
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                verify_llama_cpp_output(&staged_output, &proof)?;
+                verify_native_runtime_output(runtime, &staged_output, &proof)?;
                 if manager.get_installed_version(tag, Some(app_id))?.is_some() {
                     return Err(PumasError::InstallationFailed {
-                        message: "Installed metadata exists without its llama.cpp output".into(),
+                        message: format!(
+                            "Installed metadata exists without its {} output",
+                            runtime.display_name()
+                        ),
                     });
                 }
                 Self::publish_native_stage(&staged_output, &destination, || {
@@ -2808,9 +2932,10 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn validate_llama_cpp_receipt(
+    fn validate_native_receipt(
+        runtime: NativeRuntime,
         tag: &str,
-        proof: &LlamaCppInstallReceiptV1,
+        proof: &NativeInstallReceiptV1,
         output: &Path,
     ) -> Result<()> {
         if proof.schema_version != 1
@@ -2821,11 +2946,14 @@ impl VersionInstaller {
         {
             return Err(PumasError::Validation {
                 field: "acquisition.consumer_receipt".into(),
-                message: "llama.cpp receipt does not match its exact version or metadata".into(),
+                message: format!(
+                    "{} receipt does not match its exact version or metadata",
+                    runtime.display_name()
+                ),
             });
         }
         if path_exists_sync(output)? {
-            verify_llama_cpp_output(output, proof)?;
+            verify_native_runtime_output(runtime, output, proof)?;
         }
         Ok(())
     }
@@ -3086,6 +3214,124 @@ impl VersionInstaller {
             "llama.cpp server binary available at {}",
             launch_binary.display()
         );
+        Ok(())
+    }
+
+    /// Extract an upstream ONNX Runtime archive so the version directory holds
+    /// its `lib/`, `include/` and notices, and the library the provider loads
+    /// is a regular file at [`NativeRuntime::entry_relative_path`].
+    ///
+    /// Upstream archives wrap their contents in one `onnxruntime-<platform>-<version>`
+    /// directory, which is removed. On Linux and macOS the unversioned library
+    /// name is a link to the versioned file; the file takes the unversioned name
+    /// and the versioned name becomes the link, so every upstream name still
+    /// resolves and the receipt can hash one regular file.
+    fn extract_onnx_runtime_from(archive: File, stage: &Path, asset_name: &str) -> Result<()> {
+        info!("Extracting ONNX Runtime from {}", asset_name);
+        if asset_name.ends_with(".tgz") || asset_name.ends_with(".tar.gz") {
+            Self::extract_tarball_from(archive, stage)?;
+        } else if asset_name.ends_with(".zip") {
+            Self::extract_zip_from(archive, stage)?;
+        } else {
+            return Err(PumasError::InstallationFailed {
+                message: format!("Unsupported ONNX Runtime archive format: {asset_name}"),
+            });
+        }
+        Self::validate_native_output(stage)?;
+        Self::hoist_single_archive_root(stage)?;
+        let entry = NativeRuntime::OnnxRuntime.entry_relative_path();
+        Self::materialize_linked_entry(stage, Path::new(entry))?;
+        Self::validate_native_output(stage)?;
+        let metadata = std::fs::symlink_metadata(stage.join(entry))
+            .map_err(|error| PumasError::io_with_path(error, stage.join(entry)))?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            return Err(PumasError::InstallationFailed {
+                message: format!("ONNX Runtime archive library {entry} is empty"),
+            });
+        }
+        Ok(())
+    }
+
+    /// Move the contents of an archive's single top-level directory into `stage`.
+    fn hoist_single_archive_root(stage: &Path) -> Result<()> {
+        let entries = std::fs::read_dir(stage)
+            .map_err(|error| PumasError::io_with_path(error, stage))?
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|error| PumasError::io_with_path(error, stage))?;
+        let [only] = entries.as_slice() else {
+            return Ok(());
+        };
+        let file_type = only
+            .file_type()
+            .map_err(|error| PumasError::io_with_path(error, only.path()))?;
+        if !file_type.is_dir() {
+            return Ok(());
+        }
+        // A child may share the wrapper's name; move the wrapper aside first.
+        let wrapper = stage.join(".onnx-runtime-archive-root");
+        std::fs::rename(only.path(), &wrapper)
+            .map_err(|error| PumasError::io_with_path(error, &wrapper))?;
+        for child in std::fs::read_dir(&wrapper)
+            .map_err(|error| PumasError::io_with_path(error, &wrapper))?
+        {
+            let child = child.map_err(|error| PumasError::io_with_path(error, &wrapper))?;
+            let destination = stage.join(child.file_name());
+            std::fs::rename(child.path(), &destination)
+                .map_err(|error| PumasError::io_with_path(error, &destination))?;
+        }
+        std::fs::remove_dir(&wrapper).map_err(|error| PumasError::io_with_path(error, &wrapper))
+    }
+
+    /// Make `relative` a regular file when the archive ships it as a link to a
+    /// sibling file, and leave the sibling name as a link to it.
+    fn materialize_linked_entry(stage: &Path, relative: &Path) -> Result<()> {
+        let entry = stage.join(relative);
+        let metadata = match std::fs::symlink_metadata(&entry) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(PumasError::InstallationFailed {
+                    message: format!(
+                        "ONNX Runtime archive has no {}; it is not a supported runtime archive",
+                        relative.display()
+                    ),
+                })
+            }
+            Err(error) => return Err(PumasError::io_with_path(error, &entry)),
+        };
+        if !metadata.file_type().is_symlink() {
+            return Ok(());
+        }
+        // `validate_native_output` already proved the link is relative and
+        // resolves to a regular file inside the stage.
+        let target = entry
+            .canonicalize()
+            .map_err(|error| PumasError::io_with_path(error, &entry))?;
+        let directory = entry
+            .parent()
+            .ok_or_else(|| PumasError::Other("ONNX Runtime library has no parent".into()))?
+            .canonicalize()
+            .map_err(|error| PumasError::io_with_path(error, &entry))?;
+        if target.parent() != Some(directory.as_path()) {
+            return Err(PumasError::InstallationFailed {
+                message: "ONNX Runtime library link must name a file in the same directory".into(),
+            });
+        }
+        std::fs::remove_file(&entry).map_err(|error| PumasError::io_with_path(error, &entry))?;
+        std::fs::rename(&target, &entry)
+            .map_err(|error| PumasError::io_with_path(error, &entry))?;
+        #[cfg(unix)]
+        {
+            let entry_name = entry
+                .file_name()
+                .ok_or_else(|| PumasError::Other("ONNX Runtime library has no name".into()))?;
+            std::os::unix::fs::symlink(entry_name, &target)
+                .map_err(|error| PumasError::io_with_path(error, &target))?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::copy(&entry, &target)
+                .map_err(|error| PumasError::io_with_path(error, &target))?;
+        }
         Ok(())
     }
 
@@ -4423,7 +4669,7 @@ mod tests {
             requirements_hash: None,
             dependencies_installed: Some(true),
         };
-        let proof = LlamaCppInstallReceiptV1 {
+        let proof = NativeInstallReceiptV1 {
             schema_version: 1,
             tag: "b1234+cpu".into(),
             metadata_sha256: hash_metadata(&metadata).unwrap(),
@@ -4441,7 +4687,7 @@ mod tests {
         let custody = Arc::new(NativeInstallWorkspace::create(&versions, "b1234+cpu").unwrap());
         let manager = MetadataManager::new(root.path());
         manager.ensure_directories().unwrap();
-        VersionInstaller::reconcile_llama_cpp_installation(
+        VersionInstaller::reconcile_native_installation(
             &versions,
             "b1234+cpu",
             AppId::LlamaCpp,
@@ -4460,7 +4706,7 @@ mod tests {
             &proof.metadata
         ));
         // Already-published recovery checks owned paths and metadata.
-        VersionInstaller::reconcile_llama_cpp_installation(
+        VersionInstaller::reconcile_native_installation(
             &versions,
             "b1234+cpu",
             AppId::LlamaCpp,
@@ -4475,7 +4721,7 @@ mod tests {
         )
         .unwrap();
         let published_launcher = destination.join(&proof.launcher_relative_path);
-        VersionInstaller::reconcile_llama_cpp_installation(
+        VersionInstaller::reconcile_native_installation(
             &versions,
             "b1234+cpu",
             AppId::LlamaCpp,
@@ -4490,7 +4736,7 @@ mod tests {
         );
         // An empty launcher is unavailable irrespective of checksum policy.
         std::fs::write(&published_launcher, b"").unwrap();
-        let error = VersionInstaller::reconcile_llama_cpp_installation(
+        let error = VersionInstaller::reconcile_native_installation(
             &versions,
             "b1234+cpu",
             AppId::LlamaCpp,

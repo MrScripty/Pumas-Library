@@ -753,6 +753,13 @@ impl GitHubClient {
         if app_id == AppId::LlamaCpp {
             return Self::expand_llama_cpp_release_variants(releases);
         }
+        if app_id == AppId::OnnxRuntime {
+            return Self::onnx_runtime_installable_releases(
+                releases,
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+            );
+        }
         // Populate archive_size from platform-matched assets
         Self::populate_archive_sizes(&mut releases, app_id);
         releases
@@ -916,6 +923,39 @@ impl GitHubClient {
             && name.contains(platform)
             && name.contains(arch)
             && (name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz"))
+    }
+
+    /// ONNX Runtime releases that export the C API Pumas requests and publish
+    /// a CPU archive for this platform, as installable `+cpu` variants.
+    ///
+    /// Compatibility is derived from each release's version, so new upstream
+    /// releases appear without a Pumas change.
+    fn onnx_runtime_installable_releases(
+        releases: Vec<GitHubRelease>,
+        os: &str,
+        arch: &str,
+    ) -> Vec<GitHubRelease> {
+        use crate::onnx_runtime_distribution as distribution;
+        releases
+            .into_iter()
+            .filter_map(|release| {
+                let version = distribution::release_version(&release.tag_name)?;
+                if !distribution::is_compatible_version(&version) {
+                    return None;
+                }
+                let asset =
+                    distribution::select_platform_archive(&release.assets, &version, os, arch)?
+                        .clone();
+                let mut variant = release.clone();
+                variant.tag_name = format!("{}+{}", release.tag_name, distribution::CPU_VARIANT);
+                variant.name =
+                    format!("{} ({})", release.tag_name, distribution::CPU_VARIANT_LABEL);
+                variant.archive_size = Some(asset.size);
+                variant.total_size = Some(asset.size);
+                variant.assets = vec![asset];
+                Some(variant)
+            })
+            .collect()
     }
 
     /// Get the latest non-prerelease release.
@@ -1842,6 +1882,42 @@ mod tests {
 
         assert!(cache.get_memory("test/repo").is_none());
         assert!(cache.get_disk("test/repo").is_none());
+    }
+
+    #[test]
+    fn onnx_runtime_listing_keeps_compatible_releases_with_a_platform_archive() {
+        let release = |tag: &str, assets: Vec<GitHubAsset>| {
+            let mut release = github_release(assets);
+            release.tag_name = tag.into();
+            release.name = tag.into();
+            release
+        };
+        let releases = vec![
+            release(
+                "v1.25.0",
+                vec![
+                    github_asset("onnxruntime-linux-x64-gpu-1.25.0.tgz", 9),
+                    github_asset("onnxruntime-linux-x64-1.25.0.tgz", 7),
+                ],
+            ),
+            release(
+                "v1.24.2",
+                vec![github_asset("onnxruntime-win-x64-1.24.2.zip", 5)],
+            ),
+            release(
+                "v1.23.2",
+                vec![github_asset("onnxruntime-linux-x64-1.23.2.tgz", 3)],
+            ),
+        ];
+
+        let listed = GitHubClient::onnx_runtime_installable_releases(releases, "linux", "x86_64");
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].tag_name, "v1.25.0+cpu");
+        assert_eq!(listed[0].name, "v1.25.0 (CPU)");
+        assert_eq!(listed[0].archive_size, Some(7));
+        assert_eq!(listed[0].assets.len(), 1);
+        assert_eq!(listed[0].assets[0].name, "onnxruntime-linux-x64-1.25.0.tgz");
     }
 
     #[test]

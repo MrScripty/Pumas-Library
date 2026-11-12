@@ -1,5 +1,8 @@
 import type { InstalledRuntimeVersionsState } from '../../../hooks/useInstalledRuntimeVersions';
-import type { RuntimeProfileStatus } from '../../../types/api-runtime-profiles';
+import type {
+  RuntimeProfileStatus,
+  RuntimeProviderInfo,
+} from '../../../types/api-runtime-profiles';
 import { RuntimeProfileSettingsActions } from './RuntimeProfileSettingsActions';
 import { RuntimeProfileSettingsFields } from './RuntimeProfileSettingsFields';
 import type {
@@ -10,6 +13,7 @@ import type {
 type RuntimeProfileEditorProps = {
   draft: RuntimeProfileDraft;
   installedVersions: InstalledRuntimeVersionsState;
+  providerInfo: RuntimeProviderInfo;
   selectedProfileId: string | null;
   selectedStatus: RuntimeProfileStatus | null;
   isSaving: boolean;
@@ -25,6 +29,7 @@ type RuntimeProfileEditorProps = {
 export function RuntimeProfileEditor({
   draft,
   installedVersions,
+  providerInfo,
   selectedProfileId,
   selectedStatus,
   isSaving,
@@ -47,6 +52,7 @@ export function RuntimeProfileEditor({
         isExistingProfile={isExistingProfile}
         isManagedProfile={isManagedProfile}
         onUpdateDraft={onUpdateDraft}
+        providerInfo={providerInfo}
       />
 
       {(error || saveError) && (
@@ -72,6 +78,5 @@ export type { RuntimeProfileDraft } from './RuntimeProfileSettingsShared';
 export {
   modeLabel,
   providerLabel,
-  providerModes,
 } from './RuntimeProfileSettingsShared';
 export { RuntimeProfileList } from './RuntimeProfileSettingsList';

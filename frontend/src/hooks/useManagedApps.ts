@@ -2,23 +2,30 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_APPS } from '../config/apps';
 import type { SystemResources, AppConfig, AppIconState } from '../types/apps';
 
-interface ManagedAppVisualState {
+/** Process lifecycle of an app the shell starts and stops itself. */
+export interface ManagedAppProcessState {
   isRunning: boolean;
   isStarting: boolean;
   isStopping: boolean;
   launchError: string | null;
-  installedVersions: string[];
-  ramMemory?: number;
-  gpuMemory?: number;
+  ramMemory?: number | undefined;
+  gpuMemory?: number | undefined;
 }
 
-interface UseManagedAppsOptions {
-  systemResources?: SystemResources;
-  llamaCpp: ManagedAppVisualState;
-  ollama: ManagedAppVisualState;
-  onnxRuntime: ManagedAppVisualState;
-  torch: ManagedAppVisualState;
+export interface UseManagedAppsOptions {
+  systemResources?: SystemResources | undefined;
+  /** Installed versions of each version-managed app, keyed by app id. */
+  installedVersionsByAppId: Readonly<Record<string, readonly string[]>>;
+  /** Process lifecycle of each app with a shell-controlled process, keyed by app id. */
+  processes: Readonly<Record<string, ManagedAppProcessState>>;
 }
+
+const IDLE_PROCESS: ManagedAppProcessState = {
+  isRunning: false,
+  isStarting: false,
+  isStopping: false,
+  launchError: null,
+};
 
 function calculateUsagePercent(used: number | undefined, total: number | undefined): number | undefined {
   if (!used || !total || total <= 0) {
@@ -27,13 +34,10 @@ function calculateUsagePercent(used: number | undefined, total: number | undefin
   return Math.round((used / total) * 100);
 }
 
-function deriveIconState({
-  isRunning,
-  isStarting,
-  isStopping,
-  launchError,
-  installedVersions,
-}: ManagedAppVisualState): AppIconState {
+function deriveIconState(
+  { isRunning, isStarting, isStopping, launchError }: ManagedAppProcessState,
+  installedVersions: readonly string[]
+): AppIconState {
   if (isStopping) return 'stopping';
   if (isStarting) return 'starting';
   if (isRunning) return 'running';
@@ -44,47 +48,29 @@ function deriveIconState({
 
 export function decorateManagedApps(
   apps: AppConfig[],
-  { systemResources, llamaCpp, ollama, onnxRuntime, torch }: UseManagedAppsOptions
+  { systemResources, installedVersionsByAppId, processes }: UseManagedAppsOptions
 ): AppConfig[] {
   return apps.map((app) => {
-    if (app.id === 'ollama') {
-      return {
-        ...app,
-        status: ollama.isRunning ? 'running' : 'idle',
-        ramUsage: calculateUsagePercent(ollama.ramMemory, systemResources?.ram.total),
-        gpuUsage: calculateUsagePercent(ollama.gpuMemory, systemResources?.gpu.memory_total),
-        iconState: deriveIconState(ollama),
-      };
+    const process = processes[app.id];
+    const installedVersions = installedVersionsByAppId[app.id];
+    if (!process && !installedVersions) {
+      return app;
     }
 
-    if (app.id === 'llama-cpp') {
-      return {
-        ...app,
-        status: llamaCpp.isRunning ? 'running' : 'idle',
-        ramUsage: calculateUsagePercent(llamaCpp.ramMemory, systemResources?.ram.total),
-        gpuUsage: calculateUsagePercent(llamaCpp.gpuMemory, systemResources?.gpu.memory_total),
-        iconState: deriveIconState(llamaCpp),
-      };
+    const iconState = deriveIconState(process ?? IDLE_PROCESS, installedVersions ?? []);
+    if (!process) {
+      // No shell-controlled process (ONNX Runtime runs per profile): the
+      // state is whether a version is installed.
+      return { ...app, iconState };
     }
 
-    if (app.id === 'onnx-runtime') {
-      // ONNX Runtime executes in-process; its state is whether a downloaded
-      // version is installed.
-      return {
-        ...app,
-        iconState: deriveIconState(onnxRuntime),
-      };
-    }
-
-    if (app.id === 'torch') {
-      return {
-        ...app,
-        status: torch.isRunning ? 'running' : 'idle',
-        iconState: deriveIconState(torch),
-      };
-    }
-
-    return app;
+    return {
+      ...app,
+      status: process.isRunning ? 'running' : 'idle',
+      ramUsage: calculateUsagePercent(process.ramMemory, systemResources?.ram.total),
+      gpuUsage: calculateUsagePercent(process.gpuMemory, systemResources?.gpu.memory_total),
+      iconState,
+    };
   });
 }
 

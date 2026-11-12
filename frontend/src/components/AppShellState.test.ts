@@ -45,7 +45,6 @@ function lifecycleState() {
     isStarting: false,
     isStopping: false,
     launchError: null,
-    installedVersions: [],
   };
 }
 
@@ -65,27 +64,25 @@ describe('AppShellState', () => {
   });
 
   it('builds managed state for supported inference plugins only', () => {
+    const installedVersionsByAppId = { 'onnx-runtime': ['v1.24.2+cpu'] };
     const managed = buildManagedAppsState({
+      installedVersionsByAppId,
       running: getAppRunningState(createStatus({ ollama_running: true })),
       status: createStatus({ app_resources: { ollama: { ram_memory: 2048 } } }),
       systemResources,
       ollama: lifecycleState(),
       llamaCpp: { ...lifecycleState(), isRunning: false },
-      onnxRuntime: { installedVersions: ['v1.24.2+cpu'] },
       torch: lifecycleState(),
     });
 
-    expect(managed.ollama).toMatchObject({ isRunning: true, ramMemory: 2048 });
-    expect(managed.onnxRuntime).toMatchObject({
-      isRunning: false,
-      installedVersions: ['v1.24.2+cpu'],
-    });
+    expect(managed.processes['ollama']).toMatchObject({ isRunning: true, ramMemory: 2048 });
+    expect(managed.processes['llama-cpp']).toMatchObject({ isRunning: false });
+    expect(managed.installedVersionsByAppId).toBe(installedVersionsByAppId);
+    expect(Object.keys(managed.processes).sort()).toEqual(['llama-cpp', 'ollama', 'torch']);
     expect(Object.keys(managed).sort()).toEqual([
-      'llamaCpp',
-      'ollama',
-      'onnxRuntime',
+      'installedVersionsByAppId',
+      'processes',
       'systemResources',
-      'torch',
     ]);
   });
 

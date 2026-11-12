@@ -1,16 +1,15 @@
 import type { InstalledRuntimeVersionsState } from '../../../hooks/useInstalledRuntimeVersions';
+import { runtimeProviderManagementModes } from '../../../hooks/useRuntimeProviders';
 import type {
   RuntimeDeviceMode,
   RuntimeManagementMode,
+  RuntimeProviderInfo,
   RuntimeProviderMode,
 } from '../../../types/api-runtime-profiles';
 import {
   deviceModeLabel,
   modeLabel,
-  providerDeviceModes,
   providerLabel,
-  providerManagementModes,
-  providerModes,
   type RuntimeProfileDraft,
   type RuntimeProfileDraftUpdater,
 } from './RuntimeProfileSettingsShared';
@@ -21,20 +20,34 @@ type RuntimeProfileSettingsFieldsProps = {
   isExistingProfile: boolean;
   isManagedProfile: boolean;
   onUpdateDraft: RuntimeProfileDraftUpdater;
+  providerInfo: RuntimeProviderInfo;
 };
 
-function getDeviceModes(draft: RuntimeProfileDraft): RuntimeDeviceMode[] {
-  const providerModesForDevice = providerDeviceModes[draft.provider];
-  return providerModesForDevice.includes(draft.device_mode)
-    ? providerModesForDevice
-    : [...providerModesForDevice, draft.device_mode];
+// The backend's offered modes, plus the draft's own value when a saved
+// profile predates the offer, so the select never misreports it.
+function withCurrent<Mode extends string>(offered: readonly Mode[], current: Mode): Mode[] {
+  return offered.includes(current) ? [...offered] : [...offered, current];
 }
 
-function getManagementModes(draft: RuntimeProfileDraft): RuntimeManagementMode[] {
-  const providerModesForManagement = providerManagementModes[draft.provider];
-  return providerModesForManagement.includes(draft.management_mode)
-    ? providerModesForManagement
-    : [...providerModesForManagement, draft.management_mode];
+function getDeviceModes(
+  draft: RuntimeProfileDraft,
+  providerInfo: RuntimeProviderInfo
+): RuntimeDeviceMode[] {
+  return withCurrent(providerInfo.device_modes, draft.device_mode);
+}
+
+function getManagementModes(
+  draft: RuntimeProfileDraft,
+  providerInfo: RuntimeProviderInfo
+): RuntimeManagementMode[] {
+  return withCurrent(runtimeProviderManagementModes(providerInfo), draft.management_mode);
+}
+
+function getProviderModes(
+  draft: RuntimeProfileDraft,
+  providerInfo: RuntimeProviderInfo
+): RuntimeProviderMode[] {
+  return withCurrent(providerInfo.provider_modes, draft.provider_mode);
 }
 
 export function RuntimeProfileSettingsFields({
@@ -43,9 +56,11 @@ export function RuntimeProfileSettingsFields({
   isExistingProfile,
   isManagedProfile,
   onUpdateDraft,
+  providerInfo,
 }: RuntimeProfileSettingsFieldsProps) {
-  const deviceModes = getDeviceModes(draft);
-  const managementModes = getManagementModes(draft);
+  const deviceModes = getDeviceModes(draft, providerInfo);
+  const managementModes = getManagementModes(draft, providerInfo);
+  const providerModes = getProviderModes(draft, providerInfo);
   const showsDeviceId =
     draft.device_mode === 'gpu' || draft.device_mode === 'specific_device';
   const showsGpuLayers =
@@ -93,7 +108,7 @@ export function RuntimeProfileSettingsFields({
           }
           className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
         >
-          {providerModes[draft.provider].map((mode) => (
+          {providerModes.map((mode) => (
             <option key={mode} value={mode}>
               {modeLabel(mode)}
             </option>

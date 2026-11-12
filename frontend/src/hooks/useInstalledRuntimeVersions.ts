@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getElectronAPI } from '../api/adapter';
-import type { RuntimeProviderId } from '../types/api-runtime-profiles';
 import { getLogger } from '../utils/logger';
-import { getRuntimeProviderDescriptor } from '../utils/runtimeProviderDescriptors';
 
 const logger = getLogger('useInstalledRuntimeVersions');
 
@@ -14,14 +12,15 @@ export interface InstalledRuntimeVersionsState {
 }
 
 /**
- * Installed versions of the runtime a managed profile of `provider` launches,
- * as reported by the backend version manager. The backend validates any pin on
- * save and launch; this list only feeds the editor's choices.
+ * Installed versions of the runtime app a managed profile launches (the
+ * provider's backend-reported `app_id`), as reported by the backend version
+ * manager. Null when that app is not version managed: there is nothing to
+ * list. The backend validates any pin on save and launch; this list only
+ * feeds the editor's choices.
  */
 export function useInstalledRuntimeVersions(
-  provider: RuntimeProviderId
+  appId: string | null
 ): InstalledRuntimeVersionsState {
-  const appId = getRuntimeProviderDescriptor(provider).managedRuntimeAppId;
   const [versions, setVersions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +28,7 @@ export function useInstalledRuntimeVersions(
 
   const refresh = useCallback(async () => {
     const electronAPI = getElectronAPI();
-    if (!electronAPI?.get_installed_versions) {
+    if (appId === null || !electronAPI?.get_installed_versions) {
       return;
     }
 

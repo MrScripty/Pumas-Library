@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { UNSUPPORTED_VERSION_STATE, isVersionSupportedAppId } from '../utils/appVersionState';
 import { decorateManagedApps } from '../hooks/useManagedApps';
+import { versionManagedAppIds } from '../hooks/useRuntimeProviders';
+import { TEST_RUNTIME_PROVIDERS } from '../test/runtimeProviders';
 import { buildAppShellPanels } from '../components/AppShellPanels';
 import type { ModelManagerProps } from '../components/ModelManager';
 import { DEFAULT_APPS, getAppById } from './apps';
@@ -16,7 +18,7 @@ const onnxPlugin = JSON.parse(
 };
 
 describe('DEFAULT_APPS', () => {
-  it('registers ONNX Runtime as a downloaded in-process app without a connection URL', () => {
+  it('registers ONNX Runtime as a downloaded app without a connection URL', () => {
     const onnxRuntime = getAppById('onnx-runtime');
 
     expect(onnxRuntime).toBeDefined();
@@ -37,26 +39,23 @@ describe('DEFAULT_APPS', () => {
   it('keeps hard-coded ONNX app surfaces aligned with plugin metadata', () => {
     expect(onnxPlugin).toMatchObject({
       id: 'onnx-runtime',
-      installationType: 'in-process',
+      installationType: 'binary',
       capabilities: { hasVersionManagement: true },
     });
     expect(getAppById(onnxPlugin.id)).toBeDefined();
-    expect(isVersionSupportedAppId(onnxPlugin.id)).toBe(
-      onnxPlugin.capabilities.hasVersionManagement
-    );
+    // Version support is whatever the backend registry reports.
+    expect(
+      isVersionSupportedAppId(onnxPlugin.id, versionManagedAppIds(TEST_RUNTIME_PROVIDERS))
+    ).toBe(onnxPlugin.capabilities.hasVersionManagement);
 
     const uninstalled = decorateManagedApps(DEFAULT_APPS, {
-      llamaCpp: lifecycleState(),
-      ollama: lifecycleState(),
-      onnxRuntime: lifecycleState(),
-      torch: lifecycleState(),
+      installedVersionsByAppId: { [onnxPlugin.id]: [] },
+      processes: {},
     });
     expect(uninstalled.find((app) => app.id === onnxPlugin.id)?.iconState).toBe('uninstalled');
     const installed = decorateManagedApps(DEFAULT_APPS, {
-      llamaCpp: lifecycleState(),
-      ollama: lifecycleState(),
-      onnxRuntime: { ...lifecycleState(), installedVersions: ['v1.24.2+cpu'] },
-      torch: lifecycleState(),
+      installedVersionsByAppId: { [onnxPlugin.id]: ['v1.24.2+cpu'] },
+      processes: {},
     });
     expect(installed.find((app) => app.id === onnxPlugin.id)?.iconState).toBe('offline');
 
@@ -97,13 +96,3 @@ describe('DEFAULT_APPS', () => {
     ]);
   });
 });
-
-function lifecycleState() {
-  return {
-    isRunning: false,
-    isStarting: false,
-    isStopping: false,
-    launchError: null,
-    installedVersions: [],
-  };
-}

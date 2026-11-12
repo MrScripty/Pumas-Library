@@ -60,14 +60,8 @@ export default function InferencePluginsApp() {
   const runtimeProfiles = useRuntimeProfiles();
   const servingStatus = useServingStatus();
 
-  const {
-    appVersions,
-    installationProgress,
-    llamaCppInstalledVersions,
-    ollamaInstalledVersions,
-    onnxRuntimeInstalledVersions,
-    torchInstalledVersions,
-  } = useSelectedAppVersions(selectedAppId);
+  const { appVersions, installationProgress, installedVersionsByAppId } =
+    useSelectedAppVersions(selectedAppId);
   const { connectionUrl: llamaCppConnectionUrl, runtimeState: llamaCppRuntimeState } =
     useLlamaCppRuntimeViewState({
       profiles: runtimeProfiles.profiles,
@@ -77,6 +71,7 @@ export default function InferencePluginsApp() {
     });
 
   const managedAppsState = useMemo(() => buildManagedAppsState({
+    installedVersionsByAppId,
     running: runningState,
     status,
     systemResources,
@@ -84,36 +79,27 @@ export default function InferencePluginsApp() {
       isStarting: ollamaIsStarting,
       isStopping: ollamaIsStopping,
       launchError: ollamaLaunchError,
-      installedVersions: ollamaInstalledVersions,
     },
     llamaCpp: {
       isRunning: llamaCppRuntimeState.isRunning,
       isStarting: llamaCppRuntimeState.isStarting,
       isStopping: llamaCppRuntimeState.isStopping,
       launchError: llamaCppRuntimeState.launchError,
-      installedVersions: llamaCppInstalledVersions,
-    },
-    onnxRuntime: {
-      installedVersions: onnxRuntimeInstalledVersions,
     },
     torch: {
       isStarting: torchIsStarting,
       isStopping: torchIsStopping,
       launchError: torchLaunchError,
-      installedVersions: torchInstalledVersions,
     },
   }), [
+    installedVersionsByAppId,
     llamaCppRuntimeState,
-    llamaCppInstalledVersions,
-    ollamaInstalledVersions,
     ollamaIsStarting,
     ollamaIsStopping,
     ollamaLaunchError,
-    onnxRuntimeInstalledVersions,
     runningState,
     status,
     systemResources,
-    torchInstalledVersions,
     torchIsStarting,
     torchIsStopping,
     torchLaunchError,

@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import type { AppShell } from './AppShell';
 import type { ModelManagerProps } from './ModelManager';
-import type { useManagedApps } from '../hooks/useManagedApps';
+import type { UseManagedAppsOptions } from '../hooks/useManagedApps';
 import type { LauncherUpdateState } from '../hooks/useLauncherUpdates';
 import type { AppConfig, ModelCategory, ModelInfo, SystemResources } from '../types/apps';
 import type { RouterProfileSyncStatus, ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
@@ -11,11 +11,8 @@ import type { ServingControlObservation } from '../hooks/useServingStatus';
 type AppShellProps = ComponentProps<typeof AppShell>;
 type AppHeaderProps = AppShellProps['header'];
 type AppSidebarProps = AppShellProps['sidebar'];
-type ManagedAppsState = Parameters<typeof useManagedApps>[0];
-
 interface AppProcessVisualState {
   isRunning?: boolean;
-  installedVersions: string[];
   isStarting: boolean;
   isStopping: boolean;
   launchError: string | null;
@@ -32,9 +29,9 @@ export interface SelectedAppShellState {
 }
 
 interface BuildManagedAppsStateOptions {
+  installedVersionsByAppId: UseManagedAppsOptions['installedVersionsByAppId'];
   llamaCpp: AppProcessVisualState;
   ollama: AppProcessVisualState;
-  onnxRuntime: Pick<AppProcessVisualState, 'installedVersions'>;
   running: AppRunningState;
   status: StatusResponse | null | undefined;
   systemResources?: SystemResources | undefined;
@@ -116,39 +113,40 @@ export function getLauncherLatestVersion(
   return launcherUpdateState?.latestVersion ?? null;
 }
 
+/**
+ * Sidebar inputs: installed versions come keyed by app id from the backend's
+ * version-managed apps; process lifecycle exists only for apps the shell
+ * starts itself.
+ */
 export function buildManagedAppsState({
+  installedVersionsByAppId,
   llamaCpp,
   ollama,
-  onnxRuntime,
   running,
   status,
   systemResources,
   torch,
-}: BuildManagedAppsStateOptions): ManagedAppsState {
+}: BuildManagedAppsStateOptions): UseManagedAppsOptions {
   const appResources = status?.app_resources;
 
   return {
     systemResources,
-    ollama: {
-      ...ollama,
-      isRunning: running.ollamaRunning,
-      ramMemory: appResources?.ollama?.ram_memory ?? undefined,
-      gpuMemory: appResources?.ollama?.gpu_memory ?? undefined,
-    },
-    llamaCpp: {
-      ...llamaCpp,
-      isRunning: llamaCpp.isRunning ?? false,
-    },
-    onnxRuntime: {
-      installedVersions: onnxRuntime.installedVersions,
-      isRunning: false,
-      isStarting: false,
-      isStopping: false,
-      launchError: null,
-    },
-    torch: {
-      ...torch,
-      isRunning: running.torchRunning,
+    installedVersionsByAppId,
+    processes: {
+      ollama: {
+        ...ollama,
+        isRunning: running.ollamaRunning,
+        ramMemory: appResources?.ollama?.ram_memory ?? undefined,
+        gpuMemory: appResources?.ollama?.gpu_memory ?? undefined,
+      },
+      'llama-cpp': {
+        ...llamaCpp,
+        isRunning: llamaCpp.isRunning ?? false,
+      },
+      torch: {
+        ...torch,
+        isRunning: running.torchRunning,
+      },
     },
   };
 }

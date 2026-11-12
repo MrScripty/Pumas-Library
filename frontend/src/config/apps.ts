@@ -36,7 +36,7 @@ export const INFERENCE_PLUGIN_APPS: AppConfig[] = [
     icon: Cpu,
     status: 'idle',
     iconState: 'uninstalled',
-    description: 'Downloaded ONNX Runtime for in-process ONNX embeddings',
+    description: 'Downloaded ONNX Runtime, hosted per profile, for ONNX embeddings',
     starred: false,
     linked: false,
   },

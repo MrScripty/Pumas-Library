@@ -724,10 +724,27 @@ pub struct LfsFileInfo {
     pub sha256: String,
 }
 
+/// Hub-published facts for one regular (non-LFS) repository file.
+///
+/// `git_oid` is the Git blob object id the Hub reports for the file: the
+/// SHA-1 of `"blob {size}\0"` followed by the file bytes. It is the Hub's
+/// published content hash for files stored outside LFS.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct RegularFileInfo {
+    /// Repository-relative filename
+    pub filename: String,
+    /// File size in bytes
+    pub size: u64,
+    /// Git blob object id (40 lowercase hex characters)
+    pub git_oid: String,
+}
+
 /// Current cache format version for [`RepoFileTree`].
 /// Bump when the tree fetch logic changes (e.g. switching to recursive listing)
 /// so that stale entries are treated as cache misses.
-pub const REPO_FILE_TREE_VERSION: u32 = 2;
+/// Version 3 records regular-file sizes and Git blob ids.
+pub const REPO_FILE_TREE_VERSION: u32 = 3;
 
 /// Repository file tree from HuggingFace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -739,6 +756,10 @@ pub struct RepoFileTree {
     pub lfs_files: Vec<LfsFileInfo>,
     /// Non-LFS files
     pub regular_files: Vec<String>,
+    /// Size and Git blob id for each non-LFS file the Hub described.
+    /// Older cache entries and fixtures leave this empty.
+    #[serde(default)]
+    pub regular_file_details: Vec<RegularFileInfo>,
     /// When this was cached
     pub cached_at: String,
     /// Last modified timestamp from HuggingFace (for cache invalidation)

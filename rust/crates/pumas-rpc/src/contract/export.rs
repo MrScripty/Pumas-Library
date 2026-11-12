@@ -329,6 +329,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
                     quant: "Q4_K_M".into(),
                     size_bytes: Some(42),
                     file_group: None,
+                    companion_size_bytes: None,
                 },
                 pumas_library::models::DownloadOption {
                     quant: "Original precision".into(),
@@ -341,6 +342,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
                         shard_count: 2,
                         label: "nested/model.safetensors".into(),
                     }),
+                    companion_size_bytes: None,
                 },
             ],
         },
@@ -1041,6 +1043,7 @@ fn pull_snapshot_fixtures() -> anyhow::Result<Value> {
                 shard_count: 1,
                 label: "model-Q4_K_M.gguf".into(),
             }),
+            companion_size_bytes: None,
         }],
         url: "https://huggingface.co/example/model".into(),
         release_date: Some("2026-01-01T00:00:00Z".into()),

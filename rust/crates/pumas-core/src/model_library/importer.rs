@@ -197,6 +197,40 @@ enum InPlaceImportMode {
     FinalizeDownload,
 }
 
+/// Record the model card, license and code stored in `model_dir`. A pinned
+/// download records each file's source URL at its commit. Identity fields are
+/// not touched.
+async fn record_stored_companions(
+    library: &ModelLibrary,
+    model_dir: &Path,
+    metadata: ModelMetadata,
+    repo_id: Option<&str>,
+    revision: &DownloadRevision,
+) -> Result<ModelMetadata> {
+    let source = repo_id
+        .zip(revision.as_persisted())
+        .map(
+            |(repo_id, commit)| super::companion_files::CompanionSource {
+                repo_id: repo_id.to_string(),
+                revision: commit.to_string(),
+            },
+        );
+    let model_dir = model_dir.to_path_buf();
+    library
+        .run_import_blocking("record stored companion files", move || {
+            let mut metadata = metadata;
+            let inventory = super::companion_files::scan_companions(&model_dir)?;
+            super::companion_files::record_companions(
+                &model_dir,
+                &mut metadata,
+                &inventory,
+                source.as_ref(),
+            )?;
+            Ok::<_, PumasError>(metadata)
+        })
+        .await?
+}
+
 impl ModelImporter {
     /// Create a new model importer.
     ///
@@ -382,6 +416,14 @@ impl ModelImporter {
                 );
             }
         }
+        let metadata = record_stored_companions(
+            &self.library,
+            model_dir,
+            metadata,
+            spec.repo_id.as_deref(),
+            revision,
+        )
+        .await?;
         validate_metadata_v2_with_index(&metadata, self.library.index())?;
 
         let metadata_path = model_dir.join("metadata.json");
@@ -1520,6 +1562,14 @@ impl ModelImporter {
             metadata.metadata_needs_review = Some(true);
             metadata.review_status = Some("pending".to_string());
         }
+        let metadata = record_stored_companions(
+            &self.library,
+            model_dir,
+            metadata,
+            spec.repo_id.as_deref(),
+            revision,
+        )
+        .await?;
 
         validate_metadata_v2_with_index(&metadata, self.library.index())?;
 

@@ -23,7 +23,6 @@ use crate::model_library::download_store::{
 use crate::model_library::mutation_authority::{
     DownloadCancellation, ModelFinalImportCapability, ModelPartialImportCapability,
 };
-use crate::model_library::sharding;
 use crate::model_library::types::{DownloadRequest, DownloadStatus, ModelDownloadProgress};
 use crate::model_library::SelectedArtifactIdentity;
 use crate::model_library::{RecoveryDownloadAdmission, VerifiedDownloadRecovery};
@@ -37,27 +36,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex as TokioMutex, OwnedMutexGuard, RwLock};
 use tracing::{error, info, warn};
-
-/// Regular (non-LFS) filenames that should be automatically fetched alongside
-/// weight files.  These are config/tokenizer files needed by inference engines.
-/// Matched by filename (the last path component).
-const AUXILIARY_FILE_PATTERNS: &[&str] = &[
-    "config.json",
-    "tokenizer.json",
-    "tokenizer_config.json",
-    "generation_config.json",
-    "special_tokens_map.json",
-    "tokenizer.model",
-    "spiece.model",
-    "vocab.json",
-    "merges.txt",
-    "added_tokens.json",
-    "preprocessor_config.json",
-    "chat_template.jinja",
-    "model.safetensors.index.json",
-    "scheduler_config.json",
-    "model_index.json",
-];
 
 const DOWNLOAD_UPDATE_CURSOR_PREFIX: &str = "download:";
 const DOWNLOAD_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_millis(500);
@@ -235,82 +213,6 @@ impl DownloadPublicationOwner {
     }
 }
 
-/// Select auxiliary config/tokenizer files from a repo's regular (non-LFS) file list.
-fn select_auxiliary_files(regular_files: &[String]) -> Vec<String> {
-    regular_files
-        .iter()
-        .filter(|path| {
-            let filename = path.rsplit('/').next().unwrap_or(path);
-            AUXILIARY_FILE_PATTERNS.contains(&filename)
-        })
-        .cloned()
-        .collect()
-}
-
-/// Enhanced auxiliary selection that is scope-aware.
-///
-/// In addition to the base auxiliary patterns, this also includes:
-/// - Non-weight LFS files (images, READMEs, etc.) from the full repo
-/// - Subdirectory config files whose directory overlaps with selected weight files
-/// - Shard index JSON files (`*.index.json`) in directories containing selected weights
-fn select_auxiliary_files_for_download(
-    regular_files: &[String],
-    all_lfs_files: &[crate::model_library::types::LfsFileInfo],
-    weight_files: &[FileToDownload],
-) -> Vec<FileToDownload> {
-    // Collect directory prefixes from selected weight files.
-    let weight_dirs: HashSet<&str> = weight_files
-        .iter()
-        .filter_map(|f| f.filename.rsplit_once('/').map(|(dir, _)| dir))
-        .collect();
-
-    // Already-selected weight filenames (to avoid duplicating them in aux).
-    let weight_names: HashSet<&str> = weight_files.iter().map(|f| f.filename.as_str()).collect();
-
-    let mut aux: Vec<FileToDownload> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    // 1. Regular (non-LFS) auxiliary files — root-level by pattern.
-    for path in regular_files {
-        let filename = path.rsplit('/').next().unwrap_or(path);
-        let is_root = !path.contains('/');
-        let dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-
-        let include = if is_root {
-            // Root-level: match by auxiliary pattern.
-            AUXILIARY_FILE_PATTERNS.contains(&filename)
-        } else if weight_dirs.contains(dir) {
-            // Subdirectory that has selected weight files: include configs.
-            AUXILIARY_FILE_PATTERNS.contains(&filename) || filename.ends_with(".index.json")
-        } else {
-            // Always include globally-useful files regardless of directory.
-            filename == "model_index.json" || filename == "scheduler_config.json"
-        };
-
-        if include && !weight_names.contains(path.as_str()) && seen.insert(path.clone()) {
-            aux.push(FileToDownload {
-                filename: path.clone(),
-                size: None,
-                sha256: None,
-            });
-        }
-    }
-
-    // 2. Non-weight LFS files — always included (images, READMEs, etc.).
-    let (_weight_groups, non_weight_lfs) = sharding::group_weight_files(all_lfs_files);
-    for lf in &non_weight_lfs {
-        if !weight_names.contains(lf.filename.as_str()) && seen.insert(lf.filename.clone()) {
-            aux.push(FileToDownload {
-                filename: lf.filename.clone(),
-                size: Some(lf.size),
-                sha256: Some(lf.sha256.clone()),
-            });
-        }
-    }
-
-    aux
-}
-
 /// Resolve the exact producer-bound recovery set against the current remote
 /// tree. Recovery never widens this set with repository auxiliary files and
 /// never accepts a partial intersection.
@@ -470,20 +372,14 @@ fn resolve_download_selection(
     let required_indexes = super::package_selection::required_indexes(
         requested_payload_files.iter().map(String::as_str),
     );
-    let mut auxiliary_files = if request.filenames.is_some()
-        || request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory)
-    {
-        select_auxiliary_files_for_download(&tree.regular_files, &tree.lfs_files, &payload_files)
-    } else {
-        select_auxiliary_files(&tree.regular_files)
-            .into_iter()
-            .map(|filename| FileToDownload {
-                filename,
-                size: None,
-                sha256: None,
-            })
-            .collect()
-    };
+    // The model card, license and notice files, code, and other metadata
+    // travel with the selected weights. They are stored for provenance only
+    // and never enter the selected-artifact identity.
+    let mut auxiliary_files = super::companions::select_companion_files(
+        &tree,
+        &payload_files,
+        super::companions::CompanionMode::for_request(request),
+    );
     // Automatically add only indexes belonging to the selected shards. Explicit
     // index selections remain payloads, and no auxiliary is fetched twice.
     auxiliary_files.retain(|file| {
@@ -9753,9 +9649,10 @@ mod tests {
             repo_id: repo_id.to_string(),
             lfs_files,
             regular_files,
+            regular_file_details: Vec::new(),
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None,
-            cache_version: 2,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
         };
         std::fs::write(
             client.get_cache_path(repo_id, "files"),
@@ -11619,9 +11516,10 @@ mod tests {
                 sha256: "a".repeat(64),
             }],
             regular_files: vec!["config.json".to_string()],
+            regular_file_details: Vec::new(),
             cached_at: "2026-09-03T00:00:00Z".to_string(),
             last_modified: None,
-            cache_version: 2,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
         };
 
         assert!(resolve_exact_recovery_files(
@@ -20312,75 +20210,6 @@ mod tests {
     }
 
     #[test]
-    fn test_select_auxiliary_files_filters_correctly() {
-        let regular_files = vec![
-            ".gitattributes".to_string(),
-            "README.md".to_string(),
-            "config.json".to_string(),
-            "tokenizer.json".to_string(),
-            "tokenizer_config.json".to_string(),
-            "generation_config.json".to_string(),
-            "special_tokens_map.json".to_string(),
-            "modeling_trado.py".to_string(),
-            "tokenizer.model".to_string(),
-            "vocab.json".to_string(),
-            "merges.txt".to_string(),
-            "added_tokens.json".to_string(),
-            "preprocessor_config.json".to_string(),
-            "chat_template.jinja".to_string(),
-            "model.safetensors.index.json".to_string(),
-        ];
-
-        let selected = select_auxiliary_files(&regular_files);
-        assert_eq!(selected.len(), 12);
-        assert!(selected.contains(&"config.json".to_string()));
-        assert!(selected.contains(&"tokenizer.json".to_string()));
-        assert!(selected.contains(&"tokenizer_config.json".to_string()));
-        assert!(selected.contains(&"generation_config.json".to_string()));
-        assert!(selected.contains(&"special_tokens_map.json".to_string()));
-        assert!(selected.contains(&"tokenizer.model".to_string()));
-        assert!(selected.contains(&"vocab.json".to_string()));
-        assert!(selected.contains(&"merges.txt".to_string()));
-        assert!(selected.contains(&"added_tokens.json".to_string()));
-        assert!(selected.contains(&"preprocessor_config.json".to_string()));
-        assert!(selected.contains(&"chat_template.jinja".to_string()));
-        assert!(selected.contains(&"model.safetensors.index.json".to_string()));
-        assert!(!selected.contains(&"README.md".to_string()));
-        assert!(!selected.contains(&".gitattributes".to_string()));
-        assert!(!selected.contains(&"modeling_trado.py".to_string()));
-    }
-
-    #[test]
-    fn test_select_auxiliary_files_empty_input() {
-        let selected = select_auxiliary_files(&[]);
-        assert!(selected.is_empty());
-    }
-
-    #[test]
-    fn test_select_auxiliary_files_no_matches() {
-        let regular_files = vec![
-            ".gitattributes".to_string(),
-            "README.md".to_string(),
-            "modeling_sdar.py".to_string(),
-        ];
-        let selected = select_auxiliary_files(&regular_files);
-        assert!(selected.is_empty());
-    }
-
-    #[test]
-    fn test_select_auxiliary_files_ignores_subdirectory_paths() {
-        let regular_files = vec![
-            "subdir/config.json".to_string(),
-            "tokenizer.json".to_string(),
-        ];
-        let selected = select_auxiliary_files(&regular_files);
-        // Both should match — the subdirectory path matches by filename component
-        assert_eq!(selected.len(), 2);
-        assert!(selected.contains(&"subdir/config.json".to_string()));
-        assert!(selected.contains(&"tokenizer.json".to_string()));
-    }
-
-    #[test]
     fn test_retry_limit_zero_means_unlimited() {
         assert_eq!(retry_limit(0), None);
         assert_eq!(retry_limit(4), Some(4));
@@ -22794,9 +22623,10 @@ mod tests {
             repo_id: repo_id.to_string(),
             lfs_files,
             regular_files,
+            regular_file_details: Vec::new(),
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None,
-            cache_version: 2,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
         };
         let cache_repo_id = format!("{repo_id}@{}", revision.as_str());
         std::fs::write(
@@ -22844,6 +22674,7 @@ mod tests {
             .into_iter()
             .map(String::from)
             .collect(),
+            regular_file_details: Vec::new(),
             cached_at: "fixture".into(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -22965,6 +22796,7 @@ mod tests {
                 sha256: "a".repeat(64),
             }],
             regular_files: vec!["config.json".into(), "empty.txt".into()],
+            regular_file_details: Vec::new(),
             cached_at: "fixture".into(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -23022,6 +22854,7 @@ mod tests {
                 },
             ],
             regular_files: Vec::new(),
+            regular_file_details: Vec::new(),
             cached_at: "fixture".into(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -24183,9 +24016,10 @@ mod tests {
                 sha256: "not-a-sha256".into(),
             }],
             regular_files: Vec::new(),
+            regular_file_details: Vec::new(),
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None,
-            cache_version: 2,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
         };
         assert!(matches!(
             validate_pinned_execution_tree("acme/model", &admitted, &malformed),

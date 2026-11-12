@@ -3311,6 +3311,7 @@ mod hf_download_details_tests {
                     shard_count: 0,
                     label: " Exact label ".into(),
                 }),
+                companion_size_bytes: None,
             }],
         }
     }

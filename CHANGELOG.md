@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   restarts only that host, never Pumas. A profile's device mode selects the
   build's execution provider (CPU, CUDA, or CoreML on macOS); a provider that
   cannot initialize, or a missing runtime, refuses the launch with the reason.
+  For CUDA the reason says whether the NVIDIA driver is missing, too old for
+  the build, or present with the CUDA runtime or cuDNN libraries missing; the
+  driver stays the operating system's, and Pumas only points at NVIDIA's
+  download. Hosts run with ONNX Runtime telemetry disabled
+  (`ORT_DISABLE_TELEMETRY=1` and telemetry events off), so ONNX Runtime
+  creates no device id or telemetry database in the user cache.
   Serving launches the profile's host when needed. `ORT_DYLIB_PATH` remains a
   developer override. See
   [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md).

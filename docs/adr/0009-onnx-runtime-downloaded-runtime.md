@@ -89,7 +89,22 @@ installed build and the profile's device mode, and registers it with
 **Refusals.** The host initializes its library and execution provider before it
 listens, then reports readiness on `/health`. When a host cannot initialize,
 Pumas stops it and refuses the launch with the host's reason. For CUDA the
-reason names the NVIDIA driver plus the CUDA runtime and cuDNN libraries.
+host asks the NVIDIA driver which CUDA version it supports, and the reason
+names the missing piece: the driver is missing, the driver is too old for the
+build's CUDA major version, or the build's CUDA runtime or cuDNN libraries are
+missing.
+
+**NVIDIA driver.** The driver belongs to the host system and is never managed
+like a runtime. Pumas detects a missing or too-old driver and points at the
+official NVIDIA download, but never installs, tracks or removes it.
+
+**Telemetry.** Pumas disables third-party telemetry. Every ONNX host runs with
+`ORT_DISABLE_TELEMETRY=1`, which ONNX Runtime reads as its environment
+initializes: on Linux and macOS it stops the 1DS uploader before it creates
+its device id and event database under the user cache
+(`Microsoft/DeveloperTools/.onnxruntime`). The host also commits ONNX
+Runtime's environment with telemetry events disabled, the switch Windows
+builds honor.
 
 **Serving.** Pumas reaches hosts through `RemoteOnnxEmbeddingBackend` behind
 the existing session manager, so the `/v1` gateway and model operations are
@@ -107,16 +122,22 @@ archive verification installs ONNX Runtime through the extracted `pumas-rpc`.
 
 - A fresh install cannot run ONNX embeddings until the user installs an ONNX
   Runtime version. Every refusal says so.
-- GPU execution depends on the host's NVIDIA driver and CUDA/cuDNN libraries.
-  Pumas does not install those; the refusal names what is missing.
-- DirectML is not offered. Microsoft publishes it only as a NuGet package, last
-  updated at 1.24.x. Offering it would need a second download source and
-  SHA-512 evidence in the acquisition manifest, which is an owner decision.
+- GPU execution depends on the host's NVIDIA driver and on the CUDA runtime
+  and cuDNN libraries of the build's CUDA major version. Until Pumas installs
+  the latter, the refusal names what is missing.
+- DirectML is not offered. Microsoft publishes the DirectML build only as a
+  NuGet package, and it stops at 1.24.4, so it would pin Pumas to an old
+  release and need a second download source with SHA-512 evidence.
 - One model id is loaded by at most one host at a time. Loading it on a second
   profile is refused with the host that holds it.
 
 ## Revisit When
 
-- Pumas should install CUDA/cuDNN libraries for GPU builds;
-- a DirectML, ROCm or other execution provider is required; or
+- Pumas installs the CUDA runtime and cuDNN for GPU builds. The owner decided
+  it will, from NVIDIA's pip wheels through the shared acquisition owner,
+  stored with each ONNX Runtime version's install and resolved to current
+  compatible releases. That lands in a follow-up change that amends this
+  record;
+- Microsoft publishes DirectML builds outside NuGet or past 1.24.4, or ROCm or
+  another execution provider is required; or
 - ONNX Runtime changes its archive layout or its C API compatibility policy.

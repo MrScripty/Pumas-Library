@@ -2061,6 +2061,70 @@ class ResolverTests(unittest.TestCase):
             self.assertIn("torchvision", resolution["omitted_modalities"]["image"])
             self.assertIn("Leaving out image support", stderr.getvalue())
 
+    def run_resolution(self, fake_run):
+        """Run the lock phase with a fake pip; return (exit code, resolution)."""
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            argv = ["resolve_runtime.py", "--version", "2.10.0", "--build", "cpu"]
+            with (
+                patch.object(resolver.sys, "argv", [*argv, "--output", str(output)]),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver, "select_official_torch_wheel", return_value=selected_wheel()
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()),
+            ):
+                try:
+                    resolver.main()
+                except SystemExit as exit_result:
+                    return exit_result.code, None
+            return 0, json.loads((output / "resolution.json").read_text())
+
+    def test_an_indirect_dependency_without_a_wheel_drops_only_the_modality_needing_it(self):
+        for needs_it, kept in (("librosa", ("text", "image")), ("diffusers", ("text", "audio"))):
+            commands = []
+
+            def fake_run(command, needs_it=needs_it, kept=kept, **_kwargs):
+                commands.append(command)
+                if needs_it in command:
+                    # llvmlite is not requested; a modality's package pulls it in.
+                    return SimpleNamespace(
+                        returncode=1,
+                        stdout="",
+                        stderr="ERROR: No matching distribution found for llvmlite",
+                    )
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(report(modalities=kept)), encoding="utf-8"
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with self.subTest(needs_it=needs_it):
+                code, resolution = self.run_resolution(fake_run)
+                self.assertEqual(code, 0)
+                self.assertEqual(resolution["modalities"], list(kept))
+                (dropped,) = set(resolver.MODALITIES) - set(kept)
+                self.assertIn("llvmlite", resolution["omitted_modalities"][dropped])
+                # Trying without audio first must not drop audio when image needed it.
+                self.assertEqual(len(commands), 2 if needs_it == "librosa" else 3)
+
+    def test_a_missing_dependency_no_modality_brings_in_fails_with_its_reason(self):
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            return SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="ERROR: No matching distribution found for pydantic-core",
+            )
+
+        code, resolution = self.run_resolution(fake_run)
+        self.assertEqual(code, 2)
+        self.assertIsNone(resolution)
+        # Without audio, without image, then without every modality.
+        self.assertEqual(len(commands), 4)
+
     def test_core_and_extra_packages_never_degrade(self):
         for missing in ("fastapi", "nunchaku"):
 

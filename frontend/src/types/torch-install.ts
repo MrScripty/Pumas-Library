@@ -35,15 +35,23 @@ export function torchExtrasLabel(extras: readonly string[] | null | undefined): 
 
 /** One line summary of an installed runtime's configuration and capabilities. */
 export function torchInstalledSummary(config: TorchInstalledConfig): string {
-  const available = config.capabilities
-    .filter((capability) => capability.status === 'available')
+  const named = (status: string) => config.capabilities
+    .filter((capability) => capability.status === status)
     .map((capability) => capability.name.replaceAll('_', ' '));
+  const available = named('available');
+  const unavailable = named('unavailable');
+  // Checks that ran and failed are not the same as checks that never ran.
+  const capabilities = available.length > 0
+    ? `serves ${available.join(', ')}`
+    : unavailable.length > 0
+      ? `no capability imports (${unavailable.join(', ')} unavailable)`
+      : 'capabilities unchecked';
   return [
     config.build ?? 'unknown build',
     config.python ?? 'unknown Python',
     torchExtrasLabel(config.extras),
     config.qualification,
-    available.length > 0 ? `serves ${available.join(', ')}` : 'capabilities unchecked',
+    capabilities,
   ].join(' · ');
 }
 

@@ -360,7 +360,9 @@ TEXT = (
     "protobuf",
 )
 IMAGE = ("torchvision", "diffusers", "accelerate", "peft")
-AUDIO = ("librosa", "soundfile", "soxr", "numpy", "scipy")
+# Accelerate is listed with audio too: Cohere ASR needs it even when the image
+# packages could not install.
+AUDIO = ("accelerate", "librosa", "soundfile", "soxr", "numpy", "scipy")
 MODALITY_PACKAGES = {
     "text": TEXT,
     "image": (*TEXT, *IMAGE),
@@ -1333,11 +1335,15 @@ def installed_artifacts_match_lock(
         raise ValueError("Installed artifacts differ from the hash lock")
 
 
+def missing_requirement_names(stderr: str) -> list[str]:
+    """Distribution names pip reports it found no compatible wheel for."""
+    missing = MISSING_REQUIREMENT.findall(stderr.lower())
+    return [re.match(r"[a-z0-9][a-z0-9._-]*", requirement).group() for requirement in missing]
+
+
 def missing_requested_package(stderr: str, requested: set[str]) -> str | None:
     """The first requested package pip reports it has no compatible wheel for."""
-    missing = MISSING_REQUIREMENT.findall(stderr.lower())
-    names = [re.match(r"[a-z0-9][a-z0-9._-]*", requirement).group() for requirement in missing]
-    return next((name for name in names if name in requested), None)
+    return next((name for name in missing_requirement_names(stderr) if name in requested), None)
 
 
 def requested_packages(modalities: tuple[str, ...], extras: tuple[str, ...]) -> set[str]:
@@ -1671,14 +1677,13 @@ def resolve_lock(
         floors = applicable_floors(args.version, constraint_pins(args.constraints))
     except (OSError, InvalidVersion) as error:
         parser.exit(3, f"Invalid version constraints: {error}\n")
+
     # Every install resolves all general modalities together. When a package
-    # only one modality needs has no compatible wheel here, that modality is
-    # left out with its reason and the rest resolve; core packages, Torch and
-    # requested extras never degrade.
-    modalities = list(MODALITIES)
-    omitted = {}
-    while True:
-        completed = run_pip(
+    # a modality needs, directly or through its dependencies, has no
+    # compatible wheel here, that modality is left out with its reason and the
+    # rest resolve; core packages, Torch and requested extras never degrade.
+    def resolve(selected: list[str]) -> subprocess.CompletedProcess:
+        return run_pip(
             args,
             [
                 "--isolated",
@@ -1698,37 +1703,58 @@ def resolve_lock(
                 f"torch @ {torch_source}"
                 + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else ""),
                 *CORE,
-                *modality_requirements(modalities, floors),
+                *modality_requirements(selected, floors),
                 *extras,
             ],
         )
-        if not completed.returncode:
-            break
+
+    modalities = list(MODALITIES)
+    omitted = {}
+    completed = resolve(modalities)
+    while completed.returncode:
         requested = requested_packages(tuple(modalities), args.extras)
         code, message = resolution_failure(
             completed.stderr, args.version, args.build, requested, torch_requirement
         )
-        named = missing_requested_package(completed.stderr, requested) if code == 2 else None
-        dropped = [
-            modality
-            for modality in modalities
-            if named is not None
-            and named not in CORE
-            and named not in args.extras
-            and named in MODALITY_PACKAGES[modality]
-        ]
-        if not dropped:
+        missing = missing_requirement_names(completed.stderr)
+        if (
+            code != 2
+            or not missing
+            or any(name == "torch" or name in CORE or name in args.extras for name in missing)
+        ):
             parser.exit(code, f"{message}\n")
-        for modality in dropped:
-            omitted[modality] = (
-                f"No compatible binary wheel for {named} matches this Torch build and Python"
-            )
-            modalities.remove(modality)
-        print(
-            f"Leaving out {', '.join(dropped)} support: {omitted[dropped[0]]}",
-            file=sys.stderr,
-            flush=True,
+        named = missing_requested_package(completed.stderr, requested)
+        if named is not None:
+            candidates = [
+                [modality for modality in modalities if named in MODALITY_PACKAGES[modality]]
+            ]
+        else:
+            # An indirect dependency: find the modality that brings it in by
+            # resolving without one modality at a time, the text stack last
+            # because image and audio models use it too.
+            candidates = [[modality] for modality in ("audio", "image") if modality in modalities]
+            candidates.append(list(modalities))
+        reason = (
+            f"No compatible binary wheel for {named or missing[0]} matches this Torch build "
+            "and Python"
         )
+        for dropped in candidates:
+            remaining = [modality for modality in modalities if modality not in dropped]
+            retry = resolve(remaining)
+            if retry.returncode and set(missing) & set(missing_requirement_names(retry.stderr)):
+                continue  # Still missing without this modality: not its dependency.
+            for modality in dropped:
+                omitted[modality] = reason
+            modalities = remaining
+            completed = retry
+            print(
+                f"Leaving out {', '.join(dropped)} support: {reason}",
+                file=sys.stderr,
+                flush=True,
+            )
+            break
+        else:
+            parser.exit(code, f"{message}\n")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         requirements, resolution = requirements_from_report(

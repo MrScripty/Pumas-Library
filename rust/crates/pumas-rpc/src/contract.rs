@@ -4320,6 +4320,8 @@ mod torch_release_options_contract_tests {
             serde_json::json!({"extras": ["flux2"]}),
             serde_json::json!({"extras": ["nunchaku", "nunchaku"]}),
             serde_json::json!({"adapter": "nunchaku", "extras": []}),
+            // A misspelled adapter is refused, not mapped to the general install.
+            serde_json::json!({"adapter": "flux3", "extras": []}),
         ] {
             assert!(adapter_of(refused).is_err());
         }
@@ -4470,7 +4472,12 @@ impl PreviewTorchRuntimeParams {
         let adapter_extra = match self.adapter.as_deref() {
             None => from_extras,
             Some("nunchaku") => "nunchaku",
-            Some(_) => "none",
+            Some("none" | "flux2" | "cohere-asr") => "none",
+            Some(_) => {
+                return Err(PublicError::invalid_params_because(
+                    "adapter must be none, flux2, cohere-asr or nunchaku; prefer extras",
+                ))
+            }
         };
         if adapter_extra != from_extras {
             return Err(PublicError::invalid_params_because(

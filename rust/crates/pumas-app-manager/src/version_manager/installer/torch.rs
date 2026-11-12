@@ -1360,7 +1360,17 @@ const MODALITY_PACKAGES: &[(&str, &[&str])] = &[
         ],
     ),
     ("image", &["torchvision", "diffusers", "accelerate", "peft"]),
-    ("audio", &["librosa", "soundfile", "soxr", "numpy", "scipy"]),
+    (
+        "audio",
+        &[
+            "accelerate",
+            "librosa",
+            "soundfile",
+            "soxr",
+            "numpy",
+            "scipy",
+        ],
+    ),
 ];
 
 fn modality_packages(modality: &str) -> impl Iterator<Item = &'static str> {
@@ -3549,6 +3559,7 @@ mod managed_python_provenance_tests {
             "jinja2",
             "sentencepiece",
             "protobuf",
+            "accelerate",
             "librosa",
             "soundfile",
             "soxr",

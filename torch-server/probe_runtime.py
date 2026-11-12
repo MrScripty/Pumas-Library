@@ -40,7 +40,7 @@ TEXT_IMPORTS = (
 MODALITY_IMPORTS = {
     "text": TEXT_IMPORTS,
     "image": (*TEXT_IMPORTS, "torchvision", "diffusers", "accelerate", "peft"),
-    "audio": (*TEXT_IMPORTS, "librosa", "soundfile", "soxr", "numpy", "scipy"),
+    "audio": (*TEXT_IMPORTS, "accelerate", "librosa", "soundfile", "soxr", "numpy", "scipy"),
 }
 
 

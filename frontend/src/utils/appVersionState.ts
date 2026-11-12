@@ -43,7 +43,7 @@ export const UNSUPPORTED_VERSION_STATE: AppVersionState = {
   setDefaultVersion: noopVoid,
 };
 
-const VERSION_SUPPORTED_APP_IDS = new Set(['ollama', 'llama-cpp', 'torch']);
+const VERSION_SUPPORTED_APP_IDS = new Set(['ollama', 'llama-cpp', 'onnx-runtime', 'torch']);
 
 export function isVersionSupportedAppId(appId: string | null): boolean {
   if (!appId) return false;

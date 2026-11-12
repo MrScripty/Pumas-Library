@@ -71,13 +71,19 @@ describe('AppShellState', () => {
       systemResources,
       ollama: lifecycleState(),
       llamaCpp: { ...lifecycleState(), isRunning: false },
+      onnxRuntime: { installedVersions: ['v1.24.2+cpu'] },
       torch: lifecycleState(),
     });
 
     expect(managed.ollama).toMatchObject({ isRunning: true, ramMemory: 2048 });
+    expect(managed.onnxRuntime).toMatchObject({
+      isRunning: false,
+      installedVersions: ['v1.24.2+cpu'],
+    });
     expect(Object.keys(managed).sort()).toEqual([
       'llamaCpp',
       'ollama',
+      'onnxRuntime',
       'systemResources',
       'torch',
     ]);

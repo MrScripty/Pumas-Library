@@ -64,6 +64,10 @@ describe('useSelectedAppVersions', () => {
       trackAvailableVersions: false,
     });
     expect(useVersionsMock).toHaveBeenNthCalledWith(3, {
+      appId: 'onnx-runtime',
+      trackAvailableVersions: false,
+    });
+    expect(useVersionsMock).toHaveBeenNthCalledWith(4, {
       appId: 'torch',
       trackAvailableVersions: false,
     });
@@ -87,14 +91,16 @@ describe('useSelectedAppVersions', () => {
     expect(result.current.appVersions.installedVersions).toEqual([]);
   });
 
-  it('does not query a version manager for in-process ONNX Runtime', () => {
+  it('routes ONNX Runtime versions like the other downloaded runtimes', () => {
     const { result } = renderHook(() => useSelectedAppVersions('onnx-runtime'));
 
-    expect(useVersionsMock).toHaveBeenCalledTimes(3);
-    expect(useVersionsMock).not.toHaveBeenCalledWith(expect.objectContaining({
+    expect(useVersionsMock).toHaveBeenCalledWith({
       appId: 'onnx-runtime',
-    }));
-    expect(result.current.appVersions.isSupported).toBe(false);
-    expect(result.current.appVersions.installedVersions).toEqual([]);
+      trackAvailableVersions: true,
+    });
+    expect(result.current.appVersions.isSupported).toBe(true);
+    expect(result.current.appVersions.appId).toBe('onnx-runtime');
+    expect(result.current.appVersions.activeVersion).toBe('onnx-runtime-active');
+    expect(result.current.onnxRuntimeInstalledVersions).toEqual(['onnx-runtime-installed']);
   });
 });

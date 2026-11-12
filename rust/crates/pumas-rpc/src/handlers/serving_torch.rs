@@ -446,7 +446,7 @@ async fn serve_torch_text_model(
     if let Err(error) = client.verify_runtime(kind.capability).await {
         tracing::warn!(%error, "Selected Torch runtime cannot serve {}", kind.operation);
         let reason = format!(
-            "Selected Torch runtime cannot serve {}; it needs Transformers and Jinja, which a Torch install with a Transformers adapter provides",
+            "Selected Torch runtime cannot serve {}; it needs Transformers and Jinja, which this install does not include. Install a Torch runtime with an adapter that includes Transformers",
             kind.operation
         );
         return non_critical_failure_response(

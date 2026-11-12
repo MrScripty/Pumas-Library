@@ -192,7 +192,16 @@ remains pending the reference safetensors and a served session.
     cosine 1.001 against SentenceTransformer, because bf16 normalization
     leaves norms slightly off 1. Serving both was blocked by the sidecar's
     128-character model-name limit, fixed in `99a1f4ba`; the installed v2.15.0
-    still carries the old sidecar copy until a new Torch install.
+    still carried the old sidecar copy.
+  - **bge and harrier served on Torch (2026-11-12, v2.15.0 reinstalled through
+    Pumas with the `flux2` adapter from the local pip cache):** bge gateway
+    scores equal the in-process loader (difference 0.0); harrier gateway
+    embeddings have cosine 1.0 against it (640 dimensions). The first
+    reinstall used the default `none` adapter and lacked Transformers. Its
+    refusal named a "Transformers adapter", which does not exist, so the
+    message needs to name the adapters that do. A separate PR makes runtimes
+    run the sidecar shipped with Pumas, so sidecar fixes stop requiring a
+    reinstall.
   - **Declarations, found live and fixed in `d5969a20`:** named
     `pooling_mode` (EmbeddingGemma 2, Qwen3-VL-Embedding), and lineage search
     past a partial package (local Qwen3-Embedding-0.6B).

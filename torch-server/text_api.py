@@ -15,6 +15,7 @@ from contextlib import AsyncExitStack
 import torch
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from validation import MODEL_NAME_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +26,14 @@ MAX_ITEMS = 1024
 
 class EmbeddingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    model_id: str = Field(min_length=1, max_length=256)
+    model_id: str = Field(min_length=1, max_length=MODEL_NAME_MAX_LENGTH)
     input: list[str] = Field(min_length=1, max_length=MAX_ITEMS)
     dimensions: int | None = Field(default=None, gt=0)
 
 
 class RerankRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    model_id: str = Field(min_length=1, max_length=256)
+    model_id: str = Field(min_length=1, max_length=MODEL_NAME_MAX_LENGTH)
     query: str = Field(min_length=1)
     documents: list[str] = Field(min_length=1, max_length=MAX_ITEMS)
 

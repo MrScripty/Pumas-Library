@@ -17,6 +17,7 @@ from contextlib import AsyncExitStack
 import torch
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from validation import MODEL_NAME_MAX_LENGTH
 
 from audio_contract import LANGUAGES
 from audio_input import AudioInputError, normalize_audio
@@ -28,7 +29,7 @@ router = APIRouter()
 
 class TranscriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    model_id: str = Field(min_length=1, max_length=256)
+    model_id: str = Field(min_length=1, max_length=MODEL_NAME_MAX_LENGTH)
     audio: dict
     language: str = Field(default="en", min_length=2, max_length=8)
 

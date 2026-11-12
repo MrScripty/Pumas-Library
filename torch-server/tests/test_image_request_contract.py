@@ -31,6 +31,7 @@ _install_dependency_stubs()
 from pydantic import ValidationError  # noqa: E402
 
 from image_api import MAX_PNG_BYTES, ImageRequest, owned_generation  # noqa: E402
+from validation import MODEL_NAME_MAX_LENGTH  # noqa: E402
 
 
 def _request():
@@ -170,7 +171,7 @@ class ImageRequestDimensionsTests(unittest.TestCase):
         for kwargs in (
             {"model_id": "", "prompt": "kingfisher"},
             {"model_id": "   ", "prompt": "kingfisher"},
-            {"model_id": "m" * 257, "prompt": "kingfisher"},
+            {"model_id": "m" * (MODEL_NAME_MAX_LENGTH + 1), "prompt": "kingfisher"},
             {"model_id": "fixture", "prompt": ""},
             {"model_id": "fixture", "prompt": "   "},
             {"model_id": "fixture", "prompt": "p" * 4001},

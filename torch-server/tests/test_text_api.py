@@ -237,5 +237,22 @@ class RouteTests(unittest.TestCase):
                 build()
 
 
+class ModelNameTests(unittest.TestCase):
+    def test_artifact_qualified_library_ids_are_accepted_up_to_the_pumas_bound(self):
+        from validation import MODEL_NAME_MAX_LENGTH, validate_model_name
+
+        library_id = (
+            "embedding/gemma3_text/microsoft--harrier-oss-v1-270m__files_eaa0469ae991__"
+            "eaa0469ae991__revision_31de22b673913c7d658c0f03f792d77c2dcf8ebd"
+        )
+        self.assertGreater(len(library_id), 128)
+        self.assertEqual(validate_model_name(library_id), library_id)
+        self.assertEqual(EmbeddingRequest(model_id=library_id, input=["hi"]).model_id, library_id)
+        with self.assertRaises(ValueError):
+            validate_model_name("a" * (MODEL_NAME_MAX_LENGTH + 1))
+        with self.assertRaises(ValueError):
+            validate_model_name("bad\nname")
+
+
 if __name__ == "__main__":
     unittest.main()

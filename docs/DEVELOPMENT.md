@@ -39,21 +39,24 @@ diagnostic facts, not design or documentation requirements.
 ### Rust
 
 Cargo builds never download ONNX Runtime. Default core/RPC builds keep the
-optional ONNX execution APIs and load a separately provisioned native library
-only when execution is requested. Missing or invalid runtime files return a
-`runtime_library` backend error; metadata/library-only use needs no native SDK.
+optional ONNX execution APIs and load the native library only when execution is
+requested. Missing or invalid runtime files return a `runtime_library` backend
+error that says how to install a compatible version; metadata/library-only use
+needs no native SDK.
 
-Provision and verify the native distribution before running ONNX: the current
-qualification pin is Microsoft's ONNX Runtime 1.24.2, with C API 24 and the
-correct target/CPU variant. Record the official release identity and trusted
-archive SHA-256, verify before extraction, and retain the selected library hash
-and upstream notices. The existing acquisition owner handles any explicitly
-authorized setup transfer; neither Cargo/build scripts nor app settings fetch it.
-There is no automatic source fallback or new version-manager installation flow.
+ONNX Runtime is a downloaded, version-managed runtime like llama.cpp. The
+version manager (app id `onnx-runtime`) lists official `microsoft/onnxruntime`
+releases that export the C API the `ort` binding requests (C API 24, so 1.24 or
+newer) and publish a CPU archive for the host, installs them into
+`onnx-runtime-versions/<tag>` through the shared acquisition service (resumable,
+publisher SHA-256 verified), and tracks installed, active and default versions.
+The provider loads `lib/` of the active version. 1.24.2 is the combination that
+was verified end to end; it is evidence, not a required version.
 
-Set `ORT_DYLIB_PATH` to the absolute `.so`/`.dylib`/`.dll` file before process
-startup, or package the platform's named library beside the executable. For
-example, with an already verified Linux SDK:
+`ORT_DYLIB_PATH` remains an explicit developer override: set it to an absolute
+`.so`/`.dylib`/`.dll` file before process startup and it wins over the installed
+version. A library beside the executable is used only when neither is present
+(headless inference archives). For example, with an already verified Linux SDK:
 
 ```bash
 ORT_DYLIB_PATH=/absolute/onnxruntime-1.24.2/lib/libonnxruntime.so \
@@ -64,9 +67,10 @@ If its dependent libraries require an OS loader path, supply that only to the
 invocation; do not change system loader configuration. `ORT_LIB_PATH` and
 `ORT_PREFER_DYNAMIC_LINK` belonged to build-time linking and are not runtime
 selectors in this mode. The binding retains its process-wide loaded library;
-runtime replacement requires restarting the process: a load whose verified
-library differs from the one ORT already adopted (or whose file changed after
-verification) is refused with that reason. Applications embedding
+runtime replacement requires restarting the process: after the active ONNX
+Runtime version changes, a load whose verified library differs from the one ORT
+already adopted (or whose file changed after verification) is refused with that
+reason until Pumas restarts. Applications embedding
 Pumas keep ownership of ORT environment settings and must select the same
 library before any other direct ORT calls.
 
@@ -223,7 +227,7 @@ intended to decide a property.
 | Native cargo tests in `torch-quality` (`scripts/rust/native_qualification.py`) | Focused `pumas-library`, `pumas-app-manager` and `pumas-rpc` tests for Torch selection, acquisition and import custody, retained-download reconciliation, registry ownership, process ownership, HTTP drainage and RPC shutdown pass on each host OS. Each filter matches at least one runnable test on that host. | Linux workspace tests overlap; these expose OS path, handle and process behavior on every trigger rather than only in candidate runs. Three shards per OS (`torch`, `default-features`, `inference-disabled`) run in parallel; each builds its cargo configurations once. | Workflow-blocking on native Linux, Windows and macOS for every trigger. |
 | `review-inference-linux` | The exact review head builds through the strict inference producer, the extracted archive matches its authenticated build identity, and a deterministic untrained ONNX graph imports, loads, executes and unloads through it. | A review-only archive; it cannot satisfy the release inventory or qualify pretrained models or other OSes. | Pull requests, pushes to `main` and ordinary manual dispatches, on Linux CI. |
 | `torch-native-e2e` | Managed Python and Torch CPU install, restart and sidecar lifecycle pass through the real native RPC (`torch-managed-python-acceptance.py`). | Real-network install evidence; not CUDA/MPS or image adapters, and `torch-server/tests_native` is not run (see [Security](SECURITY.md#dependency-scans)). The acceptance tooling runs on the exact CPython in `scripts/release/acceptance.python-version`, because it reads `.tar.zst` archives with 3.14's `compression.zstd`. | Ordinary manual dispatches and `v*` tags (not `build_candidates` runs) on native Linux, Windows and macOS. |
-| Release target builds and tests in `build-rust` and `windows-release` | The non-Rustler workspace compiles warning-free and in release mode for each target, its tests pass under the `ci-test` profile, and the staged backend starts with the pinned ONNX Runtime (`onnx_runtime_probe.py`, `smoke-rpc.py`). | Linux debug tests overlap; runner-specific execution exposes OS behavior; startup is not inference. | Candidate runs only: Linux x64 and macOS arm64 in `build-rust`, Windows x64 in `windows-release`. |
+| Release target builds and tests in `build-rust` and `windows-release` | The non-Rustler workspace compiles warning-free and in release mode for each target, its tests pass under the `ci-test` profile, and the staged backend starts (`smoke-rpc.py`). Desktop packages do not bundle ONNX Runtime. | Linux debug tests overlap; runner-specific execution exposes OS behavior; startup is not inference. | Candidate runs only: Linux x64 and macOS arm64 in `build-rust`, Windows x64 in `windows-release`. |
 | Headless archives in `headless-rpc` and `headless-inference` | Each no-inference and inference headless archive is produced with exactly the inventory entry `check-artifacts.mjs` expects; the inference producer binds source, schema and runtime bytes and runs authenticated owner startup and graceful shutdown, and an untrained synthetic ONNX graph runs through each extracted inference archive. | No pretrained-model or embedding-quality evidence. | Candidate runs only, native on Linux x64, macOS arm64 and Windows x64. |
 | Electron-builder package steps in `build-electron`, `build-electron-no-inference`, `windows-release` and `windows-no-inference` | Each runner produces the full or no-inference installers the artifact plan names; `check-artifacts.mjs` rejects missing, empty, duplicate, and unexpected files. | Does not prove installation, startup, contents, signing, or user behavior. | Candidate runs only, on Linux, macOS, and Windows. |
 | Package smoke checks (`smoke-linux-packages.py`, `smoke-macos-package.py`, `smoke-windows-packages.py`, each with `--variant no-inference` for that line) | Linux installers extract with resources matching build inputs and start their RPC; the macOS DMG copy and Windows NSIS install match build inputs and start RPC and desktop (Windows also the portable executable); no-inference packages lack inference routes. | Native startup evidence; signing, notarization, SmartScreen, interactive workflows, and packaged inference require separate acceptance. | Candidate runs only, on each native OS. |

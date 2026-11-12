@@ -182,4 +182,16 @@ mod tests {
         let missing = json!({"results": [{"index": 0}]});
         assert_eq!(scored(&missing, 1), None);
     }
+
+    #[test]
+    fn caller_input_refused_by_the_sidecar_is_a_bad_request_with_its_reason() {
+        let response = torch_error_response(TorchOperationError::InvalidRequest(
+            "documents: List should have at least 1 item after validation, not 0".into(),
+        ));
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            torch_error_response(TorchOperationError::BackendFailure).status(),
+            StatusCode::BAD_GATEWAY
+        );
+    }
 }

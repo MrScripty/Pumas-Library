@@ -654,10 +654,18 @@ impl std::fmt::Display for TorchOperationError {
 
 impl std::error::Error for TorchOperationError {}
 
-fn decode_operation_error(body: &[u8]) -> TorchOperationError {
+fn decode_operation_error(status: reqwest::StatusCode, body: &[u8]) -> TorchOperationError {
     let detail = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|value| value.get("detail").cloned());
+    // The sidecar's request models refuse caller input (an empty list, a
+    // blank query, too many items) with FastAPI's 422 list of field errors.
+    // Its own bounds stay the authority; the reasons cross, never the input.
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+        if let Some(reason) = detail.as_ref().and_then(validation_reason) {
+            return TorchOperationError::InvalidRequest(reason);
+        }
+    }
     let field = |name: &str| {
         detail
             .as_ref()
@@ -680,6 +688,38 @@ fn decode_operation_error(body: &[u8]) -> TorchOperationError {
         Some("cancelled") => TorchOperationError::Cancelled,
         _ => TorchOperationError::BackendFailure,
     }
+}
+
+/// `field: message` for each FastAPI validation error, without the input.
+fn validation_reason(detail: &serde_json::Value) -> Option<String> {
+    let reasons: Vec<String> = detail
+        .as_array()?
+        .iter()
+        .filter_map(|error| {
+            let message = error.get("msg")?.as_str()?;
+            let message = message.strip_prefix("Value error, ").unwrap_or(message);
+            let field = error
+                .get("loc")
+                .and_then(serde_json::Value::as_array)
+                .map(|loc| {
+                    loc.iter()
+                        .skip_while(|part| part.as_str() == Some("body"))
+                        .map(|part| match part {
+                            serde_json::Value::String(name) => name.clone(),
+                            other => other.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(".")
+                })
+                .unwrap_or_default();
+            Some(if field.is_empty() {
+                message.to_string()
+            } else {
+                format!("{field}: {message}")
+            })
+        })
+        .collect();
+    (!reasons.is_empty()).then(|| reasons.join("; ").chars().take(512).collect())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1163,7 +1203,7 @@ impl TorchClient {
             bytes.extend_from_slice(&chunk);
         }
         if !status.is_success() {
-            return Err(decode_operation_error(&bytes));
+            return Err(decode_operation_error(status, &bytes));
         }
         decode_transcription(&bytes)
     }
@@ -1222,7 +1262,7 @@ impl TorchClient {
             bytes.extend_from_slice(&chunk);
         }
         if !status.is_success() {
-            return Err(decode_operation_error(&bytes));
+            return Err(decode_operation_error(status, &bytes));
         }
         serde_json::from_slice(&bytes).map_err(|_| TorchOperationError::InvalidBackendResult)
     }
@@ -2161,9 +2201,48 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_request_validation_is_a_caller_error_with_its_reasons() {
+        // FastAPI's 422 body for an empty document list and a blank query.
+        let body = serde_json::json!({"detail": [
+            {"type": "too_short", "loc": ["body", "documents"],
+             "msg": "List should have at least 1 item after validation, not 0",
+             "input": [], "ctx": {"field_type": "List", "min_length": 1}},
+            {"type": "value_error", "loc": ["body", "query"],
+             "msg": "Value error, query must be nonblank", "input": "  secret  "}
+        ]});
+        let error = decode_operation_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            body.to_string().as_bytes(),
+        );
+        let TorchOperationError::InvalidRequest(reason) = error else {
+            panic!("expected a caller error, got {error:?}");
+        };
+        assert_eq!(
+            reason,
+            "documents: List should have at least 1 item after validation, not 0; \
+             query: query must be nonblank"
+        );
+        assert!(!reason.contains("secret"));
+        // The same body on another status is not trusted as caller input.
+        assert_eq!(
+            decode_operation_error(
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                body.to_string().as_bytes()
+            ),
+            TorchOperationError::BackendFailure
+        );
+        // A 422 without field errors stays a backend failure.
+        assert_eq!(
+            decode_operation_error(reqwest::StatusCode::UNPROCESSABLE_ENTITY, b"{}"),
+            TorchOperationError::BackendFailure
+        );
+    }
+
+    #[test]
     fn transcription_refusals_keep_their_reasons() {
         let refusal = |code: &str, message: &str| {
             decode_operation_error(
+                reqwest::StatusCode::BAD_REQUEST,
                 serde_json::json!({"detail": {"code": code, "message": message}})
                     .to_string()
                     .as_bytes(),

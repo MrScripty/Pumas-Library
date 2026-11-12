@@ -989,44 +989,12 @@ impl PackageIndex {
                     self.display()
                 ))
             })?;
-        let mut files = Vec::with_capacity(entries.len());
-        for entry in entries {
-            let (Some(filename), Some(url)) = (
-                entry.get("filename").and_then(serde_json::Value::as_str),
-                entry.get("url").and_then(serde_json::Value::as_str),
-            ) else {
-                continue;
-            };
-            let Ok(url) = page.join(url) else {
-                continue;
-            };
-            let metadata = entry
-                .get("core-metadata")
-                // PEP 714 renamed the PEP 691 field `dist-info-metadata`.
-                .or_else(|| entry.get("dist-info-metadata"));
-            let core_metadata = match metadata {
-                None | Some(serde_json::Value::Bool(false)) | Some(serde_json::Value::Null) => None,
-                Some(serde_json::Value::Bool(true)) => Some(None),
-                Some(value) => Some(sha256_value(value)),
-            };
-            let yanked = match entry.get("yanked") {
-                Some(serde_json::Value::Bool(yanked)) => *yanked,
-                Some(serde_json::Value::String(_)) => true,
-                _ => false,
-            };
-            files.push(IndexFile {
-                filename: filename.to_owned(),
-                sha256: entry.get("hashes").and_then(sha256_value),
-                size: entry.get("size").and_then(serde_json::Value::as_u64),
-                yanked,
-                core_metadata,
-                // A file of another project is not this project's wheel.
-                wheel: WheelName::parse(filename)
-                    .filter(|wheel| wheel.project == normalize_name(project)),
-                url,
-            });
-        }
-        Ok(Some(files))
+        Ok(Some(
+            entries
+                .iter()
+                .filter_map(|entry| index_file(entry, &page, project))
+                .collect(),
+        ))
     }
 
     /// The core metadata served beside `file` (PEP 658), checked against the
@@ -1067,6 +1035,37 @@ impl PackageIndex {
         String::from_utf8(body)
             .map_err(|_| refused(format!("Core metadata of {} is not UTF-8", file.filename)))
     }
+}
+
+/// One file entry of a PEP 691 JSON project page, or `None` when it names no
+/// usable file.
+fn index_file(entry: &serde_json::Value, page: &reqwest::Url, project: &str) -> Option<IndexFile> {
+    let filename = entry.get("filename")?.as_str()?;
+    let url = page.join(entry.get("url")?.as_str()?).ok()?;
+    let metadata = entry
+        .get("core-metadata")
+        // PEP 714 renamed the PEP 691 field `dist-info-metadata`.
+        .or_else(|| entry.get("dist-info-metadata"));
+    let core_metadata = match metadata {
+        None | Some(serde_json::Value::Bool(false)) | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Bool(true)) => Some(None),
+        Some(value) => Some(sha256_value(value)),
+    };
+    let yanked = match entry.get("yanked") {
+        Some(serde_json::Value::Bool(yanked)) => *yanked,
+        Some(serde_json::Value::String(_)) => true,
+        _ => false,
+    };
+    Some(IndexFile {
+        filename: filename.to_owned(),
+        sha256: entry.get("hashes").and_then(sha256_value),
+        size: entry.get("size").and_then(serde_json::Value::as_u64),
+        yanked,
+        core_metadata,
+        // A file of another project is not this project's wheel.
+        wheel: WheelName::parse(filename).filter(|wheel| wheel.project == normalize_name(project)),
+        url,
+    })
 }
 
 /// The best wheel of `files` for `platform` with exactly `version`.
@@ -1248,6 +1247,38 @@ mod tests {
         assert!(windows.is_shared_library("cudnn_engines_precompiled64_9.dll"));
         assert!(windows.is_shared_library("CUDART64_13.DLL"));
         assert!(!windows.is_shared_library("cudart.lib"));
+    }
+
+    #[test]
+    fn core_metadata_is_read_from_either_json_field_name() {
+        let page = reqwest::Url::parse("https://index.test/simple/nvidia-cudnn-cu13/").unwrap();
+        let digest = "a".repeat(64);
+        let entry = |field: &str, value: serde_json::Value| {
+            serde_json::json!({
+                "filename": "nvidia_cudnn_cu13-9.1.0-py3-none-manylinux_2_27_x86_64.whl",
+                "url": "../../files/nvidia_cudnn_cu13-9.1.0-py3-none-manylinux_2_27_x86_64.whl",
+                "hashes": {"sha256": digest},
+                field: value,
+            })
+        };
+        for field in ["core-metadata", "dist-info-metadata"] {
+            let file = index_file(
+                &entry(field, serde_json::json!({"sha256": digest})),
+                &page,
+                "nvidia-cudnn-cu13",
+            )
+            .unwrap();
+            assert_eq!(file.core_metadata, Some(Some(digest.clone())), "{field}");
+            let file = index_file(
+                &entry(field, serde_json::json!(false)),
+                &page,
+                "nvidia-cudnn-cu13",
+            )
+            .unwrap();
+            assert_eq!(file.core_metadata, None, "{field}");
+        }
+        let no_name = serde_json::json!({"url": "x.whl"});
+        assert!(index_file(&no_name, &page, "nvidia-cudnn-cu13").is_none());
     }
 
     #[test]

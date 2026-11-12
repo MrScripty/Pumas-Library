@@ -81,6 +81,12 @@ export function VersionListItemInfo({
         </div>
       </div>
 
+      {release.unavailableReason && !isInstalled && (
+        <div className="mt-1 text-xs text-[hsl(var(--text-muted))]">
+          <span>{release.unavailableReason}</span>
+        </div>
+      )}
+
       {hasError && errorMessage && (
         <div className="mt-1 flex items-start gap-2 text-sm text-[hsl(var(--accent-error))] bg-[hsl(var(--accent-error))]/10 rounded p-2">
           <span>{errorMessage}</span>

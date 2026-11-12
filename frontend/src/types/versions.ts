@@ -16,6 +16,8 @@ export interface VersionRelease {
   archiveSize?: number | null;
   dependenciesSize?: number | null;
   installing?: boolean;
+  /** Why the backend cannot install this build on this host; null when it can. */
+  unavailableReason?: string | null;
 }
 
 export type VersionStatus = import('@pumas/desktop-contract').VersionStatusOutcome['status'];

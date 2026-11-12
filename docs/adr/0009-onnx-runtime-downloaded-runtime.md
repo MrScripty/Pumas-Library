@@ -189,6 +189,27 @@ As published on 2026-11-12, that metadata covers:
 Pumas does not substitute another release's metadata or a list of its own for
 a refused build, because that would be a guess about what the build links.
 
+**Unavailable builds are listed as such.** The ONNX Runtime version listing
+runs the same resolution for every CUDA build it lists and marks a build that
+cannot install with `unavailableReason` (an additive field of the listed
+release), so the desktop app shows the reason and offers no install before
+anyone clicks. The reason, and the refusal of an install attempted anyway,
+also names what installs instead, derived from the same lookups over the
+listed builds: the newest build of the same CUDA major that installs, and the
+other major's installing builds, in the form "+cuda13 installs from
+<oldest> (newest <tag>)" when every listed build in that range installs. A
+lookup the indexes could not answer (a network failure)
+marks nothing.
+
+The answers are kept per build, together with the index pages they read. They
+last until the indexes change or a refresh is asked for, not for a fixed time:
+a forced version refresh, or an install (which always reads the indexes as
+they are), starts a new generation, and the next lookup revalidates each page
+with the index (`If-None-Match`, `If-Modified-Since`; PyPI answers "not
+modified" when nothing changed). Core metadata of a file never changes and is
+kept for the process. A listing waits at most ten seconds for lookups; slower
+ones finish in the background and answer the next listing.
+
 **Current compatible releases.** The NVIDIA packages and the NVIDIA packages
 they require in turn (cuDNN requires cuBLAS, cuBLAS requires NVRTC, cuFFT
 requires nvJitLink) are resolved on PyPI: for each, the newest final,

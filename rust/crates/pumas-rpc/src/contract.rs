@@ -2774,6 +2774,7 @@ fn available_versions_fixture() -> Vec<pumas_library::models::VersionReleaseInfo
             archive_size: Some(0),
             dependencies_size: Some(42),
             installing: Some(false),
+            unavailable_reason: None,
         },
         VersionReleaseInfo {
             tag_name: "v2".into(),
@@ -2787,6 +2788,7 @@ fn available_versions_fixture() -> Vec<pumas_library::models::VersionReleaseInfo
             archive_size: None,
             dependencies_size: None,
             installing: None,
+            unavailable_reason: None,
         },
     ]
 }

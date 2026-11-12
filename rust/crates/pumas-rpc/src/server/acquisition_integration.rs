@@ -321,6 +321,7 @@ async fn native_transfer(
                     download_url: url.clone(),
                     content_type: None,
                 }],
+                unavailable_reason: None,
             }],
         )
         .unwrap();

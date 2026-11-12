@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod native_archive_tests;
 mod onnx_cuda;
+mod onnx_cuda_availability;
 #[cfg(test)]
 mod onnx_cuda_tests;
 mod python_index;
@@ -12,6 +13,7 @@ mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
 pub(crate) use onnx_cuda::CudaWheelSources;
+pub(crate) use onnx_cuda_availability::CudaAvailability;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
 #[cfg(test)]
@@ -1448,8 +1450,9 @@ pub struct VersionInstaller {
     shutdown_flag: Arc<AtomicBool>,
     github_client: Option<Arc<GitHubClient>>,
     acquisition_consumer: Option<Arc<AcquisitionConsumer>>,
-    /// Where the CUDA libraries of ONNX Runtime CUDA builds are resolved from.
-    cuda_wheel_sources: CudaWheelSources,
+    /// Where the CUDA libraries of ONNX Runtime CUDA builds are resolved
+    /// from, and what the version listing knows about which builds install.
+    cuda: Arc<CudaAvailability>,
     torch_control: Arc<TorchInstallControl>,
     torch_cleanup: Arc<TorchCleanupTasks>,
     torch_attempt_lock: Mutex<()>,
@@ -1523,7 +1526,7 @@ impl VersionInstaller {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             github_client: None,
             acquisition_consumer: None,
-            cuda_wheel_sources: CudaWheelSources::official(),
+            cuda: Arc::new(CudaAvailability::new(CudaWheelSources::official())),
             torch_control: Arc::new(TorchInstallControl::new()),
             torch_cleanup: Arc::new(TorchCleanupTasks::default()),
             torch_attempt_lock: Mutex::new(()),
@@ -1614,11 +1617,9 @@ impl VersionInstaller {
         self
     }
 
-    /// Resolve ONNX Runtime CUDA libraries from `sources` instead of PyPI and
-    /// Microsoft's ONNX Runtime package feeds.
-    #[cfg(test)]
-    pub(crate) fn with_cuda_wheel_sources(mut self, sources: CudaWheelSources) -> Self {
-        self.cuda_wheel_sources = sources;
+    /// Share the version listing's CUDA library sources and index answers.
+    pub(crate) fn with_cuda_availability(mut self, cuda: Arc<CudaAvailability>) -> Self {
+        self.cuda = cuda;
         self
     }
 
@@ -2244,15 +2245,34 @@ impl VersionInstaller {
             );
             return Ok(Some(selection));
         }
-        // Resolution only reads package indexes, so a cancel or shutdown
-        // abandons it at once instead of waiting for slow requests.
-        let resolution = onnx_cuda::resolve(
-            &self.cuda_wheel_sources,
-            tag,
-            &release,
-            cuda_major,
-            platform,
-        );
+        // An install reads the indexes as they are now, and what it finds
+        // also answers the version listing. A refusal names the listed builds
+        // that install instead. Resolution only reads package indexes, so a
+        // cancel or shutdown abandons it at once instead of waiting for slow
+        // requests.
+        self.cuda.refresh();
+        let resolution = async {
+            match onnx_cuda::resolve(self.cuda.sources(), tag, &release, cuda_major, platform).await
+            {
+                Ok(selection) => {
+                    self.cuda
+                        .record(tag, onnx_cuda_availability::CudaBuildOutcome::Installs);
+                    Ok(selection)
+                }
+                Err(error) => match onnx_cuda_availability::refusal_reason(&error) {
+                    None => Err(error),
+                    Some(reason) => {
+                        self.cuda.record(
+                            tag,
+                            onnx_cuda_availability::CudaBuildOutcome::Unavailable(reason.clone()),
+                        );
+                        Err(PumasError::InstallationFailed {
+                            message: self.cuda.explain(tag, &reason).await,
+                        })
+                    }
+                },
+            }
+        };
         let selection = tokio::select! {
             selection = resolution => selection?,
             _ = super::wait_for_install_cancel(self.cancel_flag.clone()) => {
@@ -4452,6 +4472,7 @@ mod tests {
             total_size: None,
             archive_size: None,
             dependencies_size: None,
+            unavailable_reason: None,
         };
         let (progress, _updates) = mpsc::channel(1);
         let error = installer

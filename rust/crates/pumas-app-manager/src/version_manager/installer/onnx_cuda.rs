@@ -27,8 +27,8 @@
 //! library search path points there. Removing the version removes them.
 
 use super::python_index::{
-    best_wheel, normalize_name, platform_versions, requires_dist, IndexFile, PackageIndex,
-    PyVersion, Requirement, WheelPlatform,
+    best_wheel, normalize_name, platform_versions, requires_dist, IndexCache, IndexFile,
+    PackageIndex, PyVersion, Requirement, WheelPlatform,
 };
 use super::{path_exists_sync, ExtractionBudget};
 use pumas_library::acquisition::{
@@ -42,6 +42,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::path::Path;
+use std::sync::Arc;
 use tracing::{debug, info};
 
 /// PyPI's JSON simple index, where NVIDIA publishes its library wheels and
@@ -80,6 +81,9 @@ pub(crate) struct CudaWheelSources {
     /// The index NVIDIA's library wheels are taken from.
     pub(crate) wheel_index: String,
     pub(crate) client: Option<reqwest::Client>,
+    /// Index answers shared by every listing and install that uses these
+    /// sources.
+    pub(crate) cache: Arc<IndexCache>,
 }
 
 impl CudaWheelSources {
@@ -91,6 +95,7 @@ impl CudaWheelSources {
             ],
             wheel_index: PYPI_SIMPLE_INDEX.to_owned(),
             client: None,
+            cache: Arc::default(),
         }
     }
 
@@ -234,6 +239,7 @@ pub(super) async fn resolve(
         let index = PackageIndex::new(
             &template.replace("{major}", &cuda_major.to_string()),
             client.clone(),
+            sources.cache.clone(),
         )?;
         let Some(files) = index.files(ORT_GPU_PROJECT).await? else {
             looked.push(format!("{} has no {ORT_GPU_PROJECT}", index.display()));
@@ -284,7 +290,7 @@ pub(super) async fn resolve(
     );
 
     // Resolve the NVIDIA packages and the NVIDIA packages they require.
-    let wheel_index = PackageIndex::new(&sources.wheel_index, client)?;
+    let wheel_index = PackageIndex::new(&sources.wheel_index, client, sources.cache.clone())?;
     let mut listings: HashMap<String, Vec<IndexFile>> = HashMap::new();
     let mut chosen: BTreeMap<String, Chosen> = BTreeMap::new();
     // Releases set aside because what they require cannot be satisfied: the

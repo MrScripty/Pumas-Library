@@ -344,9 +344,9 @@ pub struct VersionManager {
     torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
     #[cfg(test)]
     native_receipt_pause: Option<Arc<installer::TorchPublicationPause>>,
-    /// Loopback package indexes standing in for PyPI and the ONNX Runtime feeds.
-    #[cfg(test)]
-    cuda_wheel_sources: Option<installer::CudaWheelSources>,
+    /// Which ONNX Runtime CUDA builds install, shared by listings and
+    /// installs so neither asks the package indexes again needlessly.
+    cuda_availability: Arc<installer::CudaAvailability>,
     #[cfg(test)]
     interrupt_after_native_rename: Option<Arc<AtomicBool>>,
     #[cfg(test)]
@@ -506,8 +506,9 @@ impl VersionManager {
             torch_publication_pause: None,
             #[cfg(test)]
             native_receipt_pause: None,
-            #[cfg(test)]
-            cuda_wheel_sources: None,
+            cuda_availability: Arc::new(installer::CudaAvailability::new(
+                installer::CudaWheelSources::official(),
+            )),
             #[cfg(test)]
             interrupt_after_native_rename: None,
             #[cfg(test)]
@@ -947,6 +948,14 @@ impl VersionManager {
             .github_client
             .get_releases_for_app_listing(self.app_id, force_refresh)
             .await?;
+        if self.app_id == AppId::OnnxRuntime {
+            // A CUDA build whose libraries cannot be installed is listed with
+            // the reason, and the builds that install instead.
+            if force_refresh {
+                self.cuda_availability.refresh();
+            }
+            self.cuda_availability.annotate(&mut releases).await;
+        }
         if self.app_id == AppId::Torch {
             releases.retain(installer::is_torch_runtime_release);
             for release in &mut releases {
@@ -1273,16 +1282,11 @@ impl VersionManager {
         .with_torch_cleanup(self.torch_cleanup.clone())
         .with_shutdown_flag(self.torch_shutting_down.clone())
         .with_github_client(self.github_client.clone())
-        .with_acquisition_consumer(self.acquisition_consumer.clone());
+        .with_acquisition_consumer(self.acquisition_consumer.clone())
+        .with_cuda_availability(self.cuda_availability.clone());
         #[cfg(test)]
         let installer = if let Some(pause) = &self.native_receipt_pause {
             installer.with_native_receipt_pause(pause.clone())
-        } else {
-            installer
-        };
-        #[cfg(test)]
-        let installer = if let Some(sources) = &self.cuda_wheel_sources {
-            installer.with_cuda_wheel_sources(sources.clone())
         } else {
             installer
         };
@@ -1514,6 +1518,7 @@ impl VersionManager {
             total_size: None,
             archive_size: None,
             dependencies_size: None,
+            unavailable_reason: None,
         })
     }
 
@@ -1987,6 +1992,7 @@ mod tests {
                     total_size: Some(size),
                     archive_size: Some(size),
                     dependencies_size: None,
+                    unavailable_reason: None,
                 }],
             )
             .unwrap();
@@ -2189,6 +2195,7 @@ mod tests {
                         total_size: Some(100),
                         archive_size: Some(100),
                         dependencies_size: None,
+                        unavailable_reason: None,
                     }],
                 )
                 .unwrap();
@@ -5480,6 +5487,7 @@ mod tests {
                 total_size: Some(4),
                 archive_size: Some(4),
                 dependencies_size: None,
+                unavailable_reason: None,
             }],
         )
         .unwrap();
@@ -6104,6 +6112,7 @@ mod tests {
                     total_size: None,
                     archive_size: None,
                     dependencies_size: None,
+                    unavailable_reason: None,
                 }],
             )
             .unwrap();

@@ -35,8 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   are kept; `cuda/libraries.json` records their source and digests, and
   removing the version removes them. A build without usable metadata (CUDA 12
   builds from 1.30, CUDA 13 builds before 1.28, as published today) is refused
-  with the reason. The NVIDIA driver remains the operating system's. CPU builds
-  are unchanged. See
+  with the reason, and the reason names the builds that install instead. The
+  version listing reports such builds up front in the new
+  `unavailableReason` field of each listed release, and the desktop app shows
+  the reason in place of an install button. These lookups are kept until the
+  package indexes change or the list is refreshed. The NVIDIA driver remains
+  the operating system's. CPU builds are unchanged. See
   [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md#amendment-2026-11-12-cuda-libraries).
 
 ### Changed

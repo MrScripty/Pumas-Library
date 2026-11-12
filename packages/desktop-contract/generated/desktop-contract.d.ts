@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 67f12f2ded2dd70b021ed8e2dc439d24506a97edb0eb106bc34ec38ec077410f. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ac9b6da32a69149bf7f2ec8edff71727e222f401f9e7f0d5140990ea3d142aa5. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -261,7 +261,7 @@ export type UpdateStreamError = { "message": string };
 export type ValidateInstallationsOutcome = { "orphaned_dirs": ReadonlyArray<string>; "removed_tags": ReadonlyArray<string>; "valid_count": number };
 export type VersionInfoOutcome = { "info": RuntimeVersionInfo; "success": true };
 export type VersionReleaseAsset = { "downloadUrl": string; "name": string; "size": number };
-export type VersionReleaseInfo = { "archiveSize": number | null; "assets": ReadonlyArray<VersionReleaseAsset>; "body": string | null; "dependenciesSize": number | null; "htmlUrl": string; "installing": boolean | null; "name": string; "prerelease": boolean; "publishedAt": string; "tagName": string; "totalSize": number | null };
+export type VersionReleaseInfo = { "archiveSize": number | null; "assets": ReadonlyArray<VersionReleaseAsset>; "body": string | null; "dependenciesSize": number | null; "htmlUrl": string; "installing": boolean | null; "name": string; "prerelease": boolean; "publishedAt": string; "tagName": string; "totalSize": number | null; "unavailableReason": string | null };
 export type VersionStatusOutcome = { "status": RuntimeVersionStatus; "success": true };
 
 export type DecodeOutcome<T> = { readonly status: 'valid'; readonly value: T } | { readonly status: 'invalid' | 'unsupported' | 'unavailable'; readonly message: string };

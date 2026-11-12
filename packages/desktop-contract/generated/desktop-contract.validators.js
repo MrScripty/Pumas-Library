@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 67f12f2ded2dd70b021ed8e2dc439d24506a97edb0eb106bc34ec38ec077410f. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ac9b6da32a69149bf7f2ec8edff71727e222f401f9e7f0d5140990ea3d142aa5. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   try {
@@ -83,7 +83,7 @@ var require_equal = __commonJS({
 // electron/desktop-contract.validators.js
 var validateAvailableVersionsOutcome = validate10;
 var schema15 = { "additionalProperties": false, "properties": { "error": { "type": "string" }, "rate_limited": { "const": true, "type": "boolean" }, "retry_after_secs": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "success": { "const": false, "type": "boolean" } }, "required": ["success", "error", "rate_limited", "retry_after_secs"], "type": "object" };
-var schema13 = { "additionalProperties": false, "description": "Version release info as returned to frontend.", "properties": { "archiveSize": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "assets": { "default": [], "items": { "$ref": "#/definitions/VersionReleaseAsset" }, "type": "array" }, "body": { "default": null, "type": ["string", "null"] }, "dependenciesSize": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "htmlUrl": { "type": "string" }, "installing": { "default": null, "type": ["boolean", "null"] }, "name": { "type": "string" }, "prerelease": { "default": false, "type": "boolean" }, "publishedAt": { "type": "string" }, "tagName": { "type": "string" }, "totalSize": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] } }, "required": ["tagName", "name", "publishedAt", "prerelease", "body", "htmlUrl", "assets", "totalSize", "archiveSize", "dependenciesSize", "installing"], "type": "object" };
+var schema13 = { "additionalProperties": false, "description": "Version release info as returned to frontend.", "properties": { "archiveSize": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "assets": { "default": [], "items": { "$ref": "#/definitions/VersionReleaseAsset" }, "type": "array" }, "body": { "default": null, "type": ["string", "null"] }, "dependenciesSize": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "htmlUrl": { "type": "string" }, "installing": { "default": null, "type": ["boolean", "null"] }, "name": { "type": "string" }, "prerelease": { "default": false, "type": "boolean" }, "publishedAt": { "type": "string" }, "tagName": { "type": "string" }, "totalSize": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "unavailableReason": { "default": null, "description": "Why this build cannot be installed on this host, or `null` when it can\n(or the backend cannot tell yet). An unavailable build is listed so the\nuser sees the reason and the builds that install instead.", "type": ["string", "null"] } }, "required": ["tagName", "name", "publishedAt", "prerelease", "body", "htmlUrl", "assets", "totalSize", "archiveSize", "dependenciesSize", "installing", "unavailableReason"], "type": "object" };
 var func2 = Object.prototype.hasOwnProperty;
 function validate12(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
@@ -91,7 +91,7 @@ function validate12(data, { instancePath = "", parentData, parentDataProperty, r
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
-      if (data.tagName === void 0 && (missing0 = "tagName") || data.name === void 0 && (missing0 = "name") || data.publishedAt === void 0 && (missing0 = "publishedAt") || data.prerelease === void 0 && (missing0 = "prerelease") || data.body === void 0 && (missing0 = "body") || data.htmlUrl === void 0 && (missing0 = "htmlUrl") || data.assets === void 0 && (missing0 = "assets") || data.totalSize === void 0 && (missing0 = "totalSize") || data.archiveSize === void 0 && (missing0 = "archiveSize") || data.dependenciesSize === void 0 && (missing0 = "dependenciesSize") || data.installing === void 0 && (missing0 = "installing")) {
+      if (data.tagName === void 0 && (missing0 = "tagName") || data.name === void 0 && (missing0 = "name") || data.publishedAt === void 0 && (missing0 = "publishedAt") || data.prerelease === void 0 && (missing0 = "prerelease") || data.body === void 0 && (missing0 = "body") || data.htmlUrl === void 0 && (missing0 = "htmlUrl") || data.assets === void 0 && (missing0 = "assets") || data.totalSize === void 0 && (missing0 = "totalSize") || data.archiveSize === void 0 && (missing0 = "archiveSize") || data.dependenciesSize === void 0 && (missing0 = "dependenciesSize") || data.installing === void 0 && (missing0 = "installing") || data.unavailableReason === void 0 && (missing0 = "unavailableReason")) {
         validate12.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
@@ -353,6 +353,19 @@ function validate12(data, { instancePath = "", parentData, parentDataProperty, r
                                 var valid0 = _errs32 === errors;
                               } else {
                                 var valid0 = true;
+                              }
+                              if (valid0) {
+                                if (data.unavailableReason !== void 0) {
+                                  let data15 = data.unavailableReason;
+                                  const _errs34 = errors;
+                                  if (typeof data15 !== "string" && data15 !== null) {
+                                    validate12.errors = [{ instancePath: instancePath + "/unavailableReason", schemaPath: "#/properties/unavailableReason/type", keyword: "type", params: { type: schema13.properties.unavailableReason.type }, message: "must be string,null" }];
+                                    return false;
+                                  }
+                                  var valid0 = _errs34 === errors;
+                                } else {
+                                  var valid0 = true;
+                                }
                               }
                             }
                           }

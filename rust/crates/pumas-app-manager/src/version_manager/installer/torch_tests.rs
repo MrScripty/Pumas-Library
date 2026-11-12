@@ -36,6 +36,7 @@ fn upstream_release() -> GitHubRelease {
         total_size: Some(348_810_776),
         archive_size: Some(348_810_776),
         dependencies_size: None,
+        unavailable_reason: None,
     }
 }
 

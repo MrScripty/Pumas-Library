@@ -13,8 +13,9 @@ use pumas_library::{PumasError, Result};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
-use std::sync::OnceLock;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 /// The largest index page Pumas reads. NVIDIA and ONNX Runtime pages list a
 /// few hundred files and stay well below a megabyte.
@@ -876,15 +877,104 @@ fn sha256_value(value: &serde_json::Value) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
+/// What a package index answered for one project page.
+#[derive(Clone)]
+struct CachedPage {
+    /// The [`IndexCache`] generation in which the index last confirmed it.
+    generation: u64,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    /// `None`: the index does not have the project (404 or 410).
+    files: Option<Vec<IndexFile>>,
+}
+
+/// Package index answers shared by version listings and installs.
+///
+/// A project page read in the current generation is used as it is. After
+/// [`IndexCache::refresh`], the next read of a page revalidates it with the
+/// index (`If-None-Match`, `If-Modified-Since`) and keeps it when the index
+/// answers that it has not changed. Cached answers therefore last until the
+/// index changes or a refresh is asked for, never for a fixed time. Core
+/// metadata belongs to one immutable file and is kept for the process.
+#[derive(Default)]
+pub(crate) struct IndexCache {
+    generation: AtomicU64,
+    pages: StdMutex<HashMap<String, CachedPage>>,
+    metadata: StdMutex<HashMap<String, String>>,
+}
+
+impl std::fmt::Debug for IndexCache {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("IndexCache")
+            .field("generation", &self.generation())
+            .finish_non_exhaustive()
+    }
+}
+
+impl IndexCache {
+    /// Revalidate every cached page with its index on its next read.
+    pub(crate) fn refresh(&self) {
+        self.generation.fetch_add(1, AtomicOrdering::SeqCst);
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(AtomicOrdering::SeqCst)
+    }
+
+    fn page(&self, key: &str) -> Option<CachedPage> {
+        self.pages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            .cloned()
+    }
+
+    fn store_page(&self, key: String, page: CachedPage) {
+        self.pages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, page);
+    }
+}
+
+/// How an index answered a project page request.
+enum PageAnswer {
+    NotModified,
+    NotFound,
+    Body {
+        body: Vec<u8>,
+        etag: Option<String>,
+        last_modified: Option<String>,
+    },
+}
+
 /// A package index serving the JSON simple API (PEP 691).
 #[derive(Clone, Debug)]
 pub(super) struct PackageIndex {
     base: reqwest::Url,
     client: reqwest::Client,
+    cache: Arc<IndexCache>,
+}
+
+fn header(response: &reqwest::Response, name: reqwest::header::HeaderName) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+}
+
+/// Whether an index answered that a resource does not exist.
+fn is_not_found(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE
+    )
 }
 
 impl PackageIndex {
-    pub(super) fn new(base: &str, client: reqwest::Client) -> Result<Self> {
+    pub(super) fn new(base: &str, client: reqwest::Client, cache: Arc<IndexCache>) -> Result<Self> {
         let mut base = reqwest::Url::parse(base).map_err(|_| PumasError::Config {
             message: format!("Package index URL `{base}` is invalid"),
         })?;
@@ -892,7 +982,11 @@ impl PackageIndex {
             let path = format!("{}/", base.path());
             base.set_path(&path);
         }
-        Ok(Self { base, client })
+        Ok(Self {
+            base,
+            client,
+            cache,
+        })
     }
 
     /// The index URL without credentials, for messages and records.
@@ -904,49 +998,23 @@ impl PackageIndex {
         shown.to_string()
     }
 
-    async fn get(
-        &self,
-        url: &reqwest::Url,
-        accept: Option<&str>,
-        limit: usize,
-    ) -> Result<Option<Vec<u8>>> {
-        let mut request = self.client.get(url.clone());
-        if let Some(accept) = accept {
-            request = request.header(reqwest::header::ACCEPT, accept);
-        }
-        let failed = |cause: String| PumasError::Network {
+    fn failed(url: &reqwest::Url, cause: String) -> PumasError {
+        PumasError::Network {
             message: format!("Could not read {url}"),
             cause: Some(cause),
-        };
-        let mut response = request
-            .send()
-            .await
-            .map_err(|error| failed(error.without_url().to_string()))?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
         }
-        if !response.status().is_success() {
-            return Err(failed(format!("HTTP {}", response.status())));
-        }
-        if let Some(accept) = accept {
-            let content_type = response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default();
-            if !content_type.contains(accept) {
-                return Err(refused(format!(
-                    "Package index {} does not serve the JSON simple API (PEP 691); it answered \
-                     `{content_type}`",
-                    self.display()
-                )));
-            }
-        }
+    }
+
+    async fn read_body(
+        url: &reqwest::Url,
+        mut response: reqwest::Response,
+        limit: usize,
+    ) -> Result<Vec<u8>> {
         let mut body = Vec::new();
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|error| failed(error.without_url().to_string()))?
+            .map_err(|error| Self::failed(url, error.without_url().to_string()))?
         {
             if body.len() + chunk.len() > limit {
                 return Err(refused(format!(
@@ -955,7 +1023,57 @@ impl PackageIndex {
             }
             body.extend_from_slice(&chunk);
         }
-        Ok(Some(body))
+        Ok(body)
+    }
+
+    /// Request a project page, conditionally when `cached` has validators.
+    async fn fetch_page(
+        &self,
+        url: &reqwest::Url,
+        cached: Option<&CachedPage>,
+    ) -> Result<PageAnswer> {
+        let mut request = self
+            .client
+            .get(url.clone())
+            .header(reqwest::header::ACCEPT, SIMPLE_JSON);
+        if let Some(cached) = cached {
+            if let Some(etag) = &cached.etag {
+                request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+            }
+            if let Some(modified) = &cached.last_modified {
+                request = request.header(reqwest::header::IF_MODIFIED_SINCE, modified);
+            }
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| Self::failed(url, error.without_url().to_string()))?;
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_MODIFIED && cached.is_some() {
+            return Ok(PageAnswer::NotModified);
+        }
+        if is_not_found(status) {
+            return Ok(PageAnswer::NotFound);
+        }
+        if !status.is_success() {
+            return Err(Self::failed(url, format!("HTTP {status}")));
+        }
+        let content_type = header(&response, reqwest::header::CONTENT_TYPE).unwrap_or_default();
+        if !content_type.contains(SIMPLE_JSON) {
+            return Err(refused(format!(
+                "Package index {} does not serve the JSON simple API (PEP 691); it answered \
+                 `{content_type}`",
+                self.display()
+            )));
+        }
+        let etag = header(&response, reqwest::header::ETAG);
+        let last_modified = header(&response, reqwest::header::LAST_MODIFIED);
+        let body = Self::read_body(url, response, MAX_INDEX_PAGE_BYTES).await?;
+        Ok(PageAnswer::Body {
+            body,
+            etag,
+            last_modified,
+        })
     }
 
     /// The files of `project`, or `None` when the index does not have it.
@@ -968,33 +1086,59 @@ impl PackageIndex {
                     "Project name `{project}` is not a valid index path"
                 ))
             })?;
-        let Some(body) = self
-            .get(&page, Some(SIMPLE_JSON), MAX_INDEX_PAGE_BYTES)
-            .await?
-        else {
-            return Ok(None);
+        let key = page.to_string();
+        let generation = self.cache.generation();
+        let cached = self.cache.page(&key);
+        if let Some(cached) = cached
+            .as_ref()
+            .filter(|cached| cached.generation == generation)
+        {
+            return Ok(cached.files.clone());
+        }
+        let (files, etag, last_modified) = match self.fetch_page(&page, cached.as_ref()).await? {
+            PageAnswer::NotModified => {
+                let cached = cached.expect("a page is only revalidated when cached");
+                (cached.files, cached.etag, cached.last_modified)
+            }
+            PageAnswer::NotFound => (None, None, None),
+            PageAnswer::Body {
+                body,
+                etag,
+                last_modified,
+            } => {
+                let document: serde_json::Value =
+                    serde_json::from_slice(&body).map_err(|error| {
+                        refused(format!(
+                            "Package index {} returned an unreadable page for {project}: {error}",
+                            self.display()
+                        ))
+                    })?;
+                let entries = document
+                    .get("files")
+                    .and_then(serde_json::Value::as_array)
+                    .ok_or_else(|| {
+                        refused(format!(
+                            "Package index {} returned no file list for {project}",
+                            self.display()
+                        ))
+                    })?;
+                let files = entries
+                    .iter()
+                    .filter_map(|entry| index_file(entry, &page, project))
+                    .collect();
+                (Some(files), etag, last_modified)
+            }
         };
-        let document: serde_json::Value = serde_json::from_slice(&body).map_err(|error| {
-            refused(format!(
-                "Package index {} returned an unreadable page for {project}: {error}",
-                self.display()
-            ))
-        })?;
-        let entries = document
-            .get("files")
-            .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| {
-                refused(format!(
-                    "Package index {} returned no file list for {project}",
-                    self.display()
-                ))
-            })?;
-        Ok(Some(
-            entries
-                .iter()
-                .filter_map(|entry| index_file(entry, &page, project))
-                .collect(),
-        ))
+        self.cache.store_page(
+            key,
+            CachedPage {
+                generation,
+                etag,
+                last_modified,
+                files: files.clone(),
+            },
+        );
+        Ok(files)
     }
 
     /// The core metadata served beside `file` (PEP 658), checked against the
@@ -1012,16 +1156,33 @@ impl PackageIndex {
         url.set_fragment(None);
         let path = format!("{}.metadata", url.path());
         url.set_path(&path);
-        let body = self
-            .get(&url, None, MAX_METADATA_BYTES)
-            .await?
-            .ok_or_else(|| {
-                refused(format!(
-                    "Package index {} lists core metadata for {} but does not serve it",
-                    self.display(),
-                    file.filename
-                ))
-            })?;
+        let key = url.to_string();
+        if let Some(text) = self
+            .cache
+            .metadata
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+        {
+            return Ok(text.clone());
+        }
+        let response = self
+            .client
+            .get(url.clone())
+            .send()
+            .await
+            .map_err(|error| Self::failed(&url, error.without_url().to_string()))?;
+        if is_not_found(response.status()) {
+            return Err(refused(format!(
+                "Package index {} lists core metadata for {} but does not serve it",
+                self.display(),
+                file.filename
+            )));
+        }
+        if !response.status().is_success() {
+            return Err(Self::failed(&url, format!("HTTP {}", response.status())));
+        }
+        let body = Self::read_body(&url, response, MAX_METADATA_BYTES).await?;
         if let Some(expected) = digest {
             let actual = format!("{:x}", Sha256::digest(&body));
             if &actual != expected {
@@ -1032,8 +1193,14 @@ impl PackageIndex {
                 )));
             }
         }
-        String::from_utf8(body)
-            .map_err(|_| refused(format!("Core metadata of {} is not UTF-8", file.filename)))
+        let text = String::from_utf8(body)
+            .map_err(|_| refused(format!("Core metadata of {} is not UTF-8", file.filename)))?;
+        self.cache
+            .metadata
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, text.clone());
+        Ok(text)
     }
 }
 

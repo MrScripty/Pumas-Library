@@ -27,6 +27,7 @@ fn release(tag: &str, prerelease: bool, assets: Vec<GitHubAsset>) -> GitHubRelea
         total_size: None,
         archive_size: None,
         dependencies_size: None,
+        unavailable_reason: None,
     }
 }
 

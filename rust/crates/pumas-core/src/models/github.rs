@@ -37,6 +37,11 @@ pub struct GitHubRelease {
     pub archive_size: Option<u64>,
     #[serde(default)]
     pub dependencies_size: Option<u64>,
+    /// Why this listed build cannot be installed on this host, when the
+    /// listing knows it before an install is attempted. Computed per listing;
+    /// never part of the publisher's release data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
 }
 
 impl GitHubRelease {
@@ -73,6 +78,11 @@ pub struct VersionReleaseInfo {
     pub dependencies_size: Option<u64>,
     #[serde(default)]
     pub installing: Option<bool>,
+    /// Why this build cannot be installed on this host, or `null` when it can
+    /// (or the backend cannot tell yet). An unavailable build is listed so the
+    /// user sees the reason and the builds that install instead.
+    #[serde(default)]
+    pub unavailable_reason: Option<String>,
 }
 
 /// Release asset for frontend.
@@ -108,6 +118,7 @@ impl From<GitHubRelease> for VersionReleaseInfo {
             archive_size: release.archive_size,
             dependencies_size: release.dependencies_size,
             installing: None,
+            unavailable_reason: release.unavailable_reason,
         }
     }
 }
@@ -183,6 +194,7 @@ mod tests {
             total_size: Some(2048),
             archive_size: Some(1024),
             dependencies_size: Some(1024),
+            unavailable_reason: None,
         };
 
         let info: VersionReleaseInfo = release.clone().into();

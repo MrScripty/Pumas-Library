@@ -6,6 +6,7 @@
 //! is downloaded.
 
 use super::onnx_cuda::{self, CudaWheelSources};
+use super::onnx_cuda_availability::CudaAvailability;
 use super::python_index::WheelPlatform;
 use super::*;
 use std::collections::{HashMap, HashSet};
@@ -505,6 +506,7 @@ fn sources(server: &FixtureServer) -> CudaWheelSources {
         ],
         wheel_index: format!("{}/pypi/simple/", server.base_url),
         client: Some(reqwest::Client::builder().no_proxy().build().unwrap()),
+        cache: Arc::default(),
     }
 }
 
@@ -1006,12 +1008,20 @@ mod installs {
     /// Publish the release, its CPU and CUDA 12 archives and the CUDA 12
     /// package indexes.
     fn publish_release(server: &FixtureServer, root: &Path) {
-        let archives: Vec<(u64, String, Vec<u8>)> = [cpu_archive_name(), cuda_archive_name()]
-            .into_iter()
-            .enumerate()
-            .map(|(index, name)| (2412 + index as u64, runtime_archive(&name), name))
-            .map(|(id, bytes, name)| (id, name, bytes))
-            .collect();
+        let cuda13 = distribution::variant_archive_names(
+            &release(),
+            distribution::OnnxRuntimeVariant::Cuda13,
+            "linux",
+            "x86_64",
+        )
+        .remove(0);
+        let archives: Vec<(u64, String, Vec<u8>)> =
+            [cpu_archive_name(), cuda_archive_name(), cuda13]
+                .into_iter()
+                .enumerate()
+                .map(|(index, name)| (2412 + index as u64, runtime_archive(&name), name))
+                .map(|(id, bytes, name)| (id, name, bytes))
+                .collect();
         let url = |name: &str| format!("{}/archives/{name}", server.base_url);
         server.route(
             &format!("/repos/microsoft/onnxruntime/releases/tags/{RELEASE_TAG}"),
@@ -1052,6 +1062,7 @@ mod installs {
                     total_size: None,
                     archive_size: None,
                     dependencies_size: None,
+                    unavailable_reason: None,
                 }],
             )
             .unwrap();
@@ -1092,7 +1103,7 @@ mod installs {
             )
             .unwrap(),
         );
-        manager.cuda_wheel_sources = Some(sources(server));
+        manager.cuda_availability = Arc::new(CudaAvailability::new(sources(server)));
         manager
     }
 
@@ -1144,21 +1155,53 @@ mod installs {
         let api = test_api(root.path()).await;
         let manager = onnx_manager(root.path(), &api, &server).await;
 
-        let listed: Vec<_> = manager
-            .get_available_releases(false)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|release| release.tag_name)
-            .collect();
-        assert!(listed.contains(&CUDA_TAG.to_owned()), "{listed:?}");
+        let index_reads = || {
+            server
+                .requested_paths()
+                .iter()
+                .filter(|path| {
+                    path.starts_with("/pypi/")
+                        || path.starts_with("/feed")
+                        || path.ends_with(".metadata")
+                })
+                .count()
+        };
+        let listed = manager.get_available_releases(false).await.unwrap();
+        let reason = |tag: &str| {
+            listed
+                .iter()
+                .find(|release| release.tag_name == tag)
+                .unwrap_or_else(|| panic!("{tag} is listed"))
+                .unavailable_reason
+                .clone()
+        };
+        // The listing knows which CUDA builds install before any click: this
+        // release publishes CUDA 12 metadata only.
+        assert_eq!(reason(CUDA_TAG), None);
+        assert_eq!(reason("v1.24.2+cpu"), None);
+        let unavailable = reason("v1.24.2+cuda13").expect("the CUDA 13 build is unavailable");
+        assert!(
+            unavailable.contains("has no published CUDA 13 package metadata"),
+            "{unavailable}"
+        );
+        assert!(
+            unavailable.contains("Builds that install instead: no listed CUDA 13 build installs; v1.24.2+cuda12 installs."),
+            "{unavailable}"
+        );
+
+        // The answers are kept: listing again asks no index.
+        let after_listing = index_reads();
+        assert!(after_listing > 0);
+        let again = manager.get_available_releases(false).await.unwrap();
+        assert_eq!(index_reads(), after_listing);
+        assert!(again
+            .iter()
+            .any(|release| release.tag_name == "v1.24.2+cuda13"
+                && release.unavailable_reason.is_some()));
 
         // A CPU build installs as before, without reading a package index.
         install(&manager, "v1.24.2+cpu").await.unwrap();
-        assert!(!server
-            .requested_paths()
-            .iter()
-            .any(|path| path.starts_with("/pypi/") || path.starts_with("/feed")));
+        assert_eq!(index_reads(), after_listing);
         assert!(!manager
             .version_path("v1.24.2+cpu")
             .unwrap()
@@ -1209,6 +1252,22 @@ mod installs {
             .filter(|name| name.starts_with(".llama-install-"))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        // Installing the unavailable build anyway is refused with the same
+        // reason and the builds that install instead.
+        let refused = install(&manager, "v1.24.2+cuda13").await.unwrap_err();
+        assert!(
+            refused.contains("has no published CUDA 13 package metadata"),
+            "{refused}"
+        );
+        assert!(
+            refused.contains("Builds that install instead:")
+                && refused.contains("v1.24.2+cuda12 installs"),
+            "{refused}"
+        );
+        assert!(manager
+            .version_path("v1.24.2+cuda13")
+            .is_ok_and(|path| !path.exists()));
 
         // Removing the version removes its CUDA libraries with it.
         manager.remove_version(CUDA_TAG).await.unwrap();

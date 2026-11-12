@@ -104,6 +104,7 @@ export function VersionListItem({
             isCancelHovered={isCancelHovered}
             isInstalled={isInstalled}
             isInstalling={isInstalling}
+            unavailableReason={release.unavailableReason ?? null}
             onCancel={onCancel}
             onCancelMouseEnter={onCancelMouseEnter}
             onCancelMouseLeave={onCancelMouseLeave}

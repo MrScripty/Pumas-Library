@@ -226,4 +226,19 @@ describe('VersionListItem', () => {
     expect(screen.queryByText('Downloading...')).not.toBeInTheDocument();
     expect(container.querySelector('.download-progress-ring.is-waiting')).not.toBeInTheDocument();
   });
+
+  it('shows the backend reason and offers no install for an unavailable build', () => {
+    const reason =
+      'ONNX Runtime 1.31.1 has no published CUDA 12 package metadata. Builds that install instead: v1.29.0+cuda12 installs';
+    const { props } = renderVersionListItem({
+      release: { ...release, tagName: 'v1.31.1+cuda12', unavailableReason: reason },
+    });
+
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    const unavailable = screen.getByRole('button', { name: `Unavailable: ${reason}` });
+    expect(unavailable).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Install version' })).not.toBeInTheDocument();
+    fireEvent.click(unavailable);
+    expect(props.onInstall).not.toHaveBeenCalled();
+  });
 });

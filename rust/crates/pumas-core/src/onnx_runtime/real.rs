@@ -11,6 +11,8 @@ use ort::{
 };
 use tracing::info;
 
+use crate::onnx_runtime_distribution::OnnxRuntimeVariant;
+
 use super::{
     output::extract_hidden_states, tensors::TokenTensors, OnnxEmbedding,
     OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest,
@@ -25,11 +27,13 @@ const ONNX_RUNTIME_INTRA_THREADS: usize = 1;
 const ONNX_RUNTIME_INTER_THREADS: usize = 1;
 
 /// Register exactly the requested execution provider. A GPU provider that
-/// cannot initialize (its provider library or the CUDA/cuDNN libraries it
-/// needs are missing) is an error with the reason, never a silent CPU fallback.
+/// cannot initialize is an error with the reason, never a silent CPU
+/// fallback. For CUDA the reason names the missing piece: the NVIDIA driver
+/// (missing or too old), or the build's CUDA runtime and cuDNN libraries.
 fn register_execution_provider(
     builder: SessionBuilder,
     provider: OnnxExecutionProvider,
+    runtime_library: Option<&OnnxRuntimeLibrary>,
 ) -> Result<SessionBuilder, OnnxRuntimeError> {
     let dispatch = match provider {
         OnnxExecutionProvider::Cpu => CPU::default().build(),
@@ -41,12 +45,14 @@ fn register_execution_provider(
         .with_execution_providers([dispatch])
         .map_err(|error| {
             let hint = match provider {
-                OnnxExecutionProvider::Cpu => "",
-                OnnxExecutionProvider::Cuda => {
-                    "; the CUDA build needs an NVIDIA driver plus the CUDA runtime and cuDNN \
-                     libraries of its CUDA major version on the library path"
-                }
-                OnnxExecutionProvider::CoreMl => "; CoreML needs macOS on Apple hardware",
+                OnnxExecutionProvider::Cpu => String::new(),
+                OnnxExecutionProvider::Cuda => super::cuda_driver::cuda_failure_hint(
+                    super::cuda_driver::probe_driver(),
+                    runtime_library
+                        .and_then(|library| OnnxRuntimeVariant::from_tag(library.version_tag()))
+                        .and_then(OnnxRuntimeVariant::cuda_major),
+                ),
+                OnnxExecutionProvider::CoreMl => "; CoreML needs macOS on Apple hardware".into(),
             };
             OnnxRuntimeError {
                 code: super::OnnxRuntimeErrorCode::Backend,
@@ -69,7 +75,7 @@ pub fn probe_execution_provider(
     super::native_library::ensure_runtime_library(Some(runtime_library))?;
     let builder = Session::builder()
         .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
-    register_execution_provider(builder, provider).map(|_| ())
+    register_execution_provider(builder, provider, Some(runtime_library)).map(|_| ())
 }
 
 #[derive(Debug)]
@@ -114,7 +120,11 @@ impl OnnxRuntimeSession {
         );
         let builder = Session::builder()
             .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
-        let builder = register_execution_provider(builder, request.options.execution_provider)?;
+        let builder = register_execution_provider(
+            builder,
+            request.options.execution_provider,
+            runtime_library,
+        )?;
         let mut builder = apply_session_options(builder, &request.options)?;
 
         let session = builder

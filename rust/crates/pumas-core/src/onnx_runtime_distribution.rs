@@ -74,6 +74,15 @@ impl OnnxRuntimeVariant {
         Self::ALL.into_iter().find(|variant| variant.id() == suffix)
     }
 
+    /// The CUDA major version this build links against, if it is a CUDA build.
+    pub fn cuda_major(self) -> Option<u32> {
+        match self {
+            Self::Cpu => None,
+            Self::Cuda12 => Some(12),
+            Self::Cuda13 => Some(13),
+        }
+    }
+
     /// The GPU execution provider this build offers on the running platform.
     pub fn gpu_execution_provider(self) -> Option<OnnxRuntimeExecutionProvider> {
         match self {

@@ -14,6 +14,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 mod config;
+mod cuda_driver;
 mod fake;
 pub mod host_protocol;
 mod manager;

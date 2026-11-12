@@ -95,7 +95,13 @@ pub(super) async fn run(
             .map_err(|error| failure(name, &format!("group custody unavailable: {error}")))?;
         command.process_group(0);
     }
+    // Conversion scripts load models with third-party libraries.
     command
+        .envs(
+            crate::platform::child_environment::THIRD_PARTY_TELEMETRY_OPT_OUT
+                .iter()
+                .copied(),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -392,6 +398,24 @@ mod tests {
         let mut command = Command::new("sh");
         command.args(["-c", script]);
         command
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn conversion_processes_run_with_third_party_telemetry_disabled() {
+        let mut command =
+            shell("printf '%s %s\\n' \"$HF_HUB_DISABLE_TELEMETRY\" \"$DO_NOT_TRACK\"");
+        command.env("HF_HUB_DISABLE_TELEMETRY", "0");
+        let mut lines = Vec::new();
+        run(
+            &mut command,
+            "environment fixture",
+            &CancellationToken::new(),
+            |_, line| lines.push(line.to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(lines, ["1 1"]);
     }
 
     #[cfg(unix)]

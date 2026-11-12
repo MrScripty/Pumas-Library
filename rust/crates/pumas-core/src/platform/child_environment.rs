@@ -17,6 +17,9 @@
 //! (`PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP` and other `PYTHON*`), and
 //! credentials such as `HF_TOKEN`. A launch that needs a library path sets it
 //! explicitly (the llama.cpp launch configuration does).
+//!
+//! Always set: the third-party telemetry opt-outs in
+//! [`THIRD_PARTY_TELEMETRY_OPT_OUT`].
 
 use std::ffi::{OsStr, OsString};
 use std::process::Command;
@@ -144,11 +147,28 @@ pub fn inherited_environment(
         .collect()
 }
 
+/// Third-party telemetry opt-outs set for every process Pumas runs that may
+/// load third-party libraries which report usage.
+///
+/// - `HF_HUB_DISABLE_TELEMETRY`: `huggingface_hub`, and through it
+///   Transformers, Diffusers and sentence-transformers.
+/// - `DO_NOT_TRACK`: the cross-tool convention, also honored by
+///   `huggingface_hub`.
+///
+/// ONNX Runtime has no environment switch; its host disables telemetry
+/// through the ORT API. pip, uv, PyTorch, llama.cpp and Ollama send none.
+/// These are always set, even when the user's environment says otherwise:
+/// Pumas does not let third-party libraries report usage.
+pub const THIRD_PARTY_TELEMETRY_OPT_OUT: &[(&str, &str)] =
+    &[("HF_HUB_DISABLE_TELEMETRY", "1"), ("DO_NOT_TRACK", "1")];
+
 /// Clear `command`'s environment and inherit only the allowlisted variables
-/// from this process. Apply launch-specific variables after this call.
+/// from this process, with third-party telemetry disabled. Apply
+/// launch-specific variables after this call.
 pub fn apply_owned_child_environment(command: &mut Command) {
     command.env_clear();
     command.envs(inherited_environment(std::env::vars_os()));
+    command.envs(THIRD_PARTY_TELEMETRY_OPT_OUT.iter().copied());
 }
 
 #[cfg(test)]
@@ -207,12 +227,27 @@ mod tests {
         command.env("LD_PRELOAD", "/tmp/inject.so");
         apply_owned_child_environment(&mut command);
         let configured: Vec<_> = command.get_envs().collect();
+        let opt_out = |name: &OsStr| {
+            THIRD_PARTY_TELEMETRY_OPT_OUT
+                .iter()
+                .any(|(opt_out, _)| name == OsStr::new(opt_out))
+        };
         assert!(configured
             .iter()
-            .all(|(name, value)| value.is_some() && is_inherited(name)));
+            .all(|(name, value)| value.is_some() && (is_inherited(name) || opt_out(name))));
         assert!(!configured
             .iter()
             .any(|(name, _)| *name == OsStr::new("LD_PRELOAD")));
+    }
+
+    #[test]
+    fn owned_children_have_third_party_telemetry_disabled() {
+        let mut command = Command::new("runtime");
+        apply_owned_child_environment(&mut command);
+        let configured: Vec<_> = command.get_envs().collect();
+        for (name, value) in THIRD_PARTY_TELEMETRY_OPT_OUT {
+            assert!(configured.contains(&(OsStr::new(name), Some(OsStr::new(value)))));
+        }
     }
 
     #[test]

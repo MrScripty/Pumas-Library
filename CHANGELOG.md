@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Runtime profiles can pin an installed runtime version
+  (`runtime_version`), so llama.cpp, Torch and other managed runtimes can run
+  instances of different versions at the same time. A profile without a pin
+  follows the runtime's active version, as before. Saving a pin that is not
+  installed, or launching a profile whose pinned version was removed, is
+  refused with the reason. Running instances report the version they started
+  from in `RuntimeProfileStatus.runtime_version`.
+
 ### Changed
 
+- Changing a runtime's active or default version no longer requires stopping
+  its running profiles; they keep the version they started from, and the
+  change applies to new launches. Removing a version is refused only while an
+  instance runs that version, and the refusal names the profiles to stop.
 - Torch runtime wheels now download through Pumas's shared acquisition
   owner, the one llama.cpp archives use, instead of through pip. A dropped
   connection resumes from the bytes already received, and a failed install

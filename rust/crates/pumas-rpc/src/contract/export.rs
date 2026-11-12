@@ -986,6 +986,7 @@ fn pull_snapshot_fixtures() -> anyhow::Result<Value> {
                 pid: Some(4242),
                 log_path: Some("/fixture/logs/ollama.log".into()),
                 last_error: Some("fixture error".into()),
+                runtime_version: None,
             }],
             profiles: vec![profile.clone(), llama],
             ..RuntimeProfilesSnapshot::empty()

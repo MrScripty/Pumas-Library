@@ -119,6 +119,7 @@ async fn launch_in_process_runtime_profile(
             pid: None,
             log_path: None,
             last_error: None,
+            runtime_version: None,
         })?;
 
     Ok(LaunchResponse {
@@ -469,6 +470,7 @@ pub(super) async fn stop_runtime_profile(
             pid: None,
             log_path: None,
             last_error: None,
+            runtime_version: None,
         })?;
     primary
         .serving_service

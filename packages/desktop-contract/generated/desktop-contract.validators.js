@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 273d5c4076c61cfdba2393e5e39acbe9a673d8efc229ad101871ff4e950af401. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 d2a0f817cc215064033f00e2feb3c88d25f23926b12e0d6f37c7895c229c7e1e. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   try {
@@ -19012,9 +19012,9 @@ function validate138(data, { instancePath = "", parentData, parentDataProperty, 
   return errors === 0;
 }
 var validateRuntimeProfilesSnapshotResponse = validate139;
-var schema163 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "ModelRuntimeRoute": { "additionalProperties": false, "properties": { "auto_load": { "default": false, "type": "boolean" }, "model_id": { "type": "string" }, "profile_id": { "type": ["string", "null"] }, "provider": { "$ref": "#/definitions/RuntimeProviderId" } }, "required": ["provider", "model_id", "auto_load"], "type": "object" }, "RuntimeDeviceMode": { "enum": ["auto", "cpu", "gpu", "hybrid", "specific_device"], "type": "string" }, "RuntimeDeviceSettings": { "additionalProperties": false, "properties": { "device_id": { "type": ["string", "null"] }, "gpu_layers": { "maximum": 2147483647, "minimum": -2147483648, "type": ["integer", "null"] }, "mode": { "$ref": "#/definitions/RuntimeDeviceMode" }, "tensor_split": { "items": { "maximum": 34028234663852886e22, "minimum": -34028234663852886e22, "type": "number" }, "type": ["array", "null"] } }, "required": ["mode"], "type": "object" }, "RuntimeLifecycleState": { "enum": ["unknown", "stopped", "starting", "running", "stopping", "failed", "external"], "type": "string" }, "RuntimeManagementMode": { "enum": ["managed", "external"], "type": "string" }, "RuntimeProfileConfig": { "additionalProperties": false, "properties": { "device": { "allOf": [{ "$ref": "#/definitions/RuntimeDeviceSettings" }], "default": { "mode": "auto" } }, "enabled": { "default": true, "type": "boolean" }, "endpoint_url": { "type": ["string", "null"] }, "management_mode": { "$ref": "#/definitions/RuntimeManagementMode" }, "name": { "type": "string" }, "port": { "maximum": 65535, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "provider": { "$ref": "#/definitions/RuntimeProviderId" }, "provider_mode": { "$ref": "#/definitions/RuntimeProviderMode" }, "scheduler": { "allOf": [{ "$ref": "#/definitions/RuntimeSchedulerSettings" }], "default": { "auto_load": true } } }, "required": ["profile_id", "provider", "provider_mode", "management_mode", "name", "enabled", "device", "scheduler"], "type": "object" }, "RuntimeProfileStatus": { "additionalProperties": false, "properties": { "endpoint_url": { "type": ["string", "null"] }, "last_error": { "type": ["string", "null"] }, "log_path": { "type": ["string", "null"] }, "pid": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "state": { "$ref": "#/definitions/RuntimeLifecycleState" } }, "required": ["profile_id", "state"], "type": "object" }, "RuntimeProfilesSnapshot": { "additionalProperties": false, "properties": { "cursor": { "type": "string" }, "default_profile_id": { "type": ["string", "null"] }, "profiles": { "items": { "$ref": "#/definitions/RuntimeProfileConfig" }, "type": "array" }, "routes": { "items": { "$ref": "#/definitions/ModelRuntimeRoute" }, "type": "array" }, "schema_version": { "maximum": 4294967295, "minimum": 0, "type": "integer" }, "statuses": { "items": { "$ref": "#/definitions/RuntimeProfileStatus" }, "type": "array" } }, "required": ["schema_version", "cursor", "profiles", "routes", "statuses"], "type": "object" }, "RuntimeProviderId": { "enum": ["torch", "ollama", "llama_cpp", "onnx_runtime"], "type": "string" }, "RuntimeProviderMode": { "enum": ["torch_serve", "ollama_serve", "llama_cpp_router", "llama_cpp_dedicated", "onnx_serve"], "type": "string" }, "RuntimeSchedulerSettings": { "additionalProperties": false, "properties": { "auto_load": { "default": false, "type": "boolean" }, "keep_alive_seconds": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "max_concurrent_models": { "maximum": 65535, "minimum": 0, "type": ["integer", "null"] } }, "required": ["auto_load"], "type": "object" } }, "properties": { "error": { "type": ["string", "null"] }, "snapshot": { "$ref": "#/definitions/RuntimeProfilesSnapshot" }, "success": { "type": "boolean" } }, "required": ["success", "snapshot"], "title": "RuntimeProfilesSnapshotResponse", "type": "object" };
+var schema163 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "ModelRuntimeRoute": { "additionalProperties": false, "properties": { "auto_load": { "default": false, "type": "boolean" }, "model_id": { "type": "string" }, "profile_id": { "type": ["string", "null"] }, "provider": { "$ref": "#/definitions/RuntimeProviderId" } }, "required": ["provider", "model_id", "auto_load"], "type": "object" }, "RuntimeDeviceMode": { "enum": ["auto", "cpu", "gpu", "hybrid", "specific_device"], "type": "string" }, "RuntimeDeviceSettings": { "additionalProperties": false, "properties": { "device_id": { "type": ["string", "null"] }, "gpu_layers": { "maximum": 2147483647, "minimum": -2147483648, "type": ["integer", "null"] }, "mode": { "$ref": "#/definitions/RuntimeDeviceMode" }, "tensor_split": { "items": { "maximum": 34028234663852886e22, "minimum": -34028234663852886e22, "type": "number" }, "type": ["array", "null"] } }, "required": ["mode"], "type": "object" }, "RuntimeLifecycleState": { "enum": ["unknown", "stopped", "starting", "running", "stopping", "failed", "external"], "type": "string" }, "RuntimeManagementMode": { "enum": ["managed", "external"], "type": "string" }, "RuntimeProfileConfig": { "additionalProperties": false, "properties": { "device": { "allOf": [{ "$ref": "#/definitions/RuntimeDeviceSettings" }], "default": { "mode": "auto" } }, "enabled": { "default": true, "type": "boolean" }, "endpoint_url": { "type": ["string", "null"] }, "management_mode": { "$ref": "#/definitions/RuntimeManagementMode" }, "name": { "type": "string" }, "port": { "maximum": 65535, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "provider": { "$ref": "#/definitions/RuntimeProviderId" }, "provider_mode": { "$ref": "#/definitions/RuntimeProviderMode" }, "runtime_version": { "description": "Installed runtime version this managed profile launches, such as\n`b9082+cuda-12` for llama.cpp. `None` follows the runtime's active\nversion at each launch. Profiles that name different versions run as\nseparate processes at the same time; a running instance keeps the\nversion it started with.", "type": ["string", "null"] }, "scheduler": { "allOf": [{ "$ref": "#/definitions/RuntimeSchedulerSettings" }], "default": { "auto_load": true } } }, "required": ["profile_id", "provider", "provider_mode", "management_mode", "name", "enabled", "device", "scheduler"], "type": "object" }, "RuntimeProfileStatus": { "additionalProperties": false, "properties": { "endpoint_url": { "type": ["string", "null"] }, "last_error": { "type": ["string", "null"] }, "log_path": { "type": ["string", "null"] }, "pid": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "runtime_version": { "description": "Installed runtime version the running instance was launched from.", "type": ["string", "null"] }, "state": { "$ref": "#/definitions/RuntimeLifecycleState" } }, "required": ["profile_id", "state"], "type": "object" }, "RuntimeProfilesSnapshot": { "additionalProperties": false, "properties": { "cursor": { "type": "string" }, "default_profile_id": { "type": ["string", "null"] }, "profiles": { "items": { "$ref": "#/definitions/RuntimeProfileConfig" }, "type": "array" }, "routes": { "items": { "$ref": "#/definitions/ModelRuntimeRoute" }, "type": "array" }, "schema_version": { "maximum": 4294967295, "minimum": 0, "type": "integer" }, "statuses": { "items": { "$ref": "#/definitions/RuntimeProfileStatus" }, "type": "array" } }, "required": ["schema_version", "cursor", "profiles", "routes", "statuses"], "type": "object" }, "RuntimeProviderId": { "enum": ["torch", "ollama", "llama_cpp", "onnx_runtime"], "type": "string" }, "RuntimeProviderMode": { "enum": ["torch_serve", "ollama_serve", "llama_cpp_router", "llama_cpp_dedicated", "onnx_serve"], "type": "string" }, "RuntimeSchedulerSettings": { "additionalProperties": false, "properties": { "auto_load": { "default": false, "type": "boolean" }, "keep_alive_seconds": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "max_concurrent_models": { "maximum": 65535, "minimum": 0, "type": ["integer", "null"] } }, "required": ["auto_load"], "type": "object" } }, "properties": { "error": { "type": ["string", "null"] }, "snapshot": { "$ref": "#/definitions/RuntimeProfilesSnapshot" }, "success": { "type": "boolean" } }, "required": ["success", "snapshot"], "title": "RuntimeProfilesSnapshotResponse", "type": "object" };
 var schema164 = { "additionalProperties": false, "properties": { "cursor": { "type": "string" }, "default_profile_id": { "type": ["string", "null"] }, "profiles": { "items": { "$ref": "#/definitions/RuntimeProfileConfig" }, "type": "array" }, "routes": { "items": { "$ref": "#/definitions/ModelRuntimeRoute" }, "type": "array" }, "schema_version": { "maximum": 4294967295, "minimum": 0, "type": "integer" }, "statuses": { "items": { "$ref": "#/definitions/RuntimeProfileStatus" }, "type": "array" } }, "required": ["schema_version", "cursor", "profiles", "routes", "statuses"], "type": "object" };
-var schema165 = { "additionalProperties": false, "properties": { "device": { "allOf": [{ "$ref": "#/definitions/RuntimeDeviceSettings" }], "default": { "mode": "auto" } }, "enabled": { "default": true, "type": "boolean" }, "endpoint_url": { "type": ["string", "null"] }, "management_mode": { "$ref": "#/definitions/RuntimeManagementMode" }, "name": { "type": "string" }, "port": { "maximum": 65535, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "provider": { "$ref": "#/definitions/RuntimeProviderId" }, "provider_mode": { "$ref": "#/definitions/RuntimeProviderMode" }, "scheduler": { "allOf": [{ "$ref": "#/definitions/RuntimeSchedulerSettings" }], "default": { "auto_load": true } } }, "required": ["profile_id", "provider", "provider_mode", "management_mode", "name", "enabled", "device", "scheduler"], "type": "object" };
+var schema165 = { "additionalProperties": false, "properties": { "device": { "allOf": [{ "$ref": "#/definitions/RuntimeDeviceSettings" }], "default": { "mode": "auto" } }, "enabled": { "default": true, "type": "boolean" }, "endpoint_url": { "type": ["string", "null"] }, "management_mode": { "$ref": "#/definitions/RuntimeManagementMode" }, "name": { "type": "string" }, "port": { "maximum": 65535, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "provider": { "$ref": "#/definitions/RuntimeProviderId" }, "provider_mode": { "$ref": "#/definitions/RuntimeProviderMode" }, "runtime_version": { "description": "Installed runtime version this managed profile launches, such as\n`b9082+cuda-12` for llama.cpp. `None` follows the runtime's active\nversion at each launch. Profiles that name different versions run as\nseparate processes at the same time; a running instance keeps the\nversion it started with.", "type": ["string", "null"] }, "scheduler": { "allOf": [{ "$ref": "#/definitions/RuntimeSchedulerSettings" }], "default": { "auto_load": true } } }, "required": ["profile_id", "provider", "provider_mode", "management_mode", "name", "enabled", "device", "scheduler"], "type": "object" };
 var schema168 = { "enum": ["managed", "external"], "type": "string" };
 var schema169 = { "enum": ["torch", "ollama", "llama_cpp", "onnx_runtime"], "type": "string" };
 var schema170 = { "enum": ["torch_serve", "ollama_serve", "llama_cpp_router", "llama_cpp_dedicated", "onnx_serve"], "type": "string" };
@@ -19295,77 +19295,64 @@ function validate141(data, { instancePath = "", parentData, parentDataProperty, 
                             var valid0 = true;
                           }
                           if (valid0) {
-                            if (data.scheduler !== void 0) {
-                              let data9 = data.scheduler;
+                            if (data.runtime_version !== void 0) {
+                              let data9 = data.runtime_version;
                               const _errs23 = errors;
-                              const _errs25 = errors;
-                              if (errors === _errs25) {
-                                if (data9 && typeof data9 == "object" && !Array.isArray(data9)) {
-                                  let missing1;
-                                  if (data9.auto_load === void 0 && (missing1 = "auto_load")) {
-                                    validate141.errors = [{ instancePath: instancePath + "/scheduler", schemaPath: "#/definitions/RuntimeSchedulerSettings/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
-                                    return false;
-                                  } else {
-                                    const _errs27 = errors;
-                                    for (const key1 in data9) {
-                                      if (!(key1 === "auto_load" || key1 === "keep_alive_seconds" || key1 === "max_concurrent_models")) {
-                                        validate141.errors = [{ instancePath: instancePath + "/scheduler", schemaPath: "#/definitions/RuntimeSchedulerSettings/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
-                                        return false;
-                                        break;
-                                      }
-                                    }
-                                    if (_errs27 === errors) {
-                                      if (data9.auto_load !== void 0) {
-                                        const _errs28 = errors;
-                                        if (typeof data9.auto_load !== "boolean") {
-                                          validate141.errors = [{ instancePath: instancePath + "/scheduler/auto_load", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/auto_load/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                              if (typeof data9 !== "string" && data9 !== null) {
+                                validate141.errors = [{ instancePath: instancePath + "/runtime_version", schemaPath: "#/properties/runtime_version/type", keyword: "type", params: { type: schema165.properties.runtime_version.type }, message: "must be string,null" }];
+                                return false;
+                              }
+                              var valid0 = _errs23 === errors;
+                            } else {
+                              var valid0 = true;
+                            }
+                            if (valid0) {
+                              if (data.scheduler !== void 0) {
+                                let data10 = data.scheduler;
+                                const _errs25 = errors;
+                                const _errs27 = errors;
+                                if (errors === _errs27) {
+                                  if (data10 && typeof data10 == "object" && !Array.isArray(data10)) {
+                                    let missing1;
+                                    if (data10.auto_load === void 0 && (missing1 = "auto_load")) {
+                                      validate141.errors = [{ instancePath: instancePath + "/scheduler", schemaPath: "#/definitions/RuntimeSchedulerSettings/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                                      return false;
+                                    } else {
+                                      const _errs29 = errors;
+                                      for (const key1 in data10) {
+                                        if (!(key1 === "auto_load" || key1 === "keep_alive_seconds" || key1 === "max_concurrent_models")) {
+                                          validate141.errors = [{ instancePath: instancePath + "/scheduler", schemaPath: "#/definitions/RuntimeSchedulerSettings/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                                           return false;
+                                          break;
                                         }
-                                        var valid7 = _errs28 === errors;
-                                      } else {
-                                        var valid7 = true;
                                       }
-                                      if (valid7) {
-                                        if (data9.keep_alive_seconds !== void 0) {
-                                          let data11 = data9.keep_alive_seconds;
+                                      if (_errs29 === errors) {
+                                        if (data10.auto_load !== void 0) {
                                           const _errs30 = errors;
-                                          if (!(typeof data11 == "number" && (!(data11 % 1) && !isNaN(data11)) && isFinite(data11)) && data11 !== null) {
-                                            validate141.errors = [{ instancePath: instancePath + "/scheduler/keep_alive_seconds", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/keep_alive_seconds/type", keyword: "type", params: { type: schema171.properties.keep_alive_seconds.type }, message: "must be integer,null" }];
+                                          if (typeof data10.auto_load !== "boolean") {
+                                            validate141.errors = [{ instancePath: instancePath + "/scheduler/auto_load", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/auto_load/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                                             return false;
-                                          }
-                                          if (errors === _errs30) {
-                                            if (typeof data11 == "number" && isFinite(data11)) {
-                                              if (data11 > 9007199254740991 || isNaN(data11)) {
-                                                validate141.errors = [{ instancePath: instancePath + "/scheduler/keep_alive_seconds", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/keep_alive_seconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
-                                                return false;
-                                              } else {
-                                                if (data11 < 0 || isNaN(data11)) {
-                                                  validate141.errors = [{ instancePath: instancePath + "/scheduler/keep_alive_seconds", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/keep_alive_seconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
-                                                  return false;
-                                                }
-                                              }
-                                            }
                                           }
                                           var valid7 = _errs30 === errors;
                                         } else {
                                           var valid7 = true;
                                         }
                                         if (valid7) {
-                                          if (data9.max_concurrent_models !== void 0) {
-                                            let data12 = data9.max_concurrent_models;
+                                          if (data10.keep_alive_seconds !== void 0) {
+                                            let data12 = data10.keep_alive_seconds;
                                             const _errs32 = errors;
                                             if (!(typeof data12 == "number" && (!(data12 % 1) && !isNaN(data12)) && isFinite(data12)) && data12 !== null) {
-                                              validate141.errors = [{ instancePath: instancePath + "/scheduler/max_concurrent_models", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/max_concurrent_models/type", keyword: "type", params: { type: schema171.properties.max_concurrent_models.type }, message: "must be integer,null" }];
+                                              validate141.errors = [{ instancePath: instancePath + "/scheduler/keep_alive_seconds", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/keep_alive_seconds/type", keyword: "type", params: { type: schema171.properties.keep_alive_seconds.type }, message: "must be integer,null" }];
                                               return false;
                                             }
                                             if (errors === _errs32) {
                                               if (typeof data12 == "number" && isFinite(data12)) {
-                                                if (data12 > 65535 || isNaN(data12)) {
-                                                  validate141.errors = [{ instancePath: instancePath + "/scheduler/max_concurrent_models", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/max_concurrent_models/maximum", keyword: "maximum", params: { comparison: "<=", limit: 65535 }, message: "must be <= 65535" }];
+                                                if (data12 > 9007199254740991 || isNaN(data12)) {
+                                                  validate141.errors = [{ instancePath: instancePath + "/scheduler/keep_alive_seconds", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/keep_alive_seconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
                                                   return false;
                                                 } else {
                                                   if (data12 < 0 || isNaN(data12)) {
-                                                    validate141.errors = [{ instancePath: instancePath + "/scheduler/max_concurrent_models", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/max_concurrent_models/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                                    validate141.errors = [{ instancePath: instancePath + "/scheduler/keep_alive_seconds", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/keep_alive_seconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
                                                     return false;
                                                   }
                                                 }
@@ -19375,18 +19362,44 @@ function validate141(data, { instancePath = "", parentData, parentDataProperty, 
                                           } else {
                                             var valid7 = true;
                                           }
+                                          if (valid7) {
+                                            if (data10.max_concurrent_models !== void 0) {
+                                              let data13 = data10.max_concurrent_models;
+                                              const _errs34 = errors;
+                                              if (!(typeof data13 == "number" && (!(data13 % 1) && !isNaN(data13)) && isFinite(data13)) && data13 !== null) {
+                                                validate141.errors = [{ instancePath: instancePath + "/scheduler/max_concurrent_models", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/max_concurrent_models/type", keyword: "type", params: { type: schema171.properties.max_concurrent_models.type }, message: "must be integer,null" }];
+                                                return false;
+                                              }
+                                              if (errors === _errs34) {
+                                                if (typeof data13 == "number" && isFinite(data13)) {
+                                                  if (data13 > 65535 || isNaN(data13)) {
+                                                    validate141.errors = [{ instancePath: instancePath + "/scheduler/max_concurrent_models", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/max_concurrent_models/maximum", keyword: "maximum", params: { comparison: "<=", limit: 65535 }, message: "must be <= 65535" }];
+                                                    return false;
+                                                  } else {
+                                                    if (data13 < 0 || isNaN(data13)) {
+                                                      validate141.errors = [{ instancePath: instancePath + "/scheduler/max_concurrent_models", schemaPath: "#/definitions/RuntimeSchedulerSettings/properties/max_concurrent_models/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                                      return false;
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                              var valid7 = _errs34 === errors;
+                                            } else {
+                                              var valid7 = true;
+                                            }
+                                          }
                                         }
                                       }
                                     }
+                                  } else {
+                                    validate141.errors = [{ instancePath: instancePath + "/scheduler", schemaPath: "#/definitions/RuntimeSchedulerSettings/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                                    return false;
                                   }
-                                } else {
-                                  validate141.errors = [{ instancePath: instancePath + "/scheduler", schemaPath: "#/definitions/RuntimeSchedulerSettings/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-                                  return false;
                                 }
+                                var valid0 = _errs25 === errors;
+                              } else {
+                                var valid0 = true;
                               }
-                              var valid0 = _errs23 === errors;
-                            } else {
-                              var valid0 = true;
                             }
                           }
                         }
@@ -19489,7 +19502,7 @@ function validate145(data, { instancePath = "", parentData, parentDataProperty, 
   validate145.errors = vErrors;
   return errors === 0;
 }
-var schema174 = { "additionalProperties": false, "properties": { "endpoint_url": { "type": ["string", "null"] }, "last_error": { "type": ["string", "null"] }, "log_path": { "type": ["string", "null"] }, "pid": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "state": { "$ref": "#/definitions/RuntimeLifecycleState" } }, "required": ["profile_id", "state"], "type": "object" };
+var schema174 = { "additionalProperties": false, "properties": { "endpoint_url": { "type": ["string", "null"] }, "last_error": { "type": ["string", "null"] }, "log_path": { "type": ["string", "null"] }, "pid": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "profile_id": { "type": "string" }, "runtime_version": { "description": "Installed runtime version the running instance was launched from.", "type": ["string", "null"] }, "state": { "$ref": "#/definitions/RuntimeLifecycleState" } }, "required": ["profile_id", "state"], "type": "object" };
 var schema175 = { "enum": ["unknown", "stopped", "starting", "running", "stopping", "failed", "external"], "type": "string" };
 function validate147(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
@@ -19503,7 +19516,7 @@ function validate147(data, { instancePath = "", parentData, parentDataProperty, 
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "endpoint_url" || key0 === "last_error" || key0 === "log_path" || key0 === "pid" || key0 === "profile_id" || key0 === "state")) {
+          if (!(key0 === "endpoint_url" || key0 === "last_error" || key0 === "log_path" || key0 === "pid" || key0 === "profile_id" || key0 === "runtime_version" || key0 === "state")) {
             validate147.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
@@ -19582,20 +19595,33 @@ function validate147(data, { instancePath = "", parentData, parentDataProperty, 
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (data.state !== void 0) {
-                      let data5 = data.state;
+                    if (data.runtime_version !== void 0) {
+                      let data5 = data.runtime_version;
                       const _errs12 = errors;
-                      if (typeof data5 !== "string") {
-                        validate147.errors = [{ instancePath: instancePath + "/state", schemaPath: "#/definitions/RuntimeLifecycleState/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                        return false;
-                      }
-                      if (!(data5 === "unknown" || data5 === "stopped" || data5 === "starting" || data5 === "running" || data5 === "stopping" || data5 === "failed" || data5 === "external")) {
-                        validate147.errors = [{ instancePath: instancePath + "/state", schemaPath: "#/definitions/RuntimeLifecycleState/enum", keyword: "enum", params: { allowedValues: schema175.enum }, message: "must be equal to one of the allowed values" }];
+                      if (typeof data5 !== "string" && data5 !== null) {
+                        validate147.errors = [{ instancePath: instancePath + "/runtime_version", schemaPath: "#/properties/runtime_version/type", keyword: "type", params: { type: schema174.properties.runtime_version.type }, message: "must be string,null" }];
                         return false;
                       }
                       var valid0 = _errs12 === errors;
                     } else {
                       var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (data.state !== void 0) {
+                        let data6 = data.state;
+                        const _errs14 = errors;
+                        if (typeof data6 !== "string") {
+                          validate147.errors = [{ instancePath: instancePath + "/state", schemaPath: "#/definitions/RuntimeLifecycleState/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          return false;
+                        }
+                        if (!(data6 === "unknown" || data6 === "stopped" || data6 === "starting" || data6 === "running" || data6 === "stopping" || data6 === "failed" || data6 === "external")) {
+                          validate147.errors = [{ instancePath: instancePath + "/state", schemaPath: "#/definitions/RuntimeLifecycleState/enum", keyword: "enum", params: { allowedValues: schema175.enum }, message: "must be equal to one of the allowed values" }];
+                          return false;
+                        }
+                        var valid0 = _errs14 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
                     }
                   }
                 }

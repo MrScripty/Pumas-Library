@@ -200,13 +200,13 @@ pub(crate) fn validate_version_tag(tag: &str) -> Result<()> {
     Ok(())
 }
 
-/// Why the Torch process recorded at `pid_file` may still use the runtime,
+/// Why the process recorded at `pid_file` may still use a runtime version,
 /// or `None` when nothing recorded there is running.
 ///
 /// A verified identity record is checked against the live process. A bare PID
 /// file (no identity record) proves nothing, so it blocks only while some
 /// process holds that PID; it is never signalled here.
-fn torch_process_blocker(pid_file: &Path) -> Option<String> {
+fn runtime_process_blocker(pid_file: &Path) -> Option<String> {
     use pumas_library::platform::process_identity::{
         read_record, verify, IdentityCheck, PidRecord,
     };
@@ -229,6 +229,63 @@ fn torch_process_blocker(pid_file: &Path) -> Option<String> {
         Ok(Some(PidRecord::Unverified { .. })) => None,
         Err(error) => Some(format!("cannot read {}: {error}", pid_file.display())),
     }
+}
+
+/// Describe every live process that runs from one installed version: PID
+/// files inside the version directory, and runtime profile instances
+/// (`<profiles_dir>/<profile>/runtime.pid`) whose recorded version is `tag`.
+/// An instance that recorded no version may run any version, so it counts.
+fn version_process_blockers(
+    version_dir: &Path,
+    profiles_dir: &Path,
+    tag: &str,
+) -> Result<Vec<String>> {
+    use pumas_library::platform::process_identity::read_runtime_version;
+    let mut blockers = Vec::new();
+    let read_dir = |dir: &Path| match std::fs::read_dir(dir) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(PumasError::io_with_path(error, dir)),
+    };
+    if let Some(entries) = read_dir(version_dir)? {
+        for entry in entries {
+            let path = entry
+                .map_err(|error| PumasError::io_with_path(error, version_dir))?
+                .path();
+            if path.extension().is_some_and(|extension| extension == "pid") {
+                if let Some(reason) = runtime_process_blocker(&path) {
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    blockers.push(format!("the process recorded in {name} ({reason})"));
+                }
+            }
+        }
+    }
+    if let Some(entries) = read_dir(profiles_dir)? {
+        for entry in entries {
+            let profile_dir = entry
+                .map_err(|error| PumasError::io_with_path(error, profiles_dir))?
+                .path();
+            let pid_file = profile_dir.join("runtime.pid");
+            let recorded = read_runtime_version(&pid_file)
+                .map_err(|error| PumasError::io_with_path(error, &pid_file))?;
+            if recorded.as_deref().is_some_and(|version| version != tag) {
+                continue;
+            }
+            if let Some(reason) = runtime_process_blocker(&pid_file) {
+                let profile = profile_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let unrecorded = if recorded.is_none() {
+                    "; its version was not recorded"
+                } else {
+                    ""
+                };
+                blockers.push(format!("runtime profile {profile} ({reason}{unrecorded})"));
+            }
+        }
+    }
+    Ok(blockers)
 }
 
 fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
@@ -307,6 +364,14 @@ pub struct VersionManager {
 }
 
 impl VersionManager {
+    /// Hold this runtime's selection/removal lease while resolving a version
+    /// and starting a process from it, so a version cannot be removed between
+    /// the check and the moment the new process records its PID. Drop it after
+    /// startup admission or a failed attempt.
+    pub async fn lifecycle_lease(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.lifecycle_lock.clone().lock_owned().await
+    }
+
     /// Hold Torch's selection/removal lease while checking and starting a
     /// runtime. Drop it after startup admission or a failed attempt.
     pub async fn torch_lifecycle_lease(&self) -> Result<tokio::sync::OwnedMutexGuard<()>> {
@@ -629,6 +694,11 @@ impl VersionManager {
     // Path helpers
     // ========================================
 
+    /// The runtime this manager installs and selects versions of.
+    pub fn app_id(&self) -> AppId {
+        self.app_id
+    }
+
     /// Get the versions directory for this app.
     pub fn versions_dir(&self) -> PathBuf {
         self.launcher_root.join(self.app_id.versions_dir_name())
@@ -763,14 +833,10 @@ impl VersionManager {
         if let Some(proceeded) = &self.selection_proceeded {
             proceeded.store(true, Ordering::SeqCst);
         }
+        // Selecting a version affects new launches only. Running instances
+        // keep the version directory they started from, so nothing has to stop.
         if self.app_id == AppId::Torch {
             self.verify_torch_identity(tag).await?;
-            let current = self.state.read().await.get_active_version();
-            if current.as_deref() != Some(tag) {
-                if let Some(current) = current {
-                    self.ensure_torch_stopped(&current).await?;
-                }
-            }
         }
         let mut state = self.state.write().await;
         if let Some(lock) = &torch_versions_lock {
@@ -1448,39 +1514,28 @@ impl VersionManager {
         })
     }
 
-    async fn ensure_torch_stopped(&self, tag: &str) -> Result<()> {
-        if self.app_id != AppId::Torch {
-            return Ok(());
-        }
-        let mut pid_paths = vec![self.version_path(tag)?.join("torch.pid")];
-        let profiles = self
+    /// Refuse while any process still runs from `tag`'s version directory:
+    /// a runtime profile instance that recorded `tag` as its version (or
+    /// recorded none), or a process launched directly from the directory.
+    /// Instances of other versions of the same runtime do not block.
+    async fn ensure_version_not_running(&self, tag: &str) -> Result<()> {
+        let version_dir = self.version_path(tag)?;
+        let profiles_dir = self
             .launcher_root
-            .join("launcher-data/runtime-profiles/torch");
-        match fs::read_dir(&profiles).await {
-            Ok(mut entries) => {
-                while let Some(entry) = entries
-                    .next_entry()
-                    .await
-                    .map_err(|error| PumasError::io_with_path(error, &profiles))?
-                {
-                    pid_paths.push(entry.path().join("runtime.pid"));
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(PumasError::io_with_path(error, profiles)),
-        }
-        // Profiles share the selected environment. Require them to stop before
-        // changing runtime selection or deleting files used by a profile.
-        let blocker = tokio::task::spawn_blocking(move || {
-            pid_paths
-                .iter()
-                .find_map(|path| torch_process_blocker(path))
+            .join("launcher-data")
+            .join("runtime-profiles")
+            .join(self.app_id.as_str());
+        let tag_for_scan = tag.to_owned();
+        let blockers = tokio::task::spawn_blocking(move || {
+            version_process_blockers(&version_dir, &profiles_dir, &tag_for_scan)
         })
         .await
-        .map_err(|error| PumasError::Other(format!("Torch process check failed: {error}")))?;
-        if let Some(reason) = blocker {
+        .map_err(|error| PumasError::Other(format!("Runtime process check failed: {error}")))??;
+        if !blockers.is_empty() {
             return Err(PumasError::Other(format!(
-                "Stop Torch before switching or removing its runtime ({reason})"
+                "{} version {tag} is still running; stop {} before removing it",
+                self.app_id,
+                blockers.join(", ")
             )));
         }
         Ok(())
@@ -1506,7 +1561,7 @@ impl VersionManager {
                 .refresh_with_native_lock(lock)
                 .await?;
         }
-        self.ensure_torch_stopped(tag).await?;
+        self.ensure_version_not_running(tag).await?;
         // Check if installed
         {
             let state = self.state.read().await;
@@ -6912,39 +6967,44 @@ mod tests {
         let error = manager
             .remove_version("torch-runtime-running")
             .await
-            .unwrap_err();
-        assert!(error.to_string().contains("Stop Torch"));
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("version torch-runtime-running is still running"),
+            "{error}"
+        );
+        assert!(error.contains("torch.pid"), "{error}");
         assert!(runtime.join("torch.pid").exists());
     }
 
     #[test]
-    fn torch_process_blocker_trusts_identity_records_over_bare_pids() {
+    fn runtime_process_blocker_trusts_identity_records_over_bare_pids() {
         use pumas_library::platform::process_identity::{capture, write_record};
         let root = TempDir::new().unwrap();
         let pid_file = root.path().join("torch.pid");
-        assert_eq!(super::torch_process_blocker(&pid_file), None);
+        assert_eq!(super::runtime_process_blocker(&pid_file), None);
 
         // A verified live record blocks.
         let live = capture(std::process::id()).unwrap();
         write_record(&pid_file, &live).unwrap();
-        assert!(super::torch_process_blocker(&pid_file)
+        assert!(super::runtime_process_blocker(&pid_file)
             .is_some_and(|reason| reason.contains("is running")));
 
         // A record whose PID now belongs to another process does not.
         let mut reused = live.clone();
         reused.start_time = reused.start_time.wrapping_add(1);
         write_record(&pid_file, &reused).unwrap();
-        assert_eq!(super::torch_process_blocker(&pid_file), None);
+        assert_eq!(super::runtime_process_blocker(&pid_file), None);
 
         // A bare PID file proves nothing; it blocks only while the PID is live.
         std::fs::remove_file(pumas_library::platform::process_identity::identity_path(
             &pid_file,
         ))
         .unwrap();
-        assert!(super::torch_process_blocker(&pid_file)
+        assert!(super::runtime_process_blocker(&pid_file)
             .is_some_and(|reason| reason.contains("may be running")));
         std::fs::write(&pid_file, "not-a-pid").unwrap();
-        assert!(super::torch_process_blocker(&pid_file)
+        assert!(super::runtime_process_blocker(&pid_file)
             .is_some_and(|reason| reason.contains("invalid PID")));
     }
 
@@ -6959,12 +7019,76 @@ mod tests {
             .join("launcher-data/runtime-profiles/torch/image-profile");
         std::fs::create_dir_all(&profile).unwrap();
         std::fs::write(profile.join("runtime.pid"), std::process::id().to_string()).unwrap();
+        // An instance that recorded no version may run any version.
         let error = manager
             .remove_version("torch-runtime-profile")
             .await
-            .unwrap_err();
-        assert!(error.to_string().contains("Stop Torch"));
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime profile image-profile"), "{error}");
+        assert!(error.contains("its version was not recorded"), "{error}");
         assert!(profile.join("runtime.pid").exists());
+    }
+
+    #[tokio::test]
+    async fn removal_waits_for_a_launch_holding_the_lifecycle_lease() {
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        // A launch holds the lease from version resolution until its process
+        // records a PID; removal must not run in between.
+        let lease = manager.lifecycle_lease().await;
+        let removal = tokio::spawn({
+            let manager = manager.clone();
+            async move { manager.remove_version("b1000+cpu").await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!removal.is_finished(), "removal ran during a launch");
+        drop(lease);
+        let error = tokio::time::timeout(Duration::from_secs(5), removal)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(error, PumasError::VersionNotFound { .. }),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_instances_of_the_removed_version_block_removal() {
+        use pumas_library::platform::process_identity::write_runtime_version;
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        let profiles = root.path().join("launcher-data/runtime-profiles/llama-cpp");
+        for (profile, version) in [("router-new", "b2000+cpu"), ("router-old", "b1000+cpu")] {
+            let dir = profiles.join(profile);
+            std::fs::create_dir_all(&dir).unwrap();
+            let pid_file = dir.join("runtime.pid");
+            std::fs::write(&pid_file, std::process::id().to_string()).unwrap();
+            write_runtime_version(&pid_file, version).unwrap();
+        }
+
+        // A live instance of another version does not block; the refusal is
+        // only that this version is not installed.
+        let error = manager.remove_version("b3000+cpu").await.unwrap_err();
+        assert!(
+            matches!(error, PumasError::VersionNotFound { .. }),
+            "{error}"
+        );
+
+        // The instance running the version blocks and is named.
+        let error = manager
+            .remove_version("b1000+cpu")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime profile router-old"), "{error}");
+        assert!(!error.contains("router-new"), "{error}");
     }
 
     #[tokio::test]

@@ -28,23 +28,72 @@ pub(super) fn provider_request_model_id(
         .unwrap_or_else(|| library_model_id.to_string())
 }
 
-pub(super) async fn active_llama_cpp_runtime(
+/// The llama.cpp version a serving request's profile launches: its pinned
+/// `runtime_version`, else the active version. `Err` carries the reason.
+pub(super) async fn profile_llama_cpp_runtime(
     state: &AppState,
     request: &ServeModelRequest,
-) -> pumas_library::Result<Option<(String, PathBuf)>> {
+) -> pumas_library::Result<Result<LlamaCppRuntimeForLaunch, String>> {
+    let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
+        return Ok(Err(
+            "llama.cpp runtime versions are not available".to_string()
+        ));
+    };
+    // Taken before resolving and kept by the caller until the launched
+    // process records its PID, so the version cannot be removed in between.
+    let lease = version_manager.lifecycle_lease().await;
+    match super::resolve_profile_runtime_version(
+        state,
+        &version_manager,
+        &request.config.profile_id,
+        None,
+    )
+    .await?
+    {
+        Ok((tag, version_dir)) => Ok(Ok(LlamaCppRuntimeForLaunch {
+            tag,
+            version_dir,
+            _lease: lease,
+        })),
+        Err(super::ProfileRuntimeVersionRefusal::NoActiveVersion) => {
+            warn!(
+                model_id = %request.model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                "No active llama.cpp runtime version is set"
+            );
+            Ok(Err(
+                "No llama.cpp runtime version is active; install one and select it, or set the \
+                 profile's runtime version"
+                    .to_string(),
+            ))
+        }
+        Err(super::ProfileRuntimeVersionRefusal::NotInstalled(reason)) => Ok(Err(reason)),
+    }
+}
+
+/// The llama.cpp version a new process of a profile launches, with the
+/// version manager's lifecycle lease held until the launch records its PID.
+pub(super) struct LlamaCppRuntimeForLaunch {
+    pub(super) tag: String,
+    pub(super) version_dir: PathBuf,
+    _lease: tokio::sync::OwnedMutexGuard<()>,
+}
+
+/// The version directory of the llama.cpp process a profile is already
+/// running, from the version it recorded at launch.
+pub(super) async fn running_llama_cpp_version_dir(
+    state: &AppState,
+    request: &ServeModelRequest,
+) -> pumas_library::Result<Option<PathBuf>> {
+    let Some(version) =
+        super::running_profile_runtime_version(state, &request.config.profile_id).await?
+    else {
+        return Ok(None);
+    };
     let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
         return Ok(None);
     };
-    let Some(tag) = version_manager.get_active_version().await? else {
-        warn!(
-            model_id = %request.model_id,
-            profile_id = %request.config.profile_id.as_str(),
-            "No active llama.cpp runtime version is set"
-        );
-        return Ok(None);
-    };
-    let version_dir = version_manager.version_path(&tag)?;
-    Ok(Some((tag, version_dir)))
+    Ok(Some(version_manager.version_path(&version)?))
 }
 
 pub(super) fn llama_cpp_launch_overrides(

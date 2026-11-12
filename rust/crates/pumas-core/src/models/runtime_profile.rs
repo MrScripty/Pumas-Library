@@ -232,6 +232,13 @@ pub struct RuntimeProfileConfig {
     pub device: RuntimeDeviceSettings,
     #[serde(default)]
     pub scheduler: RuntimeSchedulerSettings,
+    /// Installed runtime version this managed profile launches, such as
+    /// `b9082+cuda-12` for llama.cpp. `None` follows the runtime's active
+    /// version at each launch. Profiles that name different versions run as
+    /// separate processes at the same time; a running instance keeps the
+    /// version it started with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
 }
 
 impl RuntimeProfileConfig {
@@ -247,6 +254,7 @@ impl RuntimeProfileConfig {
             port: RuntimePort::parse(11434).ok(),
             device: RuntimeDeviceSettings::default(),
             scheduler: RuntimeSchedulerSettings::default(),
+            runtime_version: None,
         }
     }
 }
@@ -281,6 +289,9 @@ pub struct RuntimeProfileStatus {
     pub log_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Installed runtime version the running instance was launched from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -351,6 +362,7 @@ impl RuntimeProfilesConfigFile {
                     pid: None,
                     log_path: None,
                     last_error: None,
+                    runtime_version: None,
                 })
                 .collect(),
             default_profile_id: self.default_profile_id.clone(),

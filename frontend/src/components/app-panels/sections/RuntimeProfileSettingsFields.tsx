@@ -1,3 +1,4 @@
+import type { InstalledRuntimeVersionsState } from '../../../hooks/useInstalledRuntimeVersions';
 import type {
   RuntimeDeviceMode,
   RuntimeManagementMode,
@@ -16,6 +17,7 @@ import {
 
 type RuntimeProfileSettingsFieldsProps = {
   draft: RuntimeProfileDraft;
+  installedVersions: InstalledRuntimeVersionsState;
   isExistingProfile: boolean;
   isManagedProfile: boolean;
   onUpdateDraft: RuntimeProfileDraftUpdater;
@@ -37,6 +39,7 @@ function getManagementModes(draft: RuntimeProfileDraft): RuntimeManagementMode[]
 
 export function RuntimeProfileSettingsFields({
   draft,
+  installedVersions,
   isExistingProfile,
   isManagedProfile,
   onUpdateDraft,
@@ -129,6 +132,13 @@ export function RuntimeProfileSettingsFields({
           ))}
         </select>
       </label>
+      {isManagedProfile && (
+        <RuntimeVersionField
+          draft={draft}
+          installedVersions={installedVersions}
+          onUpdateDraft={onUpdateDraft}
+        />
+      )}
       <EndpointFields draft={draft} isManagedProfile={isManagedProfile} onUpdateDraft={onUpdateDraft} />
       {showsDeviceId && <DeviceIdField draft={draft} onUpdateDraft={onUpdateDraft} />}
       {showsGpuLayers && <GpuLayersField draft={draft} onUpdateDraft={onUpdateDraft} />}
@@ -189,6 +199,55 @@ function EndpointFields({
         )}
       </label>
     </>
+  );
+}
+
+function RuntimeVersionField({
+  draft,
+  installedVersions,
+  onUpdateDraft,
+}: DraftFieldProps & { installedVersions: InstalledRuntimeVersionsState }) {
+  const { versions, isLoading, error } = installedVersions;
+  const pinnedVersion = draft.runtime_version;
+  // Keep a saved pin visible even when that version is no longer installed;
+  // the backend refuses launching or saving it and says why.
+  const pinIsMissing = pinnedVersion !== '' && !isLoading && !versions.includes(pinnedVersion);
+  const options = pinIsMissing ? [...versions, pinnedVersion] : versions;
+
+  let hint = 'New launches use this version. A running instance keeps the version it started with.';
+  if (error) {
+    hint = `Installed versions unavailable: ${error}`;
+  } else if (pinIsMissing) {
+    hint = `${pinnedVersion} is not installed. Install it or choose another version.`;
+  } else if (!isLoading && versions.length === 0) {
+    hint = `No ${providerLabel(draft.provider)} versions are installed.`;
+  }
+
+  return (
+    <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
+      <span>Runtime version</span>
+      <select
+        value={pinnedVersion}
+        onChange={(event) => onUpdateDraft('runtime_version', event.target.value)}
+        className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
+      >
+        <option value="">Follow active version</option>
+        {options.map((version) => (
+          <option key={version} value={version}>
+            {version === pinnedVersion && pinIsMissing ? `${version} (not installed)` : version}
+          </option>
+        ))}
+      </select>
+      <span
+        className={`block ${
+          error || pinIsMissing
+            ? 'text-[hsl(var(--accent-warning))]'
+            : 'text-[hsl(var(--launcher-text-muted)/0.75)]'
+        }`}
+      >
+        {hint}
+      </span>
+    </label>
   );
 }
 

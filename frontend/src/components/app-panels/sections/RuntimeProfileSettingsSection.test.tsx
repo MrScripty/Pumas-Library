@@ -3,12 +3,14 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   RuntimeProfileConfig,
+  RuntimeProfileStatus,
   RuntimeProfilesSnapshot,
 } from '../../../types/api-runtime-profiles';
 import { RuntimeProfileSettingsSection } from './RuntimeProfileSettingsSection';
 
 const {
   getElectronAPIMock,
+  getInstalledVersionsMock,
   getRuntimeProfilesSnapshotMock,
   launchRuntimeProfileMock,
   stopRuntimeProfileMock,
@@ -16,6 +18,8 @@ const {
 } =
   vi.hoisted(() => ({
     getElectronAPIMock: vi.fn(),
+    getInstalledVersionsMock:
+      vi.fn<(appId?: string) => Promise<{ success: true; versions: string[] }>>(),
     getRuntimeProfilesSnapshotMock: vi.fn(),
     launchRuntimeProfileMock: vi.fn(),
     stopRuntimeProfileMock: vi.fn(),
@@ -103,7 +107,14 @@ describe('RuntimeProfileSettingsSection', () => {
     stopRuntimeProfileMock.mockResolvedValue({
       success: true,
     });
+    getInstalledVersionsMock.mockImplementation((appId?: string) =>
+      Promise.resolve({
+        success: true,
+        versions: appId === 'llama-cpp' ? ['b9082+cpu', 'b9100+cuda-12'] : [],
+      })
+    );
     getElectronAPIMock.mockReturnValue({
+      get_installed_versions: getInstalledVersionsMock,
       get_runtime_profiles_snapshot: getRuntimeProfilesSnapshotMock,
       launch_runtime_profile: launchRuntimeProfileMock,
       stop_runtime_profile: stopRuntimeProfileMock,
@@ -265,5 +276,137 @@ describe('RuntimeProfileSettingsSection', () => {
         }) as RuntimeProfileConfig['device'],
       })
     );
+  });
+
+  describe('runtime version', () => {
+    const withLlamaRouter = (
+      profile: Partial<RuntimeProfileConfig>,
+      status: Partial<RuntimeProfileStatus> = {}
+    ): RuntimeProfilesSnapshot => ({
+      ...snapshot,
+      profiles: snapshot.profiles.map((item) =>
+        item.profile_id === 'llama-router' ? { ...item, ...profile } : item
+      ),
+      statuses: snapshot.statuses.map((item) =>
+        item.profile_id === 'llama-router' ? { ...item, ...status } : item
+      ),
+    });
+
+    it('offers the installed versions of the profile runtime from the backend', async () => {
+      render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+      expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+      const select = screen.getByLabelText(/runtime version/i);
+      await waitFor(() => {
+        expect(screen.getByRole('option', { name: 'b9100+cuda-12' })).toBeInTheDocument();
+      });
+      expect(getInstalledVersionsMock).toHaveBeenCalledWith('llama-cpp');
+      expect(select).toHaveValue('');
+      expect(
+        Array.from((select as HTMLSelectElement).options).map((option) => option.textContent)
+      ).toEqual(['Follow active version', 'b9082+cpu', 'b9100+cuda-12']);
+    });
+
+    it('saves a selected pin and clears it back to following the active version', async () => {
+      const user = userEvent.setup();
+
+      render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+      expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+      await screen.findByRole('option', { name: 'b9082+cpu' });
+
+      await user.selectOptions(screen.getByLabelText(/runtime version/i), 'b9082+cpu');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => {
+        expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
+      });
+      expect(upsertRuntimeProfileMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ profile_id: 'llama-router', runtime_version: 'b9082+cpu' })
+      );
+
+      await user.selectOptions(screen.getByLabelText(/runtime version/i), '');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => {
+        expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(2);
+      });
+      expect(upsertRuntimeProfileMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ profile_id: 'llama-router', runtime_version: null })
+      );
+    });
+
+    it('keeps a saved pin that is no longer installed visible', async () => {
+      getRuntimeProfilesSnapshotMock.mockResolvedValue({
+        success: true,
+        snapshot: withLlamaRouter({ runtime_version: 'b8000+cpu' }),
+      });
+
+      render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+      expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+      expect(
+        await screen.findByRole('option', { name: 'b8000+cpu (not installed)' })
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/runtime version/i)).toHaveValue('b8000+cpu');
+    });
+
+    it('hides the field for external profiles and drops the pin', async () => {
+      const user = userEvent.setup();
+      getRuntimeProfilesSnapshotMock.mockResolvedValue({
+        success: true,
+        snapshot: withLlamaRouter({ runtime_version: 'b9082+cpu' }),
+      });
+
+      render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+      expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+      expect(screen.getByLabelText(/runtime version/i)).toBeInTheDocument();
+
+      await user.selectOptions(screen.getByLabelText('Management'), 'external');
+      expect(screen.queryByLabelText(/runtime version/i)).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => {
+        expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
+      });
+      expect(upsertRuntimeProfileMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ management_mode: 'external', runtime_version: null })
+      );
+    });
+
+    it('shows the backend refusal when a pin cannot be saved', async () => {
+      const user = userEvent.setup();
+      upsertRuntimeProfileMock.mockResolvedValue({
+        success: false,
+        error: 'runtime version b9082+cpu is not installed for llama.cpp; installed: b9100+cuda-12',
+        profile_id: 'llama-router',
+        snapshot_required: false,
+      } as Awaited<ReturnType<typeof upsertRuntimeProfileMock>>);
+
+      render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+      expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+      await screen.findByRole('option', { name: 'b9082+cpu' });
+      await user.selectOptions(screen.getByLabelText(/runtime version/i), 'b9082+cpu');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(
+        await screen.findByText(
+          'runtime version b9082+cpu is not installed for llama.cpp; installed: b9100+cuda-12'
+        )
+      ).toBeInTheDocument();
+    });
+
+    it('shows the version a running instance launched from', async () => {
+      getRuntimeProfilesSnapshotMock.mockResolvedValue({
+        success: true,
+        snapshot: withLlamaRouter({}, { state: 'running', runtime_version: 'b9082+cpu' }),
+      });
+
+      render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+      expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+      expect(screen.getByText('running b9082+cpu')).toBeInTheDocument();
+      expect(screen.getByText('State: running b9082+cpu')).toBeInTheDocument();
+    });
   });
 });

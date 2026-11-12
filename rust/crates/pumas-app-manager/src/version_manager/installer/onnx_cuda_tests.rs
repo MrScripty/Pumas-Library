@@ -154,9 +154,11 @@ async fn serve(mut stream: tokio::net::TcpStream, state: Arc<StdMutex<ServerStat
     }
     let text = String::from_utf8_lossy(&request).into_owned();
     let mut lines = text.lines();
-    let path = lines
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
+    let request_line = lines.next().unwrap_or_default().to_owned();
+    let head_only = request_line.starts_with("HEAD ");
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
         .unwrap_or_default()
         .to_owned();
     let range = lines.take_while(|line| !line.is_empty()).find_map(|line| {
@@ -166,7 +168,13 @@ async fn serve(mut stream: tokio::net::TcpStream, state: Arc<StdMutex<ServerStat
     });
     let mut stalled = {
         let mut state = state.lock().unwrap();
-        state.log.push((path.clone(), range.clone()));
+        // A HEAD request is logged apart from downloads of the same path.
+        let logged = if head_only {
+            format!("HEAD {path}")
+        } else {
+            path.clone()
+        };
+        state.log.push((logged, range.clone()));
         state.stalled.contains(&path)
     };
     // A stalled path answers once it is released.
@@ -216,7 +224,13 @@ async fn serve(mut stream: tokio::net::TcpStream, state: Arc<StdMutex<ServerStat
     if stream.write_all(head.as_bytes()).await.is_err() {
         return;
     }
-    let sent = if truncate { body.len() / 2 } else { body.len() };
+    let sent = if head_only {
+        0
+    } else if truncate {
+        body.len() / 2
+    } else {
+        body.len()
+    };
     let _ = stream.write_all(&body[..sent]).await;
     let _ = stream.flush().await;
 }
@@ -958,6 +972,73 @@ fn a_wheel_that_ships_a_library_as_a_link_is_refused() {
     assert!(refused.contains("as a link"), "{refused}");
 }
 
+#[tokio::test]
+async fn a_kept_selection_is_replaced_only_when_a_wheel_is_not_found() {
+    let server = FixtureServer::start().await;
+    let platform = WheelPlatform::LinuxX64;
+    publish_onnxruntime_gpu(&server, "/pypi/simple", platform, CUDA12_EXTRAS);
+    publish_cuda12_closure(&server, platform, 64);
+    let selection = onnx_cuda::resolve(
+        &sources(&server),
+        "v1.24.2+cuda12",
+        &release(),
+        12,
+        platform,
+    )
+    .await
+    .unwrap();
+    let check = |server: &FixtureServer| {
+        let sources = sources(server);
+        let selection = selection.clone();
+        async move { onnx_cuda::vanished_wheel(&sources, &selection).await }
+    };
+    assert_eq!(check(&server).await, None);
+
+    let cufft = CUDA12_PACKAGES
+        .iter()
+        .find(|package| package.project == "nvidia-cufft-cu12")
+        .unwrap();
+    let path = format!(
+        "/files/pypi/simple/{}",
+        wheel_filename(platform, cufft.distribution, cufft.version)
+    );
+    // A server error decides nothing: the selection is kept.
+    server.fail(&path);
+    assert_eq!(check(&server).await, None);
+    server.state.lock().unwrap().failing.clear();
+
+    // The same file name with another digest is kept too; the verified
+    // download refuses it.
+    let mut changed = package_entry(platform, cufft, 64);
+    changed.bytes = b"rebuilt".to_vec();
+    publish(&server, "/pypi/simple", cufft.project, vec![changed]);
+    assert_eq!(check(&server).await, None);
+
+    // The file answers 404.
+    server.unroute(&path);
+    let reason = check(&server)
+        .await
+        .expect("a missing file replaces the selection");
+    assert!(reason.contains("404"), "{reason}");
+    assert!(reason.contains("nvidia_cufft_cu12-11.4.1.4"), "{reason}");
+
+    // The index no longer lists it.
+    publish(&server, "/pypi/simple", cufft.project, vec![]);
+    let reason = check(&server).await.unwrap();
+    assert!(
+        reason.contains("no longer lists nvidia_cufft_cu12-11.4.1.4"),
+        "{reason}"
+    );
+
+    // The project itself is gone.
+    server.unroute("/pypi/simple/nvidia-cufft-cu12/");
+    let reason = check(&server).await.unwrap();
+    assert!(
+        reason.contains("nvidia-cufft-cu12 is no longer on"),
+        "{reason}"
+    );
+}
+
 fn listed(tag: &str) -> pumas_library::models::GitHubRelease {
     pumas_library::models::GitHubRelease {
         tag_name: tag.into(),
@@ -1466,11 +1547,15 @@ mod installs {
         assert!(manager
             .version_path(CUDA_TAG)
             .is_ok_and(|path| !path.exists()));
-        let index_reads = server
-            .requested_paths()
-            .iter()
-            .filter(|path| path.starts_with("/pypi/simple/"))
-            .count();
+        // Resolving reads core metadata; checking a kept selection does not.
+        let metadata_reads = || {
+            server
+                .requested_paths()
+                .iter()
+                .filter(|path| path.ends_with(".metadata"))
+                .count()
+        };
+        let index_reads = metadata_reads();
         assert!(index_reads > 0);
 
         // NVIDIA publishes a newer cuDNN before the retry, and the missing
@@ -1508,10 +1593,7 @@ mod installs {
             "the retry keeps the selection it started with: {paths:?}"
         );
         assert_eq!(
-            paths
-                .iter()
-                .filter(|path| path.starts_with("/pypi/simple/"))
-                .count(),
+            metadata_reads(),
             index_reads,
             "the retry does not resolve again"
         );
@@ -1522,6 +1604,204 @@ mod installs {
         );
         let version_dir = manager.version_path(CUDA_TAG).unwrap();
         assert!(version_dir.join("cuda/lib/libcublasLt.so.12").is_file());
+        manager.shutdown_installations().await.ok();
+    }
+
+    /// The `.whl` downloads of `server` for `filename`.
+    fn downloads(server: &FixtureServer, filename: &str) -> usize {
+        server
+            .state
+            .lock()
+            .unwrap()
+            .log
+            .iter()
+            .filter(|(path, _)| {
+                !path.starts_with("HEAD ") && path.ends_with(&format!("/{filename}"))
+            })
+            .count()
+    }
+
+    fn install_log(root: &Path) -> String {
+        let logs = root.join("launcher-data/logs");
+        std::fs::read_dir(&logs)
+            .map(|entries| {
+                entries
+                    .filter_map(|entry| entry.ok())
+                    .filter(|entry| {
+                        entry
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with("install-onnx-runtime-")
+                    })
+                    .map(|entry| std::fs::read_to_string(entry.path()).unwrap_or_default())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default()
+    }
+
+    async fn retained_record_phases(api: &pumas_library::PumasApi) -> Vec<String> {
+        api.acquisition()
+            .store()
+            .acquisitions()
+            .unwrap()
+            .into_values()
+            .filter(|record| record.demand.consumer == "runtime.onnx-runtime")
+            .map(|record| format!("{:?}", record.phase))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_retry_whose_saved_wheel_vanished_resolves_again_and_keeps_finished_downloads() {
+        let root = tempfile::TempDir::new().unwrap();
+        let server = FixtureServer::start().await;
+        publish_release(&server, root.path());
+        let platform = WheelPlatform::LinuxX64;
+        let nvjitlink = package("nvidia-nvjitlink-cu12");
+        let old_wheel = wheel_filename(platform, nvjitlink.distribution, nvjitlink.version);
+        // The last wheel of the set cannot be fetched, so the attempt fails
+        // after the archive and the other wheels finished.
+        server.unroute(&wheel_path(nvjitlink));
+        let api = test_api(root.path()).await;
+        let manager = onnx_manager(root.path(), &api, &server).await;
+        install(&manager, CUDA_TAG).await.unwrap_err();
+        let cudnn = package("nvidia-cudnn-cu12");
+        let cudnn_wheel = wheel_filename(platform, cudnn.distribution, cudnn.version);
+        assert_eq!(downloads(&server, &cudnn_wheel), 1);
+        let archive_downloads = server
+            .requested_paths()
+            .iter()
+            .filter(|path| path.starts_with("/archives/") && path.contains("gpu_cuda12"))
+            .count();
+        assert_eq!(archive_downloads, 1);
+
+        // NVIDIA replaces that release: the index no longer lists it and its
+        // file answers 404.
+        let newer = IndexEntry::wheel(
+            &wheel_filename(platform, nvjitlink.distribution, "12.9.90"),
+            nvidia_wheel(
+                platform,
+                nvjitlink.distribution,
+                "12.9.90",
+                nvjitlink.component,
+                nvjitlink.libraries,
+                64,
+            ),
+            nvjitlink.requires,
+        );
+        publish(&server, "/pypi/simple", nvjitlink.project, vec![newer]);
+
+        install(&manager, CUDA_TAG).await.unwrap();
+
+        // The selection was resolved again with the replacement.
+        let version_dir = manager.version_path(CUDA_TAG).unwrap();
+        let record: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(version_dir.join("cuda/libraries.json")).unwrap(),
+        )
+        .unwrap();
+        let versions: Vec<_> = record["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|package| {
+                format!(
+                    "{} {}",
+                    package["project"].as_str().unwrap(),
+                    package["version"].as_str().unwrap()
+                )
+            })
+            .collect();
+        assert!(
+            versions.contains(&"nvidia-nvjitlink-cu12 12.9.90".to_owned()),
+            "{versions:?}"
+        );
+        assert!(version_dir.join("cuda/lib/libnvJitLink.so.12").is_file());
+        // Finished downloads still selected were kept, not fetched again.
+        assert_eq!(downloads(&server, &cudnn_wheel), 1);
+        assert_eq!(
+            server
+                .requested_paths()
+                .iter()
+                .filter(|path| path.starts_with("/archives/") && path.contains("gpu_cuda12"))
+                .count(),
+            archive_downloads
+        );
+        // The old download was withdrawn, not left to be resumed.
+        let phases = retained_record_phases(&api).await;
+        assert!(
+            phases.iter().any(|phase| phase == "Withdrawn"),
+            "{phases:?}"
+        );
+        assert!(
+            !phases
+                .iter()
+                .any(|phase| phase == "Transferring" || phase == "FilesReady"),
+            "{phases:?}"
+        );
+        // The install log says why.
+        let log = install_log(root.path());
+        assert!(log.contains("cannot be downloaded any more"), "{log}");
+        assert!(log.contains(&old_wheel), "{log}");
+        let leftovers: Vec<_> = std::fs::read_dir(manager.versions_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| {
+                name.starts_with(".llama-install-") || name.starts_with(".native-carry-")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        manager.shutdown_installations().await.ok();
+    }
+
+    #[tokio::test]
+    async fn a_retry_whose_saved_wheel_answers_a_server_error_keeps_its_selection() {
+        let root = tempfile::TempDir::new().unwrap();
+        let server = FixtureServer::start().await;
+        publish_release(&server, root.path());
+        let platform = WheelPlatform::LinuxX64;
+        let nvjitlink = package("nvidia-nvjitlink-cu12");
+        let wheel = wheel_path(nvjitlink);
+        server.fail(&wheel);
+        let api = test_api(root.path()).await;
+        let manager = onnx_manager(root.path(), &api, &server).await;
+        install(&manager, CUDA_TAG).await.unwrap_err();
+
+        // A newer release appears, but the saved file only answers 503: the
+        // retry keeps its selection instead of resolving again.
+        let newer = IndexEntry::wheel(
+            &wheel_filename(platform, nvjitlink.distribution, "12.9.90"),
+            b"newer".to_vec(),
+            nvjitlink.requires,
+        );
+        publish(
+            &server,
+            "/pypi/simple",
+            nvjitlink.project,
+            vec![package_entry(platform, nvjitlink, WHEEL_PAYLOAD), newer],
+        );
+        install(&manager, CUDA_TAG).await.unwrap_err();
+        let phases = retained_record_phases(&api).await;
+        assert!(
+            !phases.iter().any(|phase| phase == "Withdrawn"),
+            "{phases:?}"
+        );
+        assert!(!install_log(root.path()).contains("cannot be downloaded any more"));
+
+        // Once the file answers, the same selection finishes.
+        server.state.lock().unwrap().failing.clear();
+        install(&manager, CUDA_TAG).await.unwrap();
+        assert!(!server
+            .requested_paths()
+            .iter()
+            .any(|path| path.ends_with("12.9.90-py3-none-manylinux_2_27_x86_64.whl")));
+        let record = std::fs::read_to_string(
+            manager
+                .version_path(CUDA_TAG)
+                .unwrap()
+                .join("cuda/libraries.json"),
+        )
+        .unwrap();
+        assert!(record.contains("12.9.86"), "{record}");
         manager.shutdown_installations().await.ok();
     }
 }

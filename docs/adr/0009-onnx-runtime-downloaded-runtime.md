@@ -246,6 +246,18 @@ reuses that set, so completed wheels are not downloaded again and partial ones
 resume, even after NVIDIA publishes newer releases. Cancelling or finishing the
 attempt removes it with the workspace; the next install resolves again.
 
+A kept set is replaced only when one of its wheels can no longer be
+downloaded: its project or file answers not found (404 or 410) on the index,
+the index no longer lists it, or its file URL answers 404 or 410. The retry
+then resolves against the current indexes, withdraws the earlier attempt's
+unfinished download through the acquisition owner
+(`withdraw_unfinished_transfer`), and carries the finished files the new set
+still names (same name and SHA-256, the release archive included) into the new
+attempt, where acquisition verifies them again before using them. The install
+log says which wheel vanished and what was selected instead. A server error,
+a network failure or a different digest for the same file name keeps the set:
+a retry or the verified download decides those.
+
 **Search path.** When the installed version has `cuda/lib` and its record, the
 ONNX host starts with `LD_LIBRARY_PATH` set to that directory on Linux (the
 inherited `LD_LIBRARY_PATH` is still never passed to owned children), and with

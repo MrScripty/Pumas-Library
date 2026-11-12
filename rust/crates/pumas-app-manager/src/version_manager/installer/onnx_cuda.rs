@@ -498,6 +498,52 @@ pub(super) async fn resolve(
     })
 }
 
+/// Why a saved selection can no longer be downloaded: one of its wheels is
+/// gone from its index (the project or the file answers not found, or the
+/// project page no longer lists it) or its file URL answers 404 or 410. `None`
+/// keeps the selection: every wheel is still there, or an index or file
+/// answered something else, such as a server error or a different digest
+/// for the same file name, which a retry or the verified download decides.
+pub(super) async fn vanished_wheel(
+    sources: &CudaWheelSources,
+    selection: &CudaWheelSelection,
+) -> Option<String> {
+    let index = PackageIndex::new(
+        &sources.wheel_index,
+        sources.client().ok()?,
+        sources.cache.clone(),
+    )
+    .ok()?;
+    for wheel in &selection.wheels {
+        match index.files(&wheel.project).await {
+            Ok(None) => {
+                return Some(format!(
+                    "{} is no longer on {}: the project answers not found",
+                    wheel.project,
+                    index.display()
+                ))
+            }
+            Ok(Some(files)) if !files.iter().any(|file| file.filename == wheel.filename) => {
+                return Some(format!(
+                    "{} no longer lists {}",
+                    index.display(),
+                    wheel.filename
+                ))
+            }
+            _ => {}
+        }
+        if let Some(status) = index.head_status(&wheel.url).await {
+            if super::python_index::is_not_found(status) {
+                return Some(format!(
+                    "{} answers {status} at its file URL",
+                    wheel.filename
+                ));
+            }
+        }
+    }
+    None
+}
+
 /// The selection kept with an install attempt, if one is there.
 pub(super) fn read_selection(path: &Path) -> Result<Option<CudaWheelSelection>> {
     if !path_exists_sync(path)? {

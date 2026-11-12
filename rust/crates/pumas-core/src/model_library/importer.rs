@@ -1934,6 +1934,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             },
             domain: DownloadAdmissionDomain::Ambient,
             destination: root

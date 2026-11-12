@@ -25,6 +25,10 @@ fn runtime_check_command(python: &Path, script: &Path) -> Command {
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
 const MAX_TORCH_DOWNLOAD_SOURCE_BYTES: usize = 2048;
 const TORCH_DOWNLOAD_SPEED_STALE_AFTER: Duration = Duration::from_secs(2);
+/// An install stage fails only when it stops making progress: neither its
+/// download progress nor its log has changed for this long. A slow link
+/// that keeps transferring is never cut off by elapsed time.
+const TORCH_STAGE_STALLED_AFTER: Duration = Duration::from_secs(30 * 60);
 pub(super) const TORCH_PUBLISHING_MARKER: &[u8] = b"metadata pending";
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -3037,17 +3041,22 @@ impl VersionInstaller {
         if let Some(stage_lease) = stage_lease {
             child.attach_cleanup_lease(stage_lease);
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
+        let log_len = |path: &Path| std::fs::metadata(path).map(|meta| meta.len()).ok();
+        let mut activity = StageActivity::new(log_len(log_path), tokio::time::Instant::now());
         let mut last_download_progress: Option<TorchDownloadProgress> = None;
         let mut last_download_progress_change_at: Option<tokio::time::Instant> = None;
         let mut download_speed_expired = false;
         loop {
             let observed = child.observe_exit();
             let cancelled = self.cancel_flag.load(Ordering::SeqCst);
-            let timed_out = tokio::time::Instant::now() >= deadline;
+            activity.observe_log(log_len(log_path), tokio::time::Instant::now());
             if let Some(path) = download_progress_path {
                 if let Some(download_progress) = read_torch_download_progress(path) {
                     if last_download_progress.as_ref() != Some(&download_progress) {
+                        activity.observe_downloaded_bytes(
+                            download_progress.downloaded_bytes,
+                            tokio::time::Instant::now(),
+                        );
                         self.progress_tracker.write().await.update_network_transfer(
                             download_progress.source_url.as_deref(),
                             download_progress.active,
@@ -3080,6 +3089,8 @@ impl VersionInstaller {
                     }
                 }
             }
+            let timed_out =
+                activity.stalled(tokio::time::Instant::now(), TORCH_STAGE_STALLED_AFTER);
             if cancelled || timed_out || !matches!(&observed, Ok(None)) {
                 drop(child);
                 self.torch_cleanup
@@ -3096,7 +3107,8 @@ impl VersionInstaller {
                 self.check_cancelled()?;
                 if timed_out {
                     return Err(failed(format!(
-                        "{stage} exceeded the installation deadline"
+                        "{stage} made no progress for {} minutes (no download progress or log output); check the network and the install log, then retry",
+                        TORCH_STAGE_STALLED_AFTER.as_secs() / 60
                     )));
                 }
                 let status = observed
@@ -3106,6 +3118,69 @@ impl VersionInstaller {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+}
+
+/// When an install stage last made progress: its log grew or its download
+/// moved more bytes. Elapsed time alone never fails a stage.
+struct StageActivity {
+    log_len: Option<u64>,
+    downloaded_bytes: Option<u64>,
+    last_progress_at: tokio::time::Instant,
+}
+
+impl StageActivity {
+    fn new(log_len: Option<u64>, now: tokio::time::Instant) -> Self {
+        Self {
+            log_len,
+            downloaded_bytes: None,
+            last_progress_at: now,
+        }
+    }
+
+    fn observe_log(&mut self, log_len: Option<u64>, now: tokio::time::Instant) {
+        if log_len != self.log_len {
+            self.log_len = log_len;
+            self.last_progress_at = now;
+        }
+    }
+
+    fn observe_downloaded_bytes(&mut self, bytes: u64, now: tokio::time::Instant) {
+        if self.downloaded_bytes != Some(bytes) {
+            self.downloaded_bytes = Some(bytes);
+            self.last_progress_at = now;
+        }
+    }
+
+    fn stalled(&self, now: tokio::time::Instant, limit: Duration) -> bool {
+        now.saturating_duration_since(self.last_progress_at) >= limit
+    }
+}
+
+#[cfg(test)]
+mod stage_activity_tests {
+    use super::*;
+
+    #[test]
+    fn a_stage_stalls_only_when_neither_its_log_nor_its_bytes_move() {
+        let start = tokio::time::Instant::now();
+        let limit = Duration::from_secs(60);
+        let at = |seconds| start + Duration::from_secs(seconds);
+        let mut activity = StageActivity::new(Some(10), start);
+        // A slow but moving download is never cut off by elapsed time.
+        for minute in 1..=180 {
+            activity.observe_log(Some(10), at(minute * 60));
+            activity.observe_downloaded_bytes(minute * 1024, at(minute * 60));
+            assert!(!activity.stalled(at(minute * 60 + 59), limit));
+        }
+        // Rewrites of the same byte count and an unchanged log are no progress.
+        let last = 180 * 60;
+        activity.observe_downloaded_bytes(180 * 1024, at(last + 30));
+        activity.observe_log(Some(10), at(last + 30));
+        assert!(activity.stalled(at(last + 60), limit));
+        // Log output alone (a silent download, a build printing) is progress.
+        activity.observe_log(Some(11), at(last + 90));
+        assert!(!activity.stalled(at(last + 120), limit));
     }
 }
 

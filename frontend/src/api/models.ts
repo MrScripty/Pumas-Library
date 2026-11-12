@@ -110,6 +110,11 @@ class ModelsAPI {
     return await api.delete_model_with_cascade(modelId);
   }
 
+  async finishRetainedImport(modelId: string) {
+    const api = this.getAPI();
+    return await api.finish_retained_import(modelId);
+  }
+
   /**
    * Get metadata for a library model (both stored and embedded).
    */

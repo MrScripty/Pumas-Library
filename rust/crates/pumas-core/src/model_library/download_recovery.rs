@@ -2,11 +2,13 @@
 
 mod import_custody;
 mod import_permissions;
+mod volume_identity;
 pub(crate) use import_custody::{
     require_import_document_size, ImportFileIdentity, ImportPayloadIdentity,
     IMPORT_DOCUMENT_MAX_BYTES, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS, IMPORT_RECEIPT,
 };
 pub(crate) use import_permissions::ImportDirectoryPermissions;
+pub(crate) use volume_identity::stable_volume;
 
 use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};
@@ -88,17 +90,43 @@ fn invalid_library_id() -> io::Error {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+/// A file's identity: its volume and its file number on that volume. On Unix
+/// the volume is reboot-stable (see [`volume_identity`]), so persisted
+/// custody keeps matching after the kernel renumbers a block device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub(super) struct FilesystemIdentity {
     volume: u64,
     file: u64,
+}
+
+impl<'de> Deserialize<'de> for FilesystemIdentity {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Recorded {
+            volume: u64,
+            file: u64,
+        }
+        let recorded = Recorded::deserialize(deserializer)?;
+        // A record written before stable volumes holds a raw device number;
+        // translate it the way a fresh observation of that device would be.
+        #[cfg(unix)]
+        let volume = volume_identity::stable_volume(recorded.volume);
+        #[cfg(not(unix))]
+        let volume = recorded.volume;
+        Ok(Self {
+            volume,
+            file: recorded.file,
+        })
+    }
 }
 
 #[cfg(unix)]
 fn filesystem_identity(metadata: &Metadata) -> Option<FilesystemIdentity> {
     use cap_std::fs::MetadataExt;
     Some(FilesystemIdentity {
-        volume: metadata.dev(),
+        volume: volume_identity::stable_volume(metadata.dev()),
         file: metadata.ino(),
     })
 }
@@ -2131,6 +2159,30 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn a_legacy_device_number_record_matches_a_fresh_observation() {
+        use std::os::unix::fs::MetadataExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("payload.bin");
+        std::fs::write(&path, b"payload").unwrap();
+        let raw = std::fs::metadata(&path).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let fresh =
+            super::filesystem_identity(&super::Metadata::from_file(&file).unwrap()).unwrap();
+        // Written before stable volumes: the raw device number.
+        let legacy: super::FilesystemIdentity = serde_json::from_value(serde_json::json!({
+            "volume": raw.dev(),
+            "file": raw.ino(),
+        }))
+        .unwrap();
+        assert_eq!(legacy, fresh);
+        // Current records round-trip unchanged.
+        let current: super::FilesystemIdentity =
+            serde_json::from_value(serde_json::to_value(fresh).unwrap()).unwrap();
+        assert_eq!(current, fresh);
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn copied_import_publication_retains_output_after_parent_sync_failure() {

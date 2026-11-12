@@ -1,7 +1,7 @@
 //! OpenAI-compatible gateway handlers backed by Pumas serving state.
 
 use super::gateway_stream::{self, GenerationCancellation, GenerationTransport};
-use super::openai_gateway_onnx::handle_onnx_embedding;
+use super::openai_gateway_onnx::handle_onnx_request;
 use crate::contract::PublicError;
 use crate::http_transport::RequestDisconnect;
 use crate::provider_clients::ProviderHttp;
@@ -103,23 +103,41 @@ fn torch_process_is_stable(
 pub(super) enum TorchWork {
     Image,
     Audio,
+    TextEmbedding,
+    TextRerank,
 }
 
 impl TorchWork {
     fn capability(self) -> &'static str {
+        use pumas_app_manager::torch_client as torch;
         match self {
-            Self::Image => pumas_app_manager::torch_client::TORCH_IMAGE_GENERATION_CAPABILITY,
-            Self::Audio => pumas_app_manager::torch_client::TORCH_AUDIO_TRANSCRIPTION_CAPABILITY,
+            Self::Image => torch::TORCH_IMAGE_GENERATION_CAPABILITY,
+            Self::Audio => torch::TORCH_AUDIO_TRANSCRIPTION_CAPABILITY,
+            Self::TextEmbedding => torch::TORCH_TEXT_EMBEDDING_CAPABILITY,
+            Self::TextRerank => torch::TORCH_RERANK_CAPABILITY,
         }
     }
 
     fn supports(self, slot_type: Option<&str>) -> bool {
+        use pumas_app_manager::torch_client as torch;
         match self {
             Self::Image => matches!(
                 slot_type,
                 Some("nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8")
             ),
             Self::Audio => slot_type == Some("cohere-asr"),
+            Self::TextEmbedding => slot_type == Some(torch::TORCH_TEXT_EMBEDDING_MODEL_TYPE),
+            Self::TextRerank => slot_type == Some(torch::TORCH_TEXT_RERANK_MODEL_TYPE),
+        }
+    }
+
+    /// The `/v1/models` capability label of a model doing this work.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Image => "image_generation",
+            Self::Audio => "audio_transcription",
+            Self::TextEmbedding => "text_embedding",
+            Self::TextRerank => "rerank",
         }
     }
 }
@@ -180,10 +198,11 @@ pub(super) async fn check_live_torch_image_runtime(
 
 /// The Torch work a served library model is for.
 pub(super) fn torch_work_for(model_type: Option<&str>) -> TorchWork {
-    if model_type == Some("audio") {
-        TorchWork::Audio
-    } else {
-        TorchWork::Image
+    match model_type {
+        Some("audio") => TorchWork::Audio,
+        Some("embedding") => TorchWork::TextEmbedding,
+        Some("reranker") => TorchWork::TextRerank,
+        _ => TorchWork::Image,
     }
 }
 
@@ -192,6 +211,7 @@ pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl In
     match state.api.get_serving_status().await {
         Ok(mut response) => {
             let mut unavailable = Vec::new();
+            let mut works = std::collections::HashMap::new();
             for model in response
                 .snapshot
                 .served_models
@@ -218,11 +238,12 @@ pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl In
                 if !ready {
                     unavailable.push((model.model_id.clone(), model.profile_id.clone()));
                 }
+                works.insert(model.model_id.clone(), work);
             }
             response.snapshot.served_models.retain(|model| {
                 !unavailable.contains(&(model.model_id.clone(), model.profile_id.clone()))
             });
-            openai_models_snapshot_response(response.snapshot)
+            openai_models_snapshot_response_with(response.snapshot, &works)
         }
         Err(error) => openai_public_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -231,7 +252,17 @@ pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl In
     }
 }
 
+#[cfg(test)]
 fn openai_models_snapshot_response(snapshot: ServingStatusSnapshot) -> Response {
+    openai_models_snapshot_response_with(snapshot, &std::collections::HashMap::new())
+}
+
+/// The model list, labelling each Torch model with the work it was observed
+/// to do (image generation when unobserved).
+fn openai_models_snapshot_response_with(
+    snapshot: ServingStatusSnapshot,
+    torch_works: &std::collections::HashMap<String, TorchWork>,
+) -> Response {
     if snapshot
         .router_profiles
         .iter()
@@ -265,7 +296,8 @@ fn openai_models_snapshot_response(snapshot: ServingStatusSnapshot) -> Response 
                 }
             }
             _ => {
-                let mut entry = openai_model_entry(model);
+                let work = torch_works.get(&model.model_id).copied();
+                let mut entry = openai_model_entry_with(model, work);
                 entry["profiles"] = json!([profile]);
                 data.push(entry);
             }
@@ -414,8 +446,24 @@ pub(super) async fn dispatch_openai(
         );
     }
 
+    if served.provider == RuntimeProviderId::Torch
+        && matches!(
+            policy.endpoint,
+            OpenAiGatewayEndpoint::Embeddings | OpenAiGatewayEndpoint::Rerank
+        )
+    {
+        return super::openai_gateway_torch_text::handle_torch_text(
+            &state,
+            &served,
+            requested_model.as_str(),
+            policy.endpoint,
+            body,
+        )
+        .await;
+    }
+
     if served.provider == RuntimeProviderId::OnnxRuntime {
-        return handle_onnx_embedding(
+        return handle_onnx_request(
             &state,
             &served,
             requested_model.as_str(),
@@ -895,16 +943,21 @@ fn provider_supports_openai_gateway_endpoint(
         .is_some_and(|behavior| behavior.supports_openai_endpoint(endpoint))
 }
 
+#[cfg(test)]
 fn openai_model_entry(model: ServedModelStatus) -> Value {
-    let image_generation = model.provider == RuntimeProviderId::Torch;
+    openai_model_entry_with(model, None)
+}
+
+fn openai_model_entry_with(model: ServedModelStatus, torch_work: Option<TorchWork>) -> Value {
+    let torch = model.provider == RuntimeProviderId::Torch;
     let mut entry = json!({
         "id": model.model_alias.unwrap_or(model.model_id),
         "object": "model",
         "created": 0,
         "owned_by": "pumas"
     });
-    if image_generation {
-        entry["capabilities"] = json!(["image_generation"]);
+    if torch {
+        entry["capabilities"] = json!([torch_work.unwrap_or(TorchWork::Image).label()]);
     }
     entry
 }

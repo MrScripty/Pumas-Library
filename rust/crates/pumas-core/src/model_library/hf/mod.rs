@@ -22,6 +22,7 @@ mod lifecycle;
 mod metadata;
 mod package_selection;
 mod search;
+mod st_package;
 mod types;
 
 pub use auth::HfAuthStatus;

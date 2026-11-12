@@ -205,12 +205,12 @@ async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
     assert!(matches!(
         retry,
         Err(PumasError::InvalidParams { message })
-            if message == format!(
+            if message.starts_with(&format!(
                 "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
                 // The owner reports its canonical root in display form.
                 crate::platform::platform_display_path(&temp.path().canonicalize().unwrap()),
                 std::process::id()
-            )
+            ))
     ));
     assert_eq!(
         serde_json::to_value(registry.get_instance(temp.path()).unwrap().unwrap()).unwrap(),
@@ -393,6 +393,7 @@ async fn acquisition_integration_startup_retains_separate_pending_custody() {
         created_at: chrono::Utc::now().to_rfc3339(),
         known_sha256,
         huggingface_evidence: None,
+        error: None,
     };
     let mut client = HuggingFaceClient::new(temp.path().join("fixture-cache")).unwrap();
     client

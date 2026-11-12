@@ -210,3 +210,21 @@ async fn unserve_onnx_model_removes_stale_status_when_session_is_absent() {
         .served_models
         .is_empty());
 }
+
+#[test]
+fn load_refusals_carry_pumas_reasons_but_not_backend_internals() {
+    let refused = OnnxRuntimeError::validation(
+        "graph",
+        "the graph takes `pixel_values`, which text models cannot supply",
+    );
+    assert_eq!(
+        onnx_load_failure_message(&refused),
+        "ONNX Runtime could not load the selected model: the graph takes `pixel_values`, which text models cannot supply"
+    );
+    let backend = OnnxRuntimeError {
+        code: OnnxRuntimeErrorCode::Backend,
+        field: None,
+        message: "ort internal: /tmp/xyz CUDA failure".into(),
+    };
+    assert!(!onnx_load_failure_message(&backend).contains("ort internal"));
+}

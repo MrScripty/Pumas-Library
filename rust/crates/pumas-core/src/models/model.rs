@@ -473,6 +473,11 @@ pub struct ModelMetadata {
     // Conversion provenance tracking
     #[serde(default)]
     pub conversion_source: Option<ConversionSource>,
+    /// Sentence-transformers declarations (pooling, normalization, scoring)
+    /// resolved from the package or its upstream lineage (ADR 0007).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentence_transformers:
+        Option<crate::model_library::declarations::SentenceTransformersDeclarations>,
     // Download provenance
     /// HuggingFace repository ID (e.g. "TheBloke/Llama-2-7B-GGUF").
     #[serde(default)]

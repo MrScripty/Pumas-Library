@@ -1430,7 +1430,14 @@ impl VersionManager {
                 .get_current_state()
                 .as_ref()
                 .and_then(CompletedProgressIdentity::capture);
-            let terminal = if failed_before_effects {
+            // A failed Torch install also leaves nothing for this task to
+            // settle: its stage and publication are durably marked and retried
+            // at startup, and its child processes are drained and reported by
+            // shutdown_installations itself. Reporting the failure again from
+            // here only failed shutdown, which keeps the library registered as
+            // running and refuses the next open. Native installs keep this
+            // gate: a failure can leave acquisition custody in use.
+            let terminal = if failed_before_effects || app_id == AppId::Torch {
                 Ok(())
             } else {
                 result.as_ref().map(|_| ()).map_err(ToString::to_string)
@@ -4380,13 +4387,13 @@ mod tests {
             assert!(matches!(
                 result,
                 Err(PumasError::InvalidParams { message })
-                    if message == format!(
+                    if message.starts_with(&format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
                         pumas_library::platform::platform_display_path(
                             &root.path().canonicalize().unwrap()
                         ),
                         child_pid
-                    )
+                    ))
             ));
             assert_eq!(
                 serde_json::to_value(registry.get_instance(root.path()).unwrap().unwrap()).unwrap(),
@@ -6088,6 +6095,9 @@ mod tests {
         assert!(reached.load(Ordering::SeqCst));
         assert!(error.contains("stage reached without release lookup"));
         assert!(!cache.join("github-releases-pytorch-pytorch.json").exists());
+        // A failed Torch install has been reported and left nothing unsettled,
+        // so it must not fail shutdown and keep the library locked.
+        manager.shutdown_installations().await.unwrap();
     }
 
     #[test]

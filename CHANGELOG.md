@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sentence-transformers declarations (pooling, normalization, `LogitScore`
+  tokens, prompt template, prompts) are recorded in model metadata as
+  `sentence_transformers`, resolved from the model's package or lineage (its
+  source repository, then its single base model) at an immutable commit.
+  Models are resolved automatically when they become complete (downloads,
+  imports and conversions); `resolve_model_declarations`
+  (optional `repo_id`) resolves any library model
+  ([ADR 0007](docs/adr/0007-model-declarations.md)).
+- ONNX Runtime embeds with the pooling (mean, CLS, last token, max) and
+  normalization a model declares, accepts graphs that take `position_ids` and
+  segment ids, and reranks with cross-encoder graphs (one relevance logit per
+  pair) through `rerank` and the gateway's `/v1/rerank`. Graphs needing inputs
+  the adapter cannot supply are refused at load with their names, and ONNX
+  validation errors now carry their reason.
+- Torch serves text embedders and rerankers from local Safetensors packages
+  (for example Prism-Qwen3.5-Reranker, bge-reranker-v2-m3, harrier) through
+  `text_embedding`, `rerank`, `/v1/embeddings` and `/v1/rerank`, computing what
+  the model's recorded declarations say even when the package lacks its
+  sentence-transformers files. A runtime advertises them when Transformers
+  and Jinja are installed, which every Torch install now includes; the routes
+  come from the sidecar shipped with Pumas, so installed runtimes gain them
+  without a reinstall.
+- Cross-encoder rerankers published as text classifiers (for example
+  bge-reranker-v2-m3) are recorded as rerankers: a GGUF ranking head without
+  a decision head, or a `*ForSequenceClassification` config with one label,
+  decides the category over a `text-classification` tag when reranker
+  evidence corroborates it (see Fixed), and such a tag no longer blocks
+  `rerank` for a recorded reranker.
+- `start_model_conversion` direction `gguf_to_ranking_gguf` derives a llama.cpp
+  ranking head into a copy of a causal-LM reranker GGUF that shipped without
+  one (for example zerank-2 and some Qwen3-Reranker quantizations), from the
+  model's recorded `LogitScore` declaration. Architectures whose llama.cpp
+  rank pooling cannot use such a head are refused with the reason
+  ([ADR 0006](docs/adr/0006-derived-ranking-heads.md)). The base conversion
+  environment now also needs `jinja2`; re-run conversion setup.
 - Runtime profiles can pin an installed runtime version
   (`runtime_version`), so llama.cpp, Torch and other managed runtimes can run
   instances of different versions at the same time. A profile without a pin
@@ -111,6 +146,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Torch embeddings now apply the Dense and LayerNorm modules a model declares
+  after pooling (EmbeddingGemma: Transformer, Pooling, Dense, Dense,
+  Normalize) from the weights in its package. Before, they were skipped and
+  the vectors were silently wrong. Declarations record each module's
+  directory, role and layer (`module_details`); a module a runtime does not
+  implement is refused at load with the reason. Records written earlier
+  carry no layer, so such a model is refused until its declarations are
+  resolved again.
+- ONNX Runtime reads a graph's pooled `sentence_embedding` output when the
+  model declares stages after pooling, instead of re-pooling token states and
+  dropping those stages, and refuses graphs that do not export one.
+- ONNX Runtime rerank applies the model's declared activation, as Torch does.
+- Torch text requests the sidecar refuses (an empty input or document list,
+  a blank query, too many items) return 400 with the reason instead of 502.
+- One-label classifier heads (a `*ForSequenceClassification` config or a GGUF
+  `cls.output.weight`) are recorded as rerankers only with reranker evidence
+  beside them (a reranker tag or name, a CrossEncoder package, or recorded
+  CrossEncoder/`LogitScore` declarations). Alone they are low-confidence
+  rerankers that an explicit task tag overrides, so reward and regression
+  heads keep their category.
+- Declarations are read from the source repository at the commit its files
+  were downloaded at, not its current `main`; a lineage repository that fails
+  to read no longer ends the search; and recording them changes only the
+  `sentence_transformers` field, so edits made during the fetch are kept.
+- The declarations reactor no longer stalls the update feed behind a fetch,
+  rescans the library when the feed lags, abandons transfers that stop
+  delivering data, and stops at shutdown. It resolves only embedders,
+  rerankers and decision models.
+- Acquisition workspace identities persist the reboot-stable volume instead
+  of the raw device number; identities persisted earlier are translated when
+  read.
+
+- One malformed library record no longer makes the whole library unavailable.
+  `get_models` and catalog search leave the record out and list it in
+  `unavailable_records` with the model ID and the reason; the library view
+  shows those records beside the models that loaded.
+- A copied import no longer gets stuck Ready on disk but Pending in the index
+  when a metadata refresh overlaps its hash pass. Imports already stuck that
+  way can be finished with `finish_retained_import`, or with "Verify and
+  finish import" in the library view, which first re-verifies the confirmed
+  receipt and rehashes the payload. `unavailable_records` now carries the
+  library's diagnosis `code` and a `recovery` when a repair exists
+  ([ADR 0008](docs/adr/0008-retained-copied-publications.md)).
+- A failed download keeps its failure reason across restarts. Downloads that
+  failed before this change say so, instead of showing no reason.
+- Torch runtime installs no longer fail on a slow connection because a stage
+  ran longer than an hour. A stage now fails only after 30 minutes with no
+  new downloaded bytes and no install-log output, and the error says so.
+- A failed Torch install no longer makes the next start refuse the library
+  ("instance is already running" with a dead pid). The failure was reported a
+  second time at shutdown, which left the instance registered. Leftovers from
+  a failed Torch install are durably marked and cleaned at the next start.
+- A library left registered as open by a Pumas process that was killed or
+  crashed no longer needs hand-editing the registry. Startup reports it as a
+  `stale-instance` failure with the entry's details, and the desktop offers
+  "Release Entry": after you confirm, Pumas re-checks that the library's lock
+  is free, the process is gone and the entry is unchanged, removes only that
+  entry and opens the library. Headless users can run `pumas-rpc
+  --release-stale-instance`. Pumas still never replaces such an entry on its
+  own.
+- On Linux, file identities recorded for downloads and copied imports name
+  the filesystem by its UUID instead of its device number, which the kernel
+  can reassign at boot (an NVMe partition moved from 259:6 to 259:8).
+  Identities recorded before this change are translated when read, so records
+  from the current boot keep matching.
 - A retried ONNX Runtime CUDA install no longer stays stuck when a CUDA library
   wheel it selected earlier has been removed from PyPI (its project, listing
   or file answers not found). The retry resolves the libraries again,

@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 5b203bd68661150ce479934813b74ff13066aeaf0275bfedd327e1da9f106648. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ff9f5dc054325a09f95216f10dfb363747aa848a23f8ef4b2140224b46dccfce. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -13,13 +13,14 @@ export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgr
 export type CatalogIntegrityState = ({ "state": "clean" }) | ({ "count": number; "otherModelIds": ReadonlyArray<string>; "state": "duplicate" });
 export type CatalogModel = { "adapter": boolean; "artifact": CatalogArtifactState; "dependencyCount": number; "displayDate"?: string; "displayName": string; "format"?: string; "id": string; "inputModalities": ReadonlyArray<string>; "integrity": CatalogIntegrityState; "modelDir": string; "modelType": string; "outputModalities": ReadonlyArray<string>; "quantization"?: string; "relatedAvailable": boolean; "sizeBytes"?: number };
 export type CatalogPartialReason = "part_file_present" | "expected_files_missing";
+export type CatalogRecordRecovery = ("finish_retained_import");
 export type CatalogRecoveryIdentity = { "recoveryToken": string; "repoId": string; "selectedArtifactFiles"?: ReadonlyArray<string>; "selectedArtifactId"?: string; "selectedArtifactQuant"?: string };
-export type CatalogSearchOutcome = { "models": ReadonlyArray<CatalogModel>; "query": string; "query_time_ms": number; "success": true; "total_count": number };
+export type CatalogSearchOutcome = { "models": ReadonlyArray<CatalogModel>; "query": string; "query_time_ms": number; "success": true; "total_count": number; "unavailable_records": ReadonlyArray<UnavailableCatalogRecord> };
 export type CheckedVersionDependencies = { "installed": ReadonlyArray<string>; "missing": ReadonlyArray<string>; "requirementsFile": string | null };
 export type CheckVersionDependenciesOutcome = { "dependencies": CheckedVersionDependencies; "success": true };
 export type CheckVersionDependenciesParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
 export type ConversionCancelledOutcome = { "cancelled": boolean; "success": true };
-export type ConversionDirection = ("gguf_to_safetensors") | ("safetensors_to_gguf") | ("safetensors_to_quantized_gguf") | ("gguf_to_quantized_gguf") | ("safetensors_to_nvfp4") | ("safetensors_to_fp8") | ("safetensors_to_sherry_qat");
+export type ConversionDirection = ("gguf_to_safetensors") | ("safetensors_to_gguf") | ("safetensors_to_quantized_gguf") | ("gguf_to_quantized_gguf") | ("safetensors_to_nvfp4") | ("safetensors_to_fp8") | ("safetensors_to_sherry_qat") | ("gguf_to_ranking_gguf");
 export type ConversionEnvironmentOutcome = { "ready": boolean; "success": true };
 export type ConversionListOutcome = { "conversions": ReadonlyArray<ConversionProgressOutcome>; "success": true };
 export type ConversionProgressOutcome = { "bytesWritten": number | null; "conversionId": string; "currentTensor": string | null; "direction": ConversionDirection; "error": string | null; "estimatedOutputSize": number | null; "outputModelId": string | null; "pipelineStep": number | null; "pipelineStepLabel": string | null; "pipelineStepsTotal": number | null; "progress": number | null; "sourceModelId": string; "status": ConversionStatus; "targetQuant": string | null; "tensorsCompleted": number | null; "tensorsTotal": number | null };
@@ -54,6 +55,8 @@ export type DownloadStatusOutcome = (DownloadStatusFoundOutcome) | (DownloadStat
 export type EmbeddedMetadataResponse = { "file_type": string; "metadata": { readonly [key: string]: DesktopJsonValue } };
 export type FileGroup = { "filenames": ReadonlyArray<string>; "label": string; "shardCount": number };
 export type FindTorchAlternativesParams = { "build": string; "python": string; "tag": string };
+export type FinishedRetainedImport = "acknowledged" | "already_ready";
+export type FinishRetainedImportOutcome = { "outcome": FinishedRetainedImport; "success": true };
 export type GetBackendSetupParams = { "backend": QuantBackend };
 export type GetHfDownloadDetailsParams = ({ "quants"?: ReadonlyArray<string> | null; "repo_id": string }) | ({ "quants"?: ReadonlyArray<string> | null; "repoId": string });
 export type GetReleaseDependenciesOutcome = { "dependencies": ReadonlyArray<string>; "success": true };
@@ -88,10 +91,11 @@ export type InstallVersionStarted = { "message": string; "success": true };
 export type LauncherRootAuthorityState = "unchanged" | "replacement-visibility-unknown" | "published-durability-unavailable";
 export type LauncherRootReadyState = { "status": "ready"; "selectionAction": LauncherRootSelectionAction; "libraryScopeId": (null) | (string) };
 export type LauncherRootRecoveryDetail = string;
-export type LauncherRootRecoveryReason = "invalid" | "unavailable" | "migration-required" | "backend-unavailable";
+export type LauncherRootRecoveryReason = "invalid" | "unavailable" | "migration-required" | "backend-unavailable" | "stale-instance";
 export type LauncherRootSelectionAction = "select-library" | "correct-launch-input";
 export type LauncherRootSelectionResult = ({ "status": "cancelled" }) | ({ "status": "restarting" }) | ({ "status": "not-selectable"; "action": "correct-launch-input" }) | ({ "status": "recovery-required"; "reason": "invalid-selection" | "chooser-unavailable"; "authorityState": "unchanged" }) | ({ "status": "recovery-required"; "reason": "persistence-unavailable"; "authorityState": LauncherRootAuthorityState }) | ({ "status": "recovery-required"; "reason": "restart-unavailable"; "authorityState": "published" });
-export type LauncherRootStartupState = ({ "status": "initializing" }) | (LauncherRootReadyState) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "persisted" | "default"; "action": "select-library"; "detail"?: LauncherRootRecoveryDetail }) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "environment" | "argument"; "action": "correct-launch-input"; "detail"?: LauncherRootRecoveryDetail });
+export type LauncherRootStaleInstance = { "pid": number; "startedAt": string; "version"?: string; "leaseChecked": boolean; "survivingProcesses": ReadonlyArray<{ "pid": number; "record": string }> };
+export type LauncherRootStartupState = ({ "status": "initializing" }) | (LauncherRootReadyState) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "persisted" | "default"; "action": "select-library"; "detail"?: LauncherRootRecoveryDetail; "staleInstance"?: LauncherRootStaleInstance }) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "environment" | "argument"; "action": "correct-launch-input"; "detail"?: LauncherRootRecoveryDetail; "staleInstance"?: LauncherRootStaleInstance });
 export type LibraryModelMetadataOutcome = { "component_manifest"?: ReadonlyArray<BundleComponentManifestEntry>; "effective_metadata"?: { readonly [key: string]: DesktopJsonValue }; "embedded_metadata"?: EmbeddedMetadataResponse; "model_id": string; "primary_file"?: string; "stored_metadata"?: { readonly [key: string]: DesktopJsonValue }; "success": true };
 export type LibraryStatusResponse = { "deep_scan_in_progress": boolean; "deep_scan_progress"?: (DeepScanProgress) | (null); "error"?: string | null; "indexing": boolean; "model_count": number; "pending_lookups"?: number | null; "success": boolean };
 export type LibraryUpgradeConfirmation = { "oldWritersStopped": true; "noDowngradeAccepted": true };
@@ -117,7 +121,7 @@ export type ModelRuntimeRoute = { "auto_load": boolean; "model_id": string; "pro
 export type ModelServeError = { "code": ModelServeErrorCode; "message": string; "model_id"?: string | null; "profile_id"?: string | null; "provider"?: (RuntimeProviderId) | (null); "severity": ModelServeErrorSeverity };
 export type ModelServeErrorCode = "invalid_request" | "model_not_found" | "model_not_executable" | "profile_not_found" | "profile_stopped" | "unsupported_provider" | "unsupported_placement" | "device_unavailable" | "insufficient_memory" | "provider_load_failed" | "missing_runtime" | "invalid_format" | "endpoint_unavailable" | "duplicate_model_alias" | "ambiguous_model_routing" | "unknown";
 export type ModelServeErrorSeverity = "non_critical" | "critical";
-export type ModelsOutcome = { "models": { readonly [key: string]: CatalogModel }; "success": true };
+export type ModelsOutcome = { "models": { readonly [key: string]: CatalogModel }; "success": true; "unavailable_records": ReadonlyArray<UnavailableCatalogRecord> };
 export type NetworkStatusResponse = { "circuit_breaker_rejections": number; "circuit_states": { readonly [key: string]: string }; "error"?: string | null; "failed_requests": number; "is_offline": boolean; "retries": number; "success": boolean; "success_rate": number; "successful_requests": number; "total_requests": number };
 export type ParamConstraints = { "allowed_values": (null) | (ReadonlyArray<DesktopJsonValue>); "max": number | null; "min": number | null };
 export type ParamType = "Number" | "Integer" | "String" | "Boolean";
@@ -208,9 +212,12 @@ export type ServingStatusUpdateFeed = { "cursor": string; "events": ReadonlyArra
 export type SetDefaultVersionOutcome = { "success": boolean };
 export type SetDefaultVersionParams = ({ "app_id": string; "tag"?: string | null }) | ({ "appId": string; "tag"?: string | null });
 export type SetHfTokenParams = { "token": string };
+export type StaleInstanceFrame = { "lease_checked": boolean; "pid": number; "started_at": string; "surviving_processes": ReadonlyArray<SurvivingProcessFrame>; "version"?: string | null };
+export type StaleInstanceReleaseConfirmation = { "pid": number; "startedAt": string; "confirmed": true };
+export type StaleInstanceReleaseResult = ({ "status": "unavailable" }) | ({ "status": "failed"; "stage": "release" | "open"; "message"?: string }) | ({ "status": "ready"; "state": LauncherRootReadyState });
 export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previous_operation_id"?: string | null };
 export type StartConversionSetupParams = { "expected_previous_operation_id"?: string | null };
-export type StartupFailureFrame = { "detail"?: string | null; "reason": string; "version": number };
+export type StartupFailureFrame = { "detail"?: string | null; "reason": string; "stale_instance"?: (StaleInstanceFrame) | (null); "version": number };
 export type StatusResponse = { "app_resources"?: (AppResources) | (null); "error"?: string | null; "last_launch_error"?: string | null; "last_launch_log"?: string | null; "message": string; "notices"?: ReadonlyArray<string>; "ollama_running": boolean; "success": boolean; "torch_running": boolean; "version": string };
 export type StatusTelemetrySnapshot = { "cursor": string; "library": LibraryStatusResponse; "model_library_loaded": boolean; "network": NetworkStatusResponse; "resources": SystemResources; "revision": number; "sampled_at": string; "source_state": string; "status": StatusResponse };
 export type StatusTelemetryUpdateNotification = { "cursor": string; "snapshot": StatusTelemetrySnapshot; "snapshot_required": boolean; "stale_cursor": boolean };
@@ -218,6 +225,7 @@ export type StopRuntimeProfileGenerationOutcome = { "stopped": boolean; "success
 export type StopRuntimeProfileGenerationParams = ({ "generation": string; "profile_id": string }) | ({ "generation": string; "profileId": string });
 export type SuccessOutcome = { "success": true };
 export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
+export type SurvivingProcessFrame = { "pid": number; "record": string };
 export type SwitchVersionOutcome = { "success": boolean };
 export type SwitchVersionParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
 export type SystemResources = { "cpu": CpuResources; "disk": DiskResources; "gpu": GpuResources; "ram": RamResources };
@@ -254,6 +262,7 @@ export type TorchVerifiedPackage = { "name": string; "version": string };
 export type TorchVerifiedRuntime = { "adapters": ReadonlyArray<string>; "build": string; "extras": ReadonlyArray<string>; "packages": ReadonlyArray<TorchVerifiedPackage>; "python": string; "scope": string; "sourceCommit": string; "tag": string; "verifiedOn": string };
 export type TrialTorchRuntimeOutcome = { "capabilities": ReadonlyArray<string>; "cleanup": TorchTrialCleanup; "error": string | null; "generation": string | null; "healthStatus": TorchTrialHealthStatus; "profileId": string; "protocol": number | null; "startedByTrial": boolean; "startupStatus": TorchTrialStartupStatus; "success": boolean; "tag": string };
 export type TrialTorchRuntimeParams = ({ "profile_id": string; "tag": string }) | ({ "profileId": string; "tag": string });
+export type UnavailableCatalogRecord = { "code"?: string | null; "model_id": string; "reason": string; "recovery"?: (CatalogRecordRecovery) | (null) };
 export type UpdateInferenceSettingsOutcome = { "model_id": string; "success": true };
 export type UpdateInferenceSettingsParams = ({ "model_id": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "modelId": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "modelId": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "modelId": string });
 export type UpdateModelNotesFailure = { "error": string; "model_id": string; "success": false };
@@ -290,6 +299,7 @@ export declare function decodeDownloadResolutionRequest(input: unknown): DecodeO
 export declare function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome>;
 export declare function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome>;
 export declare function decodeFindTorchAlternativesParams(input: unknown): DecodeOutcome<FindTorchAlternativesParams>;
+export declare function decodeFinishRetainedImportOutcome(input: unknown): DecodeOutcome<FinishRetainedImportOutcome>;
 export declare function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams>;
 export declare function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams>;
 export declare function decodeGetReleaseDependenciesOutcome(input: unknown): DecodeOutcome<GetReleaseDependenciesOutcome>;
@@ -365,6 +375,8 @@ export declare function decodeServingStatusUpdateFeed(input: unknown): DecodeOut
 export declare function decodeSetDefaultVersionOutcome(input: unknown): DecodeOutcome<SetDefaultVersionOutcome>;
 export declare function decodeSetDefaultVersionParams(input: unknown): DecodeOutcome<SetDefaultVersionParams>;
 export declare function decodeSetHfTokenParams(input: unknown): DecodeOutcome<SetHfTokenParams>;
+export declare function decodeStaleInstanceReleaseConfirmation(input: unknown): DecodeOutcome<StaleInstanceReleaseConfirmation>;
+export declare function decodeStaleInstanceReleaseResult(input: unknown): DecodeOutcome<StaleInstanceReleaseResult>;
 export declare function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<StartBackendSetupParams>;
 export declare function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams>;
 export declare function decodeStartupFailureFrame(input: unknown): DecodeOutcome<StartupFailureFrame>;

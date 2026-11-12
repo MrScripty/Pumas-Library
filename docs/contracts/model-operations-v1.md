@@ -138,8 +138,31 @@ text generation, and image-to-text if it declares image input.
 `decision` is offered only when llama.cpp reports the model as a native
 decision model (`decisions` output modality); such models offer no text
 generation. `rerank` is offered for models recorded as rerankers
-(`text-ranking`) served by llama.cpp; serving refuses a reranker GGUF without
-a ranking head (`cls.output.weight`). `audio_transcription` is offered for
+(`text-ranking`) served by llama.cpp, by ONNX Runtime (cross-encoder graphs
+with a single relevance logit) or by Torch; serving refuses a reranker GGUF
+without a ranking head (`cls.output.weight`). Torch serves text embedders and
+rerankers from local Safetensors packages when its runtime advertises the
+`text_embedding`/`rerank` capabilities (an install with Transformers and
+Jinja): what it computes comes from the model's recorded sentence-transformers
+declarations (causal `LogitScore` scoring under the declared template,
+sequence-classifier logits otherwise, declared pooling and normalization for
+embedders), and an architecture the installed Transformers does not know is
+refused at load with the runtime's reason. Torch applies the Dense and
+LayerNorm modules an embedder declares after pooling, from the weights in the
+model's package; a declared module it does not implement is refused at load
+with the reason. ONNX Runtime embeddings of such a model read the pooled
+`sentence_embedding` output the graph computes them into; a graph without one
+is refused. Torch and ONNX Runtime rerank scores are the model's logit under
+its declared activation (`Sigmoid` or `Identity`; raw logits when none is
+declared; another activation is refused at load). llama.cpp returns its
+ranking head's output whatever the declared activation: the raw logit of a
+classifier head, and for a derived head the value described below. Scores
+order documents the same way on every runtime but compare in value only
+within one runtime. A causal-LM reranker GGUF without a ranking head can
+be given a head by the `gguf_to_ranking_gguf` conversion
+([ADR 0006](../adr/0006-derived-ranking-heads.md)); its scores are
+`σ(ℓ_true − ℓ_false)` (or `σ(ℓ_true)` for a one-token contract), which orders
+documents as the model's reference scorer does. `audio_transcription` is offered for
 audio models served by Torch (Cohere ASR); see [Audio transcription](#audio-transcription).
 `audio_classification` is reserved and unavailable. Build/protocol identity is reported by
 `pumas-rpc --build-info`; these endpoints define no competing identity type.
@@ -185,6 +208,14 @@ window when the runtime reports one. Text options are optional positive
 accept optional positive `dimensions`; when the provider ignores it (llama.cpp,
 Ollama), Pumas keeps the leading values and renormalizes (Matryoshka
 truncation), and a request for more dimensions than the model produces fails.
+ONNX Runtime pools and normalizes embeddings as the model's recorded
+sentence-transformers declarations say (mean, CLS, last token or max; see
+[ADR 0007](../adr/0007-model-declarations.md)); a model with none recorded is
+mean-pooled and L2-normalized. A served ONNX model computes either embeddings
+or rerank scores, chosen from its record when it is served, and the other
+capability is unavailable. ONNX rerank scores are the cross-encoder's raw
+logits; its descriptor reports the document (`input_count`), character and
+per-pair token (`input_tokens`) limits.
 The in-process ONNX adapter has fixed batch, length and dimension limits,
 which its descriptor reports, plus the loaded model's own per-input token
 limit (`input_tokens`, including special tokens) when the model config declares

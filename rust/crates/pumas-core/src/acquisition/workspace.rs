@@ -19,11 +19,54 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 /// Equality-only workspace locator. It conveys no filesystem permission.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// `root_identity` names the root by its volume and file number. The volume
+/// is the reboot-stable one ([`crate::model_library::stable_volume`]); a
+/// locator persisted with a raw device number is translated when read, the
+/// way a fresh observation of that device would be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkspaceIdentity {
     pub root_identity: String,
     pub relative_target: String,
+}
+
+impl<'de> Deserialize<'de> for WorkspaceIdentity {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Recorded {
+            root_identity: String,
+            relative_target: String,
+        }
+        let recorded = Recorded::deserialize(deserializer)?;
+        Ok(Self {
+            root_identity: stable_root_locator(recorded.root_identity),
+            relative_target: recorded.relative_target,
+        })
+    }
+}
+
+fn root_locator(binding: Identity) -> String {
+    format!("{:x}:{:x}", binding.0, binding.1)
+}
+
+/// A `<volume>:<file>` locator with a raw device number, translated to the
+/// stable volume. Other locators (fixtures, `uuid:` roots) are unchanged.
+fn stable_root_locator(locator: String) -> String {
+    #[cfg(unix)]
+    if let Some((volume, file)) = locator.split_once(':') {
+        if let (Ok(volume), Ok(file)) = (
+            u64::from_str_radix(volume, 16),
+            u64::from_str_radix(file, 16),
+        ) {
+            if locator == root_locator(Identity(volume, file)) {
+                return root_locator(Identity(crate::model_library::stable_volume(volume), file));
+            }
+        }
+    }
+    locator
 }
 
 /// Bounded verification receipt tied to a held regular file.
@@ -35,14 +78,31 @@ pub struct VerifiedFile {
     pub sha256: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// A directory or file's (volume, file number). On Unix the volume is the
+/// reboot-stable one, because bindings are persisted; one persisted with a
+/// raw device number is translated when read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 struct Identity(u64, u64);
+
+impl<'de> Deserialize<'de> for Identity {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let (volume, file) = <(u64, u64)>::deserialize(deserializer)?;
+        #[cfg(unix)]
+        let volume = crate::model_library::stable_volume(volume);
+        Ok(Self(volume, file))
+    }
+}
 
 fn identity(metadata: &Metadata) -> Result<Identity> {
     #[cfg(unix)]
     {
         use cap_std::fs::MetadataExt;
-        Ok(Identity(metadata.dev(), metadata.ino()))
+        Ok(Identity(
+            crate::model_library::stable_volume(metadata.dev()),
+            metadata.ino(),
+        ))
     }
     #[cfg(windows)]
     {
@@ -213,7 +273,7 @@ impl ReservedDirectory {
                 components: bindings,
             },
             locator: WorkspaceIdentity {
-                root_identity: format!("{:x}:{:x}", root_binding.0, root_binding.1),
+                root_identity: root_locator(root_binding),
                 relative_target: relative,
             },
             validate_owner: Box::new(validate_owner),
@@ -410,7 +470,7 @@ impl AcquisitionWorkspace {
         let root_directory = open_pinned_directory(root)?;
         let root_binding = identity(&root_directory.dir_metadata()?)?;
         Ok(WorkspaceIdentity {
-            root_identity: format!("{:x}:{:x}", root_binding.0, root_binding.1),
+            root_identity: root_locator(root_binding),
             relative_target: relative,
         })
     }
@@ -977,6 +1037,50 @@ pub(crate) fn write_chunk(file: &mut std::fs::File, bytes: &[u8]) -> Result<()> 
 mod tests {
     use super::*;
     use crate::acquisition::FileVerificationRequirement;
+
+    #[cfg(unix)]
+    #[test]
+    fn persisted_root_identities_use_the_stable_volume_and_translate_raw_devices() {
+        use std::os::unix::fs::MetadataExt;
+        let root = tempfile::tempdir().unwrap();
+        let raw = std::fs::metadata(root.path()).unwrap();
+        let stable = crate::model_library::stable_volume(raw.dev());
+        let current =
+            AcquisitionWorkspace::identity_for_reserved_directory(root.path(), Path::new("work"))
+                .unwrap();
+        assert_eq!(
+            current.root_identity,
+            format!("{:x}:{:x}", stable, raw.ino())
+        );
+
+        // A locator persisted before stable volumes held the raw device.
+        let persisted = serde_json::json!({
+            "root_identity": format!("{:x}:{:x}", raw.dev(), raw.ino()),
+            "relative_target": "work",
+        });
+        let read: WorkspaceIdentity = serde_json::from_value(persisted).unwrap();
+        assert_eq!(read, current);
+        // Other locators are read as written; unknown fields stay refused.
+        let fixture: WorkspaceIdentity = serde_json::from_value(
+            serde_json::json!({"root_identity": "fixture.root", "relative_target": "x"}),
+        )
+        .unwrap();
+        assert_eq!(fixture.root_identity, "fixture.root");
+        assert!(
+            serde_json::from_value::<WorkspaceIdentity>(serde_json::json!({
+                "root_identity": "a", "relative_target": "b", "extra": 1
+            }))
+            .is_err()
+        );
+
+        // Reserved bindings persisted with raw devices still match the root.
+        let binding: ReservedDirectoryBinding = serde_json::from_value(serde_json::json!({
+            "root": [raw.dev(), raw.ino()],
+            "components": [],
+        }))
+        .unwrap();
+        assert!(binding.matches_root(root.path()).unwrap());
+    }
 
     fn verification_manifest(payload: &[u8]) -> ArtifactManifest {
         use crate::acquisition::{

@@ -1905,6 +1905,7 @@ impl PreparedDownloadTask {
                         persistence.clone(),
                         self.download_id.clone(),
                         DownloadStatus::Error,
+                        result.as_ref().err().map(download_failure_message),
                         admission_attempt,
                     )
                     .await,
@@ -1984,16 +1985,7 @@ impl PreparedDownloadTask {
                 )
                 .map(|state| {
                     state.status = DownloadStatus::Error;
-                    state.error = Some(match error {
-                        PumasError::Validation { field, .. }
-                            if field == "artifact.http.resume"
-                                || field == "artifact.http.response" =>
-                        {
-                            crate::models::ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE
-                                .into()
-                        }
-                        _ => error.to_string(),
-                    });
+                    state.error = Some(download_failure_message(error));
                     state.task_registered = false;
                     if !persist_error_ok || nested_failures > 0 {
                         state.lifecycle_failure_unverified = true;
@@ -2717,7 +2709,7 @@ fn progress_from_state(state: &DownloadState) -> ModelDownloadProgress {
         retry_limit: state.retry_limit,
         retrying: Some(state.retrying),
         next_retry_delay_seconds: state.next_retry_delay_seconds,
-        error: state.error.clone(),
+        error: state.displayed_error(),
     }
 }
 
@@ -2856,6 +2848,18 @@ pub(super) async fn project_download_shutdown(
     // projector effects have drained. Durable recovery truth remains untouched.
     publications.publish().await;
     Ok(())
+}
+
+/// The caller-facing reason for a download that ended in error.
+fn download_failure_message(error: &PumasError) -> String {
+    match error {
+        PumasError::Validation { field, .. }
+            if field == "artifact.http.resume" || field == "artifact.http.response" =>
+        {
+            crate::models::ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE.into()
+        }
+        _ => error.to_string(),
+    }
 }
 
 impl HuggingFaceClient {
@@ -4199,6 +4203,7 @@ impl HuggingFaceClient {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: known_sha256.clone(),
                 huggingface_evidence: huggingface_evidence.clone(),
+                error: None,
             });
             let marker_contents = serialize_download_marker(
                 request,
@@ -4267,6 +4272,7 @@ impl HuggingFaceClient {
                 download_request: Some(request.clone()),
                 known_sha256: known_sha256.clone(),
                 huggingface_evidence,
+                restored_failure: None,
             };
             let owner = self.download_tasks.clone();
             let states = self.downloads.clone();
@@ -5547,12 +5553,18 @@ impl HuggingFaceClient {
         persistence: Arc<DownloadPersistence>,
         download_id: String,
         status: DownloadStatus,
+        failure_reason: Option<String>,
         admission_attempt: Option<String>,
     ) -> Result<bool> {
         match task_context
             .run_fallible_blocking_named("persist download status", move || {
                 if let Some(attempt) = admission_attempt {
-                    persistence.update_admitted_status(&download_id, &attempt, status)
+                    match failure_reason {
+                        Some(reason) => {
+                            persistence.record_admitted_failure(&download_id, &attempt, &reason)
+                        }
+                        None => persistence.update_admitted_status(&download_id, &attempt, status),
+                    }
                 } else {
                     Err(PumasError::Config {
                         message: "Ordinary status persistence requires durable admission".into(),
@@ -6549,6 +6561,7 @@ impl HuggingFaceClient {
                             download_request: Some(request),
                             known_sha256,
                             huggingface_evidence: None,
+                            restored_failure: None,
                         },
                     );
                     Some(installed)
@@ -7571,6 +7584,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             },
             &root,
         );
@@ -8241,6 +8255,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             },
             temp.path(),
         );
@@ -9064,6 +9079,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: Some("a".repeat(64)),
                 huggingface_evidence: None,
+                error: None,
             },
             domain: DownloadAdmissionDomain::Ambient,
             destination: client
@@ -9548,6 +9564,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             };
             let attempt = admit_snapshot_at_root(persistence, &snapshot, temp.path());
             let before = std::fs::read(temp.path().join("downloads.json")).unwrap();
@@ -10170,6 +10187,7 @@ mod tests {
             download_request: Some(recovery_test_request(&verified.repo_id, &verified.files)),
             known_sha256: None,
             huggingface_evidence: None,
+            restored_failure: None,
         }
     }
 
@@ -10242,6 +10260,7 @@ mod tests {
             created_at: "2026-09-03T00:00:00Z".to_string(),
             known_sha256: state.known_sha256.clone(),
             huggingface_evidence: None,
+            error: None,
         }
     }
 
@@ -13193,6 +13212,7 @@ mod tests {
             created_at: "2021-02-03T04:05:06Z".into(),
             known_sha256: Some("b".repeat(64)),
             huggingface_evidence: None,
+            error: None,
         };
         admit_snapshot_fixture(&persistence, &original, &verified.destination);
         let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
@@ -14289,6 +14309,7 @@ mod tests {
             created_at: chrono::Utc::now().to_rfc3339(),
             known_sha256: Some(SHA256.into()),
             huggingface_evidence: None,
+            error: None,
         };
         let attempt = admit_snapshot_at_root(&persistence, &snapshot, &library_root);
         std::fs::write(
@@ -14549,6 +14570,7 @@ mod tests {
             created_at: chrono::Utc::now().to_rfc3339(),
             known_sha256: Some(SHA256.into()),
             huggingface_evidence: None,
+            error: None,
         };
         let attempt = admit_snapshot_at_root(&persistence, &snapshot, &library_root);
         std::fs::write(
@@ -20467,6 +20489,7 @@ mod tests {
                 download_request: Some(request),
                 known_sha256: None,
                 huggingface_evidence: None,
+                restored_failure: None,
             },
         );
 
@@ -20554,6 +20577,7 @@ mod tests {
                 download_request: Some(unrelated_request),
                 known_sha256: None,
                 huggingface_evidence: None,
+                restored_failure: None,
             },
         );
         assert!(matches!(
@@ -20590,6 +20614,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             },
             root,
         );
@@ -21257,6 +21282,7 @@ mod tests {
             created_at: "2026-09-03T00:00:00Z".into(),
             known_sha256: None,
             huggingface_evidence: None,
+            error: None,
         };
         let mut follower = head.clone();
         follower.download_id = "verified-cleanup-follower".into();
@@ -21571,6 +21597,7 @@ mod tests {
                     download_request: Some(request),
                     known_sha256: None,
                     huggingface_evidence: None,
+                    restored_failure: None,
                 },
             );
         }
@@ -21658,6 +21685,7 @@ mod tests {
                     download_request: Some(request),
                     known_sha256: None,
                     huggingface_evidence: None,
+                    restored_failure: None,
                 },
             );
         }
@@ -21742,6 +21770,7 @@ mod tests {
                     download_request: Some(request),
                     known_sha256: None,
                     huggingface_evidence: None,
+                    restored_failure: None,
                 },
             );
         }
@@ -21802,6 +21831,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             },
             tmp.path(),
         );
@@ -21850,6 +21880,7 @@ mod tests {
                     download_request: Some(request),
                     known_sha256: None,
                     huggingface_evidence: None,
+                    restored_failure: None,
                 },
             );
         }
@@ -22141,6 +22172,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             },
             tmp.path(),
         );
@@ -22204,6 +22236,7 @@ mod tests {
                     "a4c3ed04a95a3da14a9d235c83d868bed7c0f45cf7f3faa751ee8f50598d2211".to_string(),
                 ),
                 huggingface_evidence: None,
+                error: None,
             },
             tmp.path(),
         );
@@ -22395,6 +22428,7 @@ mod tests {
                     created_at: chrono::Utc::now().to_rfc3339(),
                     known_sha256: None,
                     huggingface_evidence: None,
+                    error: None,
                 },
                 temp.path(),
             );
@@ -22492,6 +22526,7 @@ mod tests {
                     download_request: None,
                     known_sha256: None,
                     huggingface_evidence: None,
+                    restored_failure: None,
                 },
             );
         }

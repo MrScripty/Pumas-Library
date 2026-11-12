@@ -55,6 +55,11 @@ pub struct PersistedDownload {
     /// Normalized HuggingFace evidence captured during download preflight.
     #[serde(default)]
     pub huggingface_evidence: Option<HuggingFaceEvidence>,
+    /// Why the download failed, recorded with an `error` status so the reason
+    /// outlives the process. Absent for other statuses and in records written
+    /// before reasons were persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 fn deserialize_required_revision<'de, D>(
@@ -2145,6 +2150,31 @@ impl DownloadPersistence {
         attempt_id: &str,
         status: DownloadStatus,
     ) -> Result<bool> {
+        self.update_admitted(download_id, attempt_id, status, None)
+    }
+
+    /// Record this owner's admitted download as failed, with its reason.
+    pub(crate) fn record_admitted_failure(
+        &self,
+        download_id: &str,
+        attempt_id: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        self.update_admitted(
+            download_id,
+            attempt_id,
+            DownloadStatus::Error,
+            Some(reason.to_string()),
+        )
+    }
+
+    fn update_admitted(
+        &self,
+        download_id: &str,
+        attempt_id: &str,
+        status: DownloadStatus,
+        error: Option<String>,
+    ) -> Result<bool> {
         if matches!(
             status,
             DownloadStatus::Cancelling | DownloadStatus::Completed | DownloadStatus::Cancelled
@@ -2174,6 +2204,9 @@ impl DownloadPersistence {
             return Ok(false);
         };
         entry.status = status;
+        // A reason belongs to the failure it describes; any other status
+        // (a resume, a pause) clears it.
+        entry.error = error;
         self.write_data(&transaction, &mut data)?;
         Ok(true)
     }
@@ -3751,6 +3784,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
             huggingface_evidence: None,
+            error: None,
         };
 
         store.revoke("dl-revoked").unwrap();
@@ -3788,6 +3822,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
             huggingface_evidence: None,
+            error: None,
         };
         store.admit_test_download(&entry).unwrap();
         assert_eq!(store.load_all().len(), 1);
@@ -3807,6 +3842,7 @@ mod tests {
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
             huggingface_evidence: None,
+            error: None,
         }
     }
 
@@ -5420,6 +5456,40 @@ mod tests {
             );
             assert_eq!(std::fs::read(&store.path).unwrap(), bytes);
         }
+    }
+
+    #[test]
+    fn a_failure_reason_outlives_the_process_until_another_status_replaces_it() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        let attempt = Uuid::new_v4().to_string();
+        store
+            .admit_download(&attempt, &admission_request("status"))
+            .unwrap();
+        assert!(store
+            .record_admitted_failure("status", &attempt, "HTTP continuation refused")
+            .unwrap());
+        let entry = &store.load_lifecycle_inventory_strict().unwrap().downloads[0];
+        assert_eq!(entry.status, DownloadStatus::Error);
+        assert_eq!(entry.error.as_deref(), Some("HTTP continuation refused"));
+        // Durable: the reason is in the store file itself.
+        let on_disk: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        assert_eq!(
+            on_disk["downloads"][0]["error"],
+            "HTTP continuation refused"
+        );
+        assert!(store
+            .update_admitted_status("status", &attempt, DownloadStatus::Queued)
+            .unwrap());
+        let entry = &store.load_lifecycle_inventory_strict().unwrap().downloads[0];
+        assert_eq!(entry.status, DownloadStatus::Queued);
+        assert_eq!(entry.error, None);
+        // Records written before reasons were persisted still load.
+        let mut legacy = serde_json::to_value(entry).unwrap();
+        legacy.as_object_mut().unwrap().remove("error");
+        let legacy: PersistedDownload = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.error, None);
     }
 
     #[test]

@@ -174,3 +174,31 @@ remains pending the reference safetensors and a served session.
 - **Network outage (2026-11-11/12).** DNS failed for download-r2.pytorch.org
   and the Torch v2.15.0 install stopped at 415/540 MB ("incomplete-download");
   it was restarted. Model downloads continued.
+- **Torch v2.15.0 (2026-11-12): installed, active and default.** It ships
+  Transformers 5.22.2 and torch 2.15.0+cu134.
+  - **Prism-0.8B, served:** card pairs give 0.867 and 0.294. Sentence-
+    transformers in the same runtime gives identical values (parity script:
+    difference 0.0), and fp32 gives 0.874 and 0.309. The card's 0.98/0.01
+    comes from its CrossEncoder example, which loads
+    `infgrad/Prism-Qwen3.5-Reranker-4B`, the 4B sibling. Pumas matches the
+    reference library for the 0.8B. Batching moves the first pair slightly
+    (0.881 alone vs 0.867 batched): Qwen3.5 linear attention runs on the
+    reference implementation without causal_conv1d or flash-linear-attention.
+    That matches sentence-transformers' batched output.
+  - **Qwen3-Reranker-0.6B, served:** within bf16 of sentence-transformers
+    (8.69 vs 8.75 …), same order on every pair.
+  - **bge-reranker-v2-m3 (loader parity in v2.15.0):** identical to
+    sentence-transformers CrossEncoder (difference 0.0). harrier-270m:
+    cosine 1.001 against SentenceTransformer, because bf16 normalization
+    leaves norms slightly off 1. Serving both was blocked by the sidecar's
+    128-character model-name limit, fixed in `99a1f4ba`; the installed v2.15.0
+    still carries the old sidecar copy until a new Torch install.
+  - **Declarations, found live and fixed in `d5969a20`:** named
+    `pooling_mode` (EmbeddingGemma 2, Qwen3-VL-Embedding), and lineage search
+    past a partial package (local Qwen3-Embedding-0.6B).
+  - **ONNX model IDs** were also capped at 128 bytes (harrier and bge ONNX);
+    fixed in `b14bcc6f`.
+- **Disk:** the library drive reached 0 bytes free from build output. My
+  worktree's target was 79 GB, 52 GB of it incremental cache, which I removed.
+  The main checkout's `rust/target` is 317 GB and `worktrees/integration` is
+  48 GB; neither is mine.

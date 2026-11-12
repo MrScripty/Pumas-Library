@@ -212,6 +212,15 @@ the 2026-11-02 audit
 
 ### Security
 
+- Third-party telemetry is disabled in every runtime and conversion process
+  Pumas starts (`HF_HUB_DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`, which cover
+  huggingface_hub, Transformers, Diffusers and sentence-transformers, and
+  `ORT_DISABLE_TELEMETRY=1` for ONNX Runtime), even when the user's
+  environment enables it.
+- Runtime and conversion processes run with `HF_HUB_OFFLINE=1`, so Hugging
+  Face libraries read only the files Pumas downloaded into the library and
+  never fetch missing ones into their own cache. The Sherry conversion script
+  now also loads with `local_files_only=True` and without remote code.
 - The desktop keeps every renderer on the bundled app: child windows,
   off-app navigation, webviews and browser permissions are denied, links open
   in the system browser, and every IPC handler checks its sender. Packaged

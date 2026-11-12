@@ -70,7 +70,16 @@ pub(super) async fn launch_runtime_profile_with_receipt(
         });
     }
 
-    let config = runtime_profile_binary_launch_config(tag, version_dir, &spec)?;
+    let launcher_root = primary.runtime_profile_service.launcher_root();
+    if matches!(
+        spec.launch_strategy,
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe)
+    ) {
+        // The runtime supplies the interpreter; the sidecar is this Pumas's.
+        // A runtime whose packages cannot run it is refused with the reasons.
+        crate::runtime_profiles::prepare_torch_sidecar(launcher_root, version_dir).await?;
+    }
+    let config = runtime_profile_binary_launch_config(tag, version_dir, launcher_root, &spec)?;
     primary
         .runtime_profile_service
         .process_owner
@@ -124,11 +133,16 @@ async fn launch_in_process_runtime_profile(
 fn runtime_profile_binary_launch_config(
     tag: &str,
     version_dir: &Path,
+    launcher_root: &Path,
     launch_spec: &RuntimeProfileLaunchSpec,
 ) -> std::result::Result<BinaryLaunchConfig, PumasError> {
     let config = match launch_spec.launch_strategy {
         RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
-            BinaryLaunchConfig::torch(tag, version_dir)
+            BinaryLaunchConfig::torch(
+                tag,
+                version_dir,
+                crate::runtime_profiles::torch_sidecar_entry(launcher_root),
+            )
         }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe,

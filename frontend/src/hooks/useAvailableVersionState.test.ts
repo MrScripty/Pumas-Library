@@ -234,4 +234,65 @@ describe('useAvailableVersionState', () => {
     });
     expect(getAvailableVersionsMock).toHaveBeenCalledTimes(1);
   });
+
+  it('asks again while the backend reports builds it is still checking', async () => {
+    const cudaRelease = {
+      tagName: 'v1.31.1+cuda13',
+      name: 'v1.31.1',
+      publishedAt: '2026-10-01T00:00:00Z',
+      prerelease: false,
+      body: null,
+      htmlUrl: 'https://github.com/microsoft/onnxruntime/releases/tag/v1.31.1',
+      totalSize: null,
+      archiveSize: null,
+      dependenciesSize: null,
+      installing: null,
+      assets: [],
+      unavailableReason: null,
+    };
+    getAvailableVersionsMock
+      .mockResolvedValueOnce({
+        success: true,
+        availability_pending: true,
+        versions: [{ ...cudaRelease, installAvailability: 'checking' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        availability_pending: true,
+        versions: [{ ...cudaRelease, installAvailability: 'checking' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        availability_pending: false,
+        versions: [{ ...cudaRelease, installAvailability: 'available' }],
+      });
+    const { result } = renderHook(() => useAvailableVersionState({
+      isEnabled: true,
+      resolvedAppId: 'onnx-runtime',
+      trackAvailableVersions: false,
+    }));
+
+    await act(async () => {
+      await result.current.fetchAvailableVersions(false);
+    });
+    // No timer: each answer that is still pending asks again at once.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(getAvailableVersionsMock).toHaveBeenCalledTimes(3);
+    });
+    await vi.waitFor(() => {
+      expect(result.current.availableVersions).toEqual([
+        expect.objectContaining({ tagName: 'v1.31.1+cuda13', installAvailability: 'available' }),
+      ]);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(getAvailableVersionsMock).toHaveBeenCalledTimes(3);
+  });
 });

@@ -112,6 +112,8 @@ async fn release_server(root: &Path, archive: Vec<u8>) -> ReleaseServer {
         total_size: None,
         archive_size: None,
         dependencies_size: None,
+        unavailable_reason: None,
+        install_availability: None,
     };
     ReleasesCache::new(root.join("launcher-data/cache"), Duration::from_secs(3600))
         .set_disk(

@@ -200,6 +200,7 @@ impl BinaryLaunchConfig {
                 library.to_string_lossy().into_owned(),
             );
         }
+        env_vars.extend(onnx_host_library_search_path(&version_dir));
         Self {
             tag,
             pid_file: version_dir.join("onnx-host.pid"),
@@ -256,6 +257,26 @@ impl BinaryLaunchConfig {
         }
         self
     }
+}
+
+/// The library search path an ONNX host needs so ONNX Runtime's CUDA
+/// execution provider finds the CUDA runtime and cuDNN libraries Pumas
+/// installed with the version. The loader reads it when the host starts, and
+/// the provider loads those libraries by name. On Windows the inherited `PATH`
+/// follows the library directory; on Linux the inherited `LD_LIBRARY_PATH` is
+/// never passed to owned children, so the path is that directory alone.
+#[cfg(feature = "onnx-runtime")]
+fn onnx_host_library_search_path(version_dir: &Path) -> Option<(String, String)> {
+    let directory = crate::onnx_runtime_distribution::installed_cuda_library_dir(version_dir)?;
+    let (variable, separator) = crate::onnx_runtime_distribution::library_search_path_variable()?;
+    let mut value = directory.to_string_lossy().into_owned();
+    if variable == "PATH" {
+        if let Some(inherited) = std::env::var_os("PATH").filter(|value| !value.is_empty()) {
+            value.push(separator);
+            value.push_str(&inherited.to_string_lossy());
+        }
+    }
+    Some((variable.to_string(), value))
 }
 
 fn executable_name(name: &str) -> String {

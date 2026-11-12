@@ -35,6 +35,9 @@ export function useAvailableVersionState({
   const fetchAvailableVersionsRef = useRef<(forceRefresh?: boolean) => Promise<void>>(
     () => Promise.resolve()
   );
+  // Listing requests in flight. A listing that reports builds still being
+  // checked asks again only when no other request is already on its way.
+  const listingsInFlightRef = useRef(0);
 
   useEffect(() => {
     setAvailableVersions([]);
@@ -55,6 +58,7 @@ export function useAvailableVersionState({
       return;
     }
 
+    listingsInFlightRef.current += 1;
     try {
       logger.debug('Fetching available versions', { forceRefresh });
       // Read before listing: an expired cache here means the listing may be
@@ -76,6 +80,14 @@ export function useAvailableVersionState({
         setIsRateLimited(false);
         setRateLimitRetryAfter(null);
         logger.debug('Set available versions', { count: mapped.length });
+
+        // The backend says some builds are still being checked: ask again.
+        // The backend paces this, since a listing waits for running checks.
+        if (result.availability_pending && listingsInFlightRef.current === 1) {
+          void fetchAvailableVersionsRef.current(false).catch(() => {
+            // fetchAvailableVersions logs its own failures.
+          });
+        }
 
         if (forceRefresh) {
           if (followupRefreshRef.current) {
@@ -104,6 +116,8 @@ export function useAvailableVersionState({
       }
       logger.error('Unknown error fetching available versions', { error });
       throw new APIError(String(error), 'get_available_versions');
+    } finally {
+      listingsInFlightRef.current -= 1;
     }
   }, [isCurrentApp, isEnabled, resolvedAppId]);
 

@@ -9,6 +9,9 @@
 //! a profile's device mode selects, and where the library sits inside an
 //! installed version.
 //!
+//! A CUDA build's NVIDIA CUDA runtime and cuDNN libraries are installed with
+//! it under [`CUDA_LIBRARY_DIR`]; the NVIDIA driver stays the host system's.
+//!
 //! Compatibility is derived, not pinned: any stable `1.x` release with
 //! `x >= C_API_VERSION` exports the C API Pumas requests, because ONNX Runtime
 //! keeps older API versions available in newer releases. A release that was
@@ -187,6 +190,45 @@ pub const fn library_relative_path() -> &'static str {
         "lib/libonnxruntime.dylib"
     } else {
         "lib/libonnxruntime.so"
+    }
+}
+
+/// The directory, relative to an installed CUDA version, that holds the
+/// NVIDIA CUDA runtime and cuDNN shared libraries Pumas installs with it. The
+/// ONNX host's library search path points here.
+pub const CUDA_LIBRARY_DIR: &str = "cuda/lib";
+
+/// The record, relative to an installed CUDA version, of the NVIDIA packages
+/// and library digests that filled [`CUDA_LIBRARY_DIR`].
+pub const CUDA_LIBRARIES_RECORD: &str = "cuda/libraries.json";
+
+/// `relative` (one of the `/`-separated paths above) under `root`, joined
+/// component by component so it uses the platform's separator.
+pub fn join_relative(root: &std::path::Path, relative: &str) -> std::path::PathBuf {
+    relative
+        .split('/')
+        .fold(root.to_path_buf(), |path, component| path.join(component))
+}
+
+/// The CUDA library directory Pumas installed with the version at
+/// `version_dir`, if it has one.
+pub fn installed_cuda_library_dir(version_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let directory = join_relative(version_dir, CUDA_LIBRARY_DIR);
+    let installed = std::fs::symlink_metadata(&directory)
+        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        && join_relative(version_dir, CUDA_LIBRARIES_RECORD).is_file();
+    installed.then_some(directory)
+}
+
+/// The environment variable the platform's dynamic loader searches for the
+/// libraries a loaded library depends on, and the separator of its entries.
+pub const fn library_search_path_variable() -> Option<(&'static str, char)> {
+    if cfg!(target_os = "windows") {
+        Some(("PATH", ';'))
+    } else if cfg!(target_os = "linux") {
+        Some(("LD_LIBRARY_PATH", ':'))
+    } else {
+        None
     }
 }
 

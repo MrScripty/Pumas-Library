@@ -804,6 +804,8 @@ mod cross_process_recovery_tests {
             total_size: None,
             archive_size: None,
             dependencies_size: None,
+            unavailable_reason: None,
+            install_availability: None,
         };
         let (progress_tx, _progress_rx) = mpsc::channel(4);
         installer

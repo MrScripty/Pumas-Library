@@ -222,11 +222,9 @@ pub async fn launch_runtime_profile(
             "ready": false
         }));
     };
-    let _torch_lifecycle_lease = if app_id == "torch" {
-        Some(version_manager.torch_lifecycle_lease().await?)
-    } else {
-        None
-    };
+    // Held until the new process records its PID, so its version cannot be
+    // removed between resolution and launch.
+    let _lifecycle_lease = version_manager.lifecycle_lease().await;
     let (tag, version_dir) = match super::resolve_profile_runtime_version(
         state,
         &version_manager,

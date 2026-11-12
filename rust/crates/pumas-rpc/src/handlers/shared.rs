@@ -321,6 +321,31 @@ pub(crate) async fn resolve_profile_runtime_version(
     Ok(Ok((tag, version_dir)))
 }
 
+/// The version a profile's running (or starting) instance was launched from.
+/// A running instance keeps it whatever the profile now pins.
+#[cfg(feature = "inference-plugins")]
+pub(crate) async fn running_profile_runtime_version(
+    state: &AppState,
+    profile_id: &pumas_library::models::RuntimeProfileId,
+) -> pumas_library::Result<Option<String>> {
+    use pumas_library::models::RuntimeLifecycleState;
+    Ok(state
+        .api
+        .get_runtime_profiles_snapshot()
+        .await?
+        .snapshot
+        .statuses
+        .into_iter()
+        .find(|status| {
+            &status.profile_id == profile_id
+                && matches!(
+                    status.state,
+                    RuntimeLifecycleState::Running | RuntimeLifecycleState::Starting
+                )
+        })
+        .and_then(|status| status.runtime_version))
+}
+
 pub(crate) async fn path_exists(path: &Path) -> pumas_library::Result<bool> {
     tokio::fs::try_exists(path)
         .await

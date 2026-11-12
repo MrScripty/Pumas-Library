@@ -86,8 +86,10 @@ pub(super) async fn serve_llama_cpp_model(
         }
     };
 
-    let (tag, version_dir) = match profile_llama_cpp_runtime(state, &request).await? {
-        Ok(resolved) => resolved,
+    // Each dedicated serve starts a new process; the runtime keeps the
+    // version manager's lease until that process records its PID.
+    let runtime = match profile_llama_cpp_runtime(state, &request).await? {
+        Ok(runtime) => runtime,
         Err(reason) => {
             return non_critical_failure_response(
                 state,
@@ -96,19 +98,20 @@ pub(super) async fn serve_llama_cpp_model(
             .await;
         }
     };
-    if let Some(error) = llama_cpp_runtime_support_error(&version_dir, &request) {
+    if let Some(error) = llama_cpp_runtime_support_error(&runtime.version_dir, &request) {
         return non_critical_failure_response(state, error).await;
     }
     let launch_response = state
         .api
         .launch_runtime_profile_for_model_with_receipt(
             request.config.profile_id.clone(),
-            &tag,
-            &version_dir,
+            &runtime.tag,
+            &runtime.version_dir,
             Some(&request.model_id),
             Some(llama_cpp_launch_overrides(&request)),
         )
         .await;
+    drop(runtime);
     let owned = match launch_response {
         Ok(receipt) if receipt.response.success => receipt.observation,
         Ok(receipt) => {

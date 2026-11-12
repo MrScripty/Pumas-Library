@@ -364,6 +364,14 @@ pub struct VersionManager {
 }
 
 impl VersionManager {
+    /// Hold this runtime's selection/removal lease while resolving a version
+    /// and starting a process from it, so a version cannot be removed between
+    /// the check and the moment the new process records its PID. Drop it after
+    /// startup admission or a failed attempt.
+    pub async fn lifecycle_lease(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.lifecycle_lock.clone().lock_owned().await
+    }
+
     /// Hold Torch's selection/removal lease while checking and starting a
     /// runtime. Drop it after startup admission or a failed attempt.
     pub async fn torch_lifecycle_lease(&self) -> Result<tokio::sync::OwnedMutexGuard<()>> {
@@ -6975,6 +6983,33 @@ mod tests {
         assert!(error.contains("runtime profile image-profile"), "{error}");
         assert!(error.contains("its version was not recorded"), "{error}");
         assert!(profile.join("runtime.pid").exists());
+    }
+
+    #[tokio::test]
+    async fn removal_waits_for_a_launch_holding_the_lifecycle_lease() {
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        // A launch holds the lease from version resolution until its process
+        // records a PID; removal must not run in between.
+        let lease = manager.lifecycle_lease().await;
+        let removal = tokio::spawn({
+            let manager = manager.clone();
+            async move { manager.remove_version("b1000+cpu").await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!removal.is_finished(), "removal ran during a launch");
+        drop(lease);
+        let error = tokio::time::timeout(Duration::from_secs(5), removal)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(error, PumasError::VersionNotFound { .. }),
+            "{error}"
+        );
     }
 
     #[tokio::test]

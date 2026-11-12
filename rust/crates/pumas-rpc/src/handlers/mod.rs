@@ -99,7 +99,7 @@ pub(crate) use shared::{
 #[cfg(feature = "inference-plugins")]
 pub(crate) use shared::{
     get_version_manager, read_utf8_file, require_version_manager, resolve_profile_runtime_version,
-    ProfileRuntimeVersionRefusal,
+    running_profile_runtime_version, ProfileRuntimeVersionRefusal,
 };
 
 // ============================================================================

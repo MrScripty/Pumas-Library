@@ -280,6 +280,7 @@ mod tests {
             source: DeclarationSource::Package,
             model_kind: SentenceTransformersKind::CrossEncoder,
             modules: Vec::new(),
+            module_details: Vec::new(),
             pooling: None,
             normalize: false,
             logit_score: logit,

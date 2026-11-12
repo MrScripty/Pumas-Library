@@ -24,6 +24,12 @@ pub struct SentenceTransformersDeclarations {
     pub model_kind: SentenceTransformersKind,
     /// Module types in pipeline order, as declared.
     pub modules: Vec<String>,
+    /// Each declared module, in pipeline order: its package directory and,
+    /// for modules computed from their own stored weights (Dense, LayerNorm),
+    /// their configuration. Records written before this field have none; a
+    /// runtime that needs it refuses until the declarations are resolved again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub module_details: Vec<DeclaredModule>,
     /// Embedding pooling, when the package declares a Pooling module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pooling: Option<Pooling>,
@@ -51,6 +57,68 @@ pub struct SentenceTransformersDeclarations {
     pub default_prompt_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_seq_length: Option<u32>,
+}
+
+impl SentenceTransformersDeclarations {
+    /// The record with every declared module detailed. A record written
+    /// before module details gets each module's role, without a directory or
+    /// configuration, so a runtime can still refuse what it cannot compute.
+    pub fn with_module_details(mut self) -> Self {
+        if self.module_details.is_empty() {
+            self.module_details = self
+                .modules
+                .iter()
+                .map(|module_type| DeclaredModule {
+                    module_type: module_type.clone(),
+                    role: module_role(module_type),
+                    path: String::new(),
+                    dense: None,
+                    layer_norm: None,
+                })
+                .collect();
+        }
+        self
+    }
+}
+
+/// One declared module and what a runtime needs to compute it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DeclaredModule {
+    /// The module type, as declared.
+    #[serde(rename = "type")]
+    pub module_type: String,
+    /// What the module computes, as Pumas classifies its type.
+    #[serde(default)]
+    pub role: ModuleRole,
+    /// Package-relative directory of the module; empty for the package root.
+    pub path: String,
+    /// A Dense module's layer, read from its `config.json`. Its weights stay
+    /// in the module directory of the model's package.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense: Option<DenseModule>,
+    /// A LayerNorm module's dimension, read from its `config.json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer_norm: Option<LayerNormModule>,
+}
+
+/// A sentence-transformers Dense module: `activation(x W^T + b)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DenseModule {
+    pub in_features: u32,
+    pub out_features: u32,
+    pub bias: bool,
+    /// The declared activation's class path, for example
+    /// `torch.nn.modules.linear.Identity`.
+    pub activation: String,
+}
+
+/// A sentence-transformers LayerNorm module over `dimension` features.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LayerNormModule {
+    pub dimension: u32,
 }
 
 /// Where declarations were read from.
@@ -106,6 +174,16 @@ const NORMALIZE: &[&str] = &[
     "sentence_transformers.models.Normalize",
     "sentence_transformers.sentence_transformer.modules.normalize.Normalize",
 ];
+const DENSE: &[&str] = &[
+    "sentence_transformers.models.Dense",
+    "sentence_transformers.sentence_transformer.modules.dense.Dense",
+];
+const LAYER_NORM: &[&str] = &[
+    "sentence_transformers.models.LayerNorm",
+    "sentence_transformers.sentence_transformer.modules.layer_norm.LayerNorm",
+];
+/// The activation sentence-transformers gives a Dense module that names none.
+const DENSE_DEFAULT_ACTIVATION: &str = "torch.nn.modules.activation.Tanh";
 const LOGIT_SCORE: &str = "sentence_transformers.cross_encoder.modules.logit_score.LogitScore";
 const POOLING_MODES: &[(&str, Pooling)] = &[
     ("pooling_mode_mean_tokens", Pooling::Mean),
@@ -115,6 +193,42 @@ const POOLING_MODES: &[(&str, Pooling)] = &[
     ("pooling_mode_weightedmean_tokens", Pooling::WeightedMean),
     ("pooling_mode_lasttoken", Pooling::LastToken),
 ];
+
+/// What a declared module computes, for a runtime deciding whether it can
+/// apply the declared pipeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModuleRole {
+    Transformer,
+    Pooling,
+    Dense,
+    LayerNorm,
+    Normalize,
+    LogitScore,
+    /// A module type no Pumas runtime implements.
+    #[default]
+    #[serde(other)]
+    Other,
+}
+
+/// The role of a declared module type.
+pub fn module_role(module_type: &str) -> ModuleRole {
+    if TRANSFORMER.contains(&module_type) {
+        ModuleRole::Transformer
+    } else if POOLING.contains(&module_type) {
+        ModuleRole::Pooling
+    } else if DENSE.contains(&module_type) {
+        ModuleRole::Dense
+    } else if LAYER_NORM.contains(&module_type) {
+        ModuleRole::LayerNorm
+    } else if NORMALIZE.contains(&module_type) {
+        ModuleRole::Normalize
+    } else if module_type == LOGIT_SCORE {
+        ModuleRole::LogitScore
+    } else {
+        ModuleRole::Other
+    }
+}
 
 fn unsupported(message: impl Into<String>) -> PumasError {
     PumasError::Validation {
@@ -138,6 +252,7 @@ pub fn read_package(
         .as_array()
         .ok_or_else(|| unsupported("modules.json must be a list of module records"))?;
     let mut types = Vec::with_capacity(records.len());
+    let mut details = Vec::with_capacity(records.len());
     let mut pooling = None;
     let mut normalize = false;
     let mut logit = None;
@@ -150,8 +265,19 @@ pub fn read_package(
             .get("path")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        let mut detail = DeclaredModule {
+            module_type: kind.to_string(),
+            role: module_role(kind),
+            path: path.to_string(),
+            dense: None,
+            layer_norm: None,
+        };
         if POOLING.contains(&kind) {
             pooling = Some(read_pooling(&read_json(dir, &module_file(path)?)?)?);
+        } else if DENSE.contains(&kind) {
+            detail.dense = Some(read_dense(&read_json(dir, &module_file(path)?)?)?);
+        } else if LAYER_NORM.contains(&kind) {
+            detail.layer_norm = Some(read_layer_norm(&read_json(dir, &module_file(path)?)?)?);
         } else if NORMALIZE.contains(&kind) {
             normalize = true;
         } else if kind == LOGIT_SCORE {
@@ -161,6 +287,7 @@ pub fn read_package(
             logit = Some(read_json(dir, &module_file(path)?)?);
         }
         types.push(kind.to_string());
+        details.push(detail);
     }
     if !types
         .first()
@@ -261,6 +388,7 @@ pub fn read_package(
         source,
         model_kind,
         modules: types,
+        module_details: details,
         pooling,
         normalize,
         logit_score,
@@ -274,14 +402,19 @@ pub fn read_package(
     })
 }
 
-/// `<path>/config.json` for a module directory of plain components.
-fn module_file(path: &str) -> Result<String> {
-    if path.is_empty()
-        || path.contains('\\')
-        || !Path::new(path)
+/// Whether `path` is a nonempty path of plain components, so it stays
+/// inside the package (or repository) it is joined to.
+pub(crate) fn is_package_relative(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\\')
+        && Path::new(path)
             .components()
             .all(|component| matches!(component, std::path::Component::Normal(_)))
-    {
+}
+
+/// `<path>/config.json` for a module directory of plain components.
+fn module_file(path: &str) -> Result<String> {
+    if !is_package_relative(path) {
         return Err(unsupported(format!(
             "module path {path:?} is not a package-relative directory"
         )));
@@ -337,6 +470,49 @@ fn read_pooling(config: &Value) -> Result<Pooling> {
             "the Pooling module combines several pooling modes",
         )),
     }
+}
+
+fn positive_u32(config: &Value, key: &str, module: &str) -> Result<u32> {
+    config
+        .get(key)
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| {
+            unsupported(format!(
+                "the {module} module's {key} is not a positive size"
+            ))
+        })
+}
+
+/// A Dense module's sizes, bias and activation.
+fn read_dense(config: &Value) -> Result<DenseModule> {
+    let bias = match config.get("bias") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(bias)) => *bias,
+        Some(_) => return Err(unsupported("the Dense module's bias is not a boolean")),
+    };
+    let activation = match config.get("activation_function") {
+        None | Some(Value::Null) => DENSE_DEFAULT_ACTIVATION.to_string(),
+        Some(Value::String(name)) if !name.trim().is_empty() => name.trim().to_string(),
+        Some(_) => {
+            return Err(unsupported(
+                "the Dense module's activation_function is not a class name",
+            ))
+        }
+    };
+    Ok(DenseModule {
+        in_features: positive_u32(config, "in_features", "Dense")?,
+        out_features: positive_u32(config, "out_features", "Dense")?,
+        bias,
+        activation,
+    })
+}
+
+fn read_layer_norm(config: &Value) -> Result<LayerNormModule> {
+    Ok(LayerNormModule {
+        dimension: positive_u32(config, "dimension", "LayerNorm")?,
+    })
 }
 
 fn read_logit_score(dir: &Path, config: &Value) -> Result<LogitScore> {
@@ -598,6 +774,104 @@ mod tests {
         );
         assert_eq!(declared.max_seq_length, Some(32768));
         assert_eq!(declared.modules.len(), 3);
+    }
+
+    #[test]
+    fn dense_and_layer_norm_modules_record_their_layers() {
+        // EmbeddingGemma: Transformer, Pooling, Dense, Dense, Normalize.
+        let dir = package(&[
+            (
+                "modules.json",
+                json!([
+                    {"idx":0,"path":"","type":"sentence_transformers.models.Transformer"},
+                    {"idx":1,"path":"1_Pooling","type":"sentence_transformers.models.Pooling"},
+                    {"idx":2,"path":"2_Dense","type":"sentence_transformers.models.Dense"},
+                    {"idx":3,"path":"3_Dense","type":"sentence_transformers.models.Dense"},
+                    {"idx":4,"path":"4_LayerNorm","type":"sentence_transformers.models.LayerNorm"},
+                    {"idx":5,"path":"5_Normalize","type":"sentence_transformers.models.Normalize"}
+                ]),
+            ),
+            ("1_Pooling/config.json", json!({"pooling_mode":"mean"})),
+            (
+                "2_Dense/config.json",
+                json!({"in_features":768,"out_features":3072,"bias":false,
+                       "activation_function":"torch.nn.modules.linear.Identity"}),
+            ),
+            (
+                "3_Dense/config.json",
+                json!({"in_features":3072,"out_features":768}),
+            ),
+            ("4_LayerNorm/config.json", json!({"dimension":768})),
+        ]);
+        let declared = read_package(dir.path(), DeclarationSource::Package).unwrap();
+        assert_eq!(declared.module_details.len(), 6);
+        assert_eq!(declared.module_details[0].path, "");
+        assert_eq!(
+            declared.module_details[2].dense,
+            Some(DenseModule {
+                in_features: 768,
+                out_features: 3072,
+                bias: false,
+                activation: "torch.nn.modules.linear.Identity".into()
+            })
+        );
+        // sentence-transformers defaults: bias on, Tanh.
+        assert_eq!(
+            declared.module_details[3].dense,
+            Some(DenseModule {
+                in_features: 3072,
+                out_features: 768,
+                bias: true,
+                activation: DENSE_DEFAULT_ACTIVATION.into()
+            })
+        );
+        assert_eq!(
+            declared.module_details[4].layer_norm,
+            Some(LayerNormModule { dimension: 768 })
+        );
+        assert_eq!(declared.module_details[5].module_type, NORMALIZE[0]);
+        let value = serde_json::to_value(&declared).unwrap();
+        assert_eq!(value["module_details"][2]["type"], json!(DENSE[0]));
+        assert_eq!(value["module_details"][2]["role"], json!("dense"));
+        assert_eq!(value["module_details"][4]["role"], json!("layer_norm"));
+        assert_eq!(
+            serde_json::from_value::<SentenceTransformersDeclarations>(value).unwrap(),
+            declared
+        );
+
+        let bad = package(&[
+            (
+                "modules.json",
+                json!([{"path":"","type":TRANSFORMER[0]},{"path":"1_Dense","type":DENSE[0]}]),
+            ),
+            (
+                "1_Dense/config.json",
+                json!({"in_features":0,"out_features":4}),
+            ),
+        ]);
+        assert!(
+            reason(read_package(bad.path(), DeclarationSource::Package).unwrap_err())
+                .contains("in_features is not a positive size")
+        );
+    }
+
+    #[test]
+    fn records_written_before_module_details_still_read() {
+        let dir = reranker(json!({"true_token_id":9454,"false_token_id":2753}));
+        let declared = read_package(dir.path(), DeclarationSource::Package).unwrap();
+        let mut value = serde_json::to_value(&declared).unwrap();
+        value.as_object_mut().unwrap().remove("module_details");
+        let old: SentenceTransformersDeclarations = serde_json::from_value(value).unwrap();
+        assert!(old.module_details.is_empty());
+        let detailed = old.with_module_details();
+        assert_eq!(
+            detailed
+                .module_details
+                .iter()
+                .map(|module| module.role)
+                .collect::<Vec<_>>(),
+            [ModuleRole::Transformer, ModuleRole::LogitScore]
+        );
     }
 
     fn reason(error: PumasError) -> String {

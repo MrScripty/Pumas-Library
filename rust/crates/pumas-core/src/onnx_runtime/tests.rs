@@ -724,6 +724,7 @@ mod task_and_rerank_requests {
             source: DeclarationSource::Package,
             model_kind: kind,
             modules: Vec::new(),
+            module_details: Vec::new(),
             pooling,
             normalize,
             logit_score: logit.then(|| LogitScore {

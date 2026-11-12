@@ -8,8 +8,12 @@ own module files, which exported or partial copies may lack:
   ``l_true - l_false`` (or ``l_true``) at the last position of the prompt its
   declared chat template renders for ``query``/``document`` messages;
 - any other reranker is a sequence classifier with one relevance logit;
-- an embedder pools (mean, CLS, last token, max) and normalizes as declared,
-  mean-pooled and L2-normalized when nothing is declared.
+- an embedder pools (mean, CLS, last token, max), applies the declared Dense
+  and LayerNorm modules in order from their stored weights, and normalizes as
+  declared; it is mean-pooled and L2-normalized when nothing is declared.
+
+Module roles come from Pumas (``module_details``); a module role this adapter
+does not implement is refused with the reason, never skipped.
 
 A declared activation (Sigmoid or Identity) is applied to scores; otherwise
 scores are raw logits. Models load from local files only, without repository
@@ -33,6 +37,20 @@ ACTIVATIONS = {
     "torch.nn.modules.activation.Sigmoid": "sigmoid",
 }
 TEMPLATE_OPTIONS = {"add_generation_prompt"}
+# Activations a Dense module may declare, by class path.
+DENSE_ACTIVATIONS = {
+    "torch.nn.modules.linear.Identity": "identity",
+    "torch.nn.modules.activation.Tanh": "tanh",
+    "torch.nn.modules.activation.Sigmoid": "sigmoid",
+    "torch.nn.modules.activation.ReLU": "relu",
+    "torch.nn.modules.activation.GELU": "gelu",
+}
+# Module roles each kind of encoder computes; others are refused.
+EMBEDDER_ROLES = ("transformer", "pooling", "dense", "layer_norm", "normalize")
+RERANKER_ROLES = ("transformer", "logit_score")
+# sentence-transformers saves module weights under these names.
+MODULE_WEIGHTS = "model.safetensors"
+LAYER_NORM_EPS = 1e-5
 # Pairs or texts run through the model together; bounds activation memory.
 BATCH_SIZE = 16
 
@@ -53,6 +71,18 @@ class Scoring:
 
 
 @dataclass(frozen=True)
+class Stage:
+    """A module applied to pooled embeddings, computed from its own weights."""
+
+    role: str  # "dense" or "layer_norm"
+    path: str
+    in_features: int
+    out_features: int
+    bias: bool = True
+    activation: str = "identity"
+
+
+@dataclass(frozen=True)
 class EncoderPlan:
     """What a loaded text encoder computes, decoded from the declarations."""
 
@@ -62,6 +92,7 @@ class EncoderPlan:
     activation: str = "identity"
     scoring: Optional[Scoring] = None
     max_tokens: Optional[int] = None
+    stages: tuple = ()
 
 
 def _refuse(message: str):
@@ -74,6 +105,103 @@ def _token_id(value: Any, field: str) -> int:
     if type(value) is not int or value < 0:
         raise _refuse(f"declared {field} is not a token id")
     return value
+
+
+def _positive(value: Any, what: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise _refuse(f"declared {what} is not a positive size")
+    return value
+
+
+def _module_path(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise _refuse("a declared module has no package directory; resolve its declarations again")
+    parts = value.split("/")
+    if "\\" in value or any(part in ("", ".", "..") for part in parts):
+        raise _refuse(f"declared module directory {value!r} is not package-relative")
+    return value
+
+
+def _stage(module: dict) -> Stage:
+    role = module.get("role")
+    path = module.get("path")
+    if role == "dense":
+        dense = module.get("dense")
+        if not isinstance(dense, dict):
+            raise _refuse(
+                "the declared Dense module has no recorded layer; resolve the model's "
+                "declarations again"
+            )
+        activation = dense.get("activation")
+        if activation not in DENSE_ACTIVATIONS:
+            raise _refuse(
+                f"the declared Dense activation {activation} is not implemented by the "
+                "Torch adapter"
+            )
+        if type(dense.get("bias")) is not bool:
+            raise _refuse("declared Dense bias must be a boolean")
+        return Stage(
+            role="dense",
+            path=_module_path(path),
+            in_features=_positive(dense.get("in_features"), "Dense in_features"),
+            out_features=_positive(dense.get("out_features"), "Dense out_features"),
+            bias=dense["bias"],
+            activation=DENSE_ACTIVATIONS[activation],
+        )
+    layer_norm = module.get("layer_norm")
+    if not isinstance(layer_norm, dict):
+        raise _refuse(
+            "the declared LayerNorm module has no recorded dimension; resolve the model's "
+            "declarations again"
+        )
+    dimension = _positive(layer_norm.get("dimension"), "LayerNorm dimension")
+    return Stage(
+        role="layer_norm",
+        path=_module_path(path),
+        in_features=dimension,
+        out_features=dimension,
+    )
+
+
+def _pipeline(declared: dict, allowed: tuple) -> tuple:
+    """The declared modules in order, refusing roles this kind cannot compute.
+
+    For embedders, Dense and LayerNorm follow Pooling and precede Normalize,
+    which comes last; any other order is refused.
+    """
+    modules = declared.get("module_details")
+    if modules is None:
+        modules = []
+    if not isinstance(modules, list) or not all(isinstance(m, dict) for m in modules):
+        raise _refuse("declared module_details must be a list of modules")
+    stages = []
+    seen = []
+    for module in modules:
+        role = module.get("role")
+        if role not in allowed:
+            raise _refuse(
+                f"the model declares a {module.get('type')} module, which the Torch adapter "
+                "does not implement"
+            )
+        if role in ("dense", "layer_norm"):
+            if "pooling" not in seen or "normalize" in seen:
+                raise _refuse(
+                    f"the declared {module.get('type')} module must follow Pooling and "
+                    "precede Normalize"
+                )
+            stages.append(_stage(module))
+        elif role == "transformer" and seen:
+            raise _refuse("the declared Transformer module must come first")
+        elif role == "pooling" and "pooling" in seen:
+            raise _refuse("more than one Pooling module is declared")
+        seen.append(role)
+    for before, after in zip(stages, stages[1:]):
+        if after.in_features != before.out_features:
+            raise _refuse(
+                f"declared module {after.path} takes {after.in_features} features but "
+                f"{before.path} produces {before.out_features}"
+            )
+    return tuple(stages)
 
 
 def plan_for(model_type: str, declarations: Optional[dict]) -> EncoderPlan:
@@ -90,6 +218,7 @@ def plan_for(model_type: str, declarations: Optional[dict]) -> EncoderPlan:
     if max_tokens is not None and (type(max_tokens) is not int or max_tokens <= 0):
         raise _refuse("declared max_seq_length is invalid")
     if model_type == TEXT_RERANK:
+        _pipeline(declared, RERANKER_ROLES)
         scoring = None
         logit = declared.get("logit_score")
         if logit is not None:
@@ -133,6 +262,7 @@ def plan_for(model_type: str, declarations: Optional[dict]) -> EncoderPlan:
         pooling=pooling or "mean",
         normalize=normalize,
         max_tokens=max_tokens,
+        stages=_pipeline(declared, EMBEDDER_ROLES),
     )
 
 
@@ -142,6 +272,78 @@ class TextEncoder:
     model: Any
     tokenizer: Any
     device: Any
+    # Loaded stage weights, parallel to ``plan.stages``.
+    stage_weights: tuple = ()
+
+
+def load_stage_weights(package: Path, stages: tuple, hidden_size: Optional[int]) -> tuple:
+    """Each stage's tensors from ``<package>/<module>/model.safetensors``.
+
+    Only Safetensors are read (never pickled weights), from directories
+    inside the package; shapes must match the declared layer.
+    """
+    if not stages:
+        return ()
+    from safetensors.torch import load_file
+
+    if hidden_size is not None and stages[0].in_features != hidden_size:
+        raise _refuse(
+            f"declared module {stages[0].path} takes {stages[0].in_features} features but "
+            f"the model produces {hidden_size}"
+        )
+    root = package.resolve()
+    loaded = []
+    for stage in stages:
+        weights_path = (package / stage.path / MODULE_WEIGHTS).resolve()
+        if root not in weights_path.parents:
+            raise _refuse(f"declared module directory {stage.path!r} leaves the package")
+        if not weights_path.is_file():
+            raise _refuse(
+                f"the package has no {stage.path}/{MODULE_WEIGHTS}; the declared module's "
+                "weights must be downloaded with the model"
+            )
+        tensors = load_file(str(weights_path))
+        prefix = "linear" if stage.role == "dense" else "norm"
+        weight = tensors.get(f"{prefix}.weight")
+        bias = tensors.get(f"{prefix}.bias")
+        if stage.role == "dense":
+            expected = (stage.out_features, stage.in_features)
+        else:
+            expected = (stage.out_features,)
+        if weight is None or tuple(weight.shape) != expected:
+            raise _refuse(
+                f"{stage.path}/{MODULE_WEIGHTS} has no {prefix}.weight of shape {list(expected)}"
+            )
+        needs_bias = stage.role == "layer_norm" or stage.bias
+        if needs_bias and (bias is None or tuple(bias.shape) != (stage.out_features,)):
+            raise _refuse(
+                f"{stage.path}/{MODULE_WEIGHTS} has no {prefix}.bias of {stage.out_features} values"
+            )
+        loaded.append((weight.float(), bias.float() if needs_bias else None))
+    return tuple(loaded)
+
+
+def apply_stages(pooled, stages: tuple, weights: tuple):
+    """Apply Dense and LayerNorm stages to pooled float vectors, in order."""
+    import torch
+
+    functional = torch.nn.functional
+    for stage, (weight, bias) in zip(stages, weights):
+        if stage.role == "dense":
+            pooled = functional.linear(pooled, weight, bias)
+            if stage.activation == "tanh":
+                pooled = torch.tanh(pooled)
+            elif stage.activation == "sigmoid":
+                pooled = torch.sigmoid(pooled)
+            elif stage.activation == "relu":
+                pooled = functional.relu(pooled)
+            elif stage.activation == "gelu":
+                pooled = functional.gelu(pooled)
+        else:
+            pooled = functional.layer_norm(
+                pooled, (stage.out_features,), weight, bias, LAYER_NORM_EPS
+            )
+    return pooled
 
 
 def load_text_encoder(path: Path, device, model_type: str, declarations: Optional[dict]):
@@ -175,11 +377,20 @@ def load_text_encoder(path: Path, device, model_type: str, declarations: Optiona
         labels = getattr(model.config, "num_labels", None)
         if labels != 1:
             raise _refuse(f"a sequence-classifier reranker needs one relevance label, not {labels}")
+    hidden_size = getattr(model.config, "hidden_size", None)
+    stage_weights = load_stage_weights(
+        path, plan.stages, hidden_size if isinstance(hidden_size, int) else None
+    )
+    stage_weights = tuple(
+        (weight.to(device), None if bias is None else bias.to(device))
+        for weight, bias in stage_weights
+    )
     model.to(device)
     model.eval()
     if device.type == "cuda":
         torch.cuda.synchronize(device)
-    return TextEncoder(plan, model, tokenizer, device), tokenizer, model_type
+    encoder = TextEncoder(plan, model, tokenizer, device, stage_weights)
+    return encoder, tokenizer, model_type
 
 
 def _batches(items, size=BATCH_SIZE):
@@ -309,6 +520,7 @@ def embed(encoder: TextEncoder, texts: list[str], dimensions: Optional[int], can
             batch = {name: value.to(encoder.device) for name, value in batch.items()}
             hidden = encoder.model(**batch).last_hidden_state.float()
             pooled = _pool(hidden, batch["attention_mask"], plan.pooling)
+            pooled = apply_stages(pooled, plan.stages, encoder.stage_weights)
             if dimensions is not None:
                 if dimensions > pooled.shape[-1]:
                     raise ValueError(

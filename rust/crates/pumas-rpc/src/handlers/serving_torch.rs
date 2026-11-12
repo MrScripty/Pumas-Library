@@ -421,6 +421,19 @@ async fn package_dir(state: &AppState, model_id: &str) -> Result<PathBuf, String
 /// Serve a text embedder or reranker through the managed Torch runtime. What
 /// it computes comes from the model's recorded sentence-transformers
 /// declarations (ADR 0007), passed to the sidecar with the load.
+/// The recorded declarations with every module detailed (its role, and for
+/// Dense and LayerNorm their layer), so the sidecar applies the pipeline the
+/// backend classified instead of classifying module types itself.
+fn detailed_declarations(recorded: Value) -> Result<Value, String> {
+    let unreadable = || {
+        "The model's recorded sentence-transformers declarations are unreadable; resolve them again"
+            .to_string()
+    };
+    let declared: pumas_library::model_library::declarations::SentenceTransformersDeclarations =
+        serde_json::from_value(recorded).map_err(|_| unreadable())?;
+    serde_json::to_value(declared.with_module_details()).map_err(|_| unreadable())
+}
+
 async fn serve_torch_text_model(
     state: &AppState,
     request: ServeModelRequest,
@@ -429,6 +442,16 @@ async fn serve_torch_text_model(
     declarations: Option<Value>,
 ) -> pumas_library::Result<Value> {
     let fail = |code, message: &str| serving_error(code, message, &request);
+    let declarations = match declarations.map(detailed_declarations).transpose() {
+        Ok(declarations) => declarations,
+        Err(reason) => {
+            return non_critical_failure_response(
+                state,
+                fail(ModelServeErrorCode::InvalidFormat, &reason),
+            )
+            .await;
+        }
+    };
     let package = match package_dir(state, &request.model_id).await {
         Ok(package) => package,
         Err(reason) => {
@@ -901,6 +924,36 @@ pub(super) async fn unserve_torch_model(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_sidecar_receives_each_module_with_its_role() {
+        let recorded = json!({
+            "source": {"kind": "package"},
+            "model_kind": "SentenceTransformer",
+            "modules": [
+                "sentence_transformers.models.Transformer",
+                "sentence_transformers.models.Pooling",
+                "sentence_transformers.models.Dense",
+                "sentence_transformers.models.Normalize"
+            ],
+            "pooling": "mean",
+            "normalize": true
+        });
+        let sent = detailed_declarations(recorded).unwrap();
+        let roles: Vec<&str> = sent["module_details"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|module| module["role"].as_str().unwrap())
+            .collect();
+        assert_eq!(roles, ["transformer", "pooling", "dense", "normalize"]);
+        // A record written before module details carries no Dense layer, which
+        // the sidecar refuses with the reason instead of skipping the stage.
+        assert!(sent["module_details"][2].get("dense").is_none());
+        assert!(detailed_declarations(json!({"modules": 3}))
+            .unwrap_err()
+            .contains("resolve them again"));
+    }
 
     #[tokio::test]
     async fn fp8_requires_matching_config_in_resolved_package() {

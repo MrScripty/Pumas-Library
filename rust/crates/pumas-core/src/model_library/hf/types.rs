@@ -224,10 +224,7 @@ impl DownloadState {
             ));
         }
     }
-    /// Restore a download state from a persisted entry.
-    ///
-    /// Reconstructs in-memory state from a persistence record, including
-    /// file lists, progress calculation, and status normalization.
+
     /// The reason shown for this download: the live error, or for a download
     /// restored in error, the reason its durable record kept.
     pub(super) fn displayed_error(&self) -> Option<String> {
@@ -238,6 +235,10 @@ impl DownloadState {
         })
     }
 
+    /// Restore a download state from a persisted entry.
+    ///
+    /// Reconstructs in-memory state from a persistence record, including
+    /// file lists, progress calculation, and status normalization.
     pub(super) fn from_persisted(
         entry: &PersistedDownload,
         downloaded_bytes: u64,

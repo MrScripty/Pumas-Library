@@ -192,9 +192,53 @@ pub enum OnnxSessionTask {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pooling: Option<OnnxEmbeddingPooling>,
         normalize: bool,
+        /// The declared pipeline continues past pooling (Dense, LayerNorm).
+        /// Only an output the graph pooled itself (`sentence_embedding`)
+        /// carries those stages, so token states are not read.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        requires_pooled_output: bool,
     },
-    /// One relevance logit per `(query, document)` pair (cross-encoder).
-    Rerank,
+    /// One relevance score per `(query, document)` pair (cross-encoder):
+    /// the graph's logit under the model's declared activation.
+    Rerank {
+        #[serde(default, skip_serializing_if = "OnnxScoreActivation::is_identity")]
+        activation: OnnxScoreActivation,
+    },
+}
+
+/// The monotone activation a cross-encoder declares for its scores
+/// (`activation_fn`); without one, scores are raw logits, as on Torch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnnxScoreActivation {
+    #[default]
+    Identity,
+    Sigmoid,
+}
+
+impl OnnxScoreActivation {
+    fn is_identity(&self) -> bool {
+        *self == Self::Identity
+    }
+
+    /// The activation named by a declared `activation_fn` class path.
+    pub fn from_declared(declared: Option<&str>) -> Result<Self, OnnxRuntimeError> {
+        match declared {
+            None | Some("torch.nn.modules.linear.Identity") => Ok(Self::Identity),
+            Some("torch.nn.modules.activation.Sigmoid") => Ok(Self::Sigmoid),
+            Some(other) => Err(OnnxRuntimeError::validation(
+                "model",
+                format!("the model declares score activation {other}, which the ONNX adapter does not implement"),
+            )),
+        }
+    }
+
+    pub fn apply(self, logit: f32) -> f32 {
+        match self {
+            Self::Identity => logit,
+            Self::Sigmoid => 1.0 / (1.0 + (-logit).exp()),
+        }
+    }
 }
 
 impl OnnxSessionTask {
@@ -205,7 +249,9 @@ impl OnnxSessionTask {
         model_type: &str,
         declarations: Option<&crate::model_library::declarations::SentenceTransformersDeclarations>,
     ) -> Result<Self, OnnxRuntimeError> {
-        use crate::model_library::declarations::{Pooling, SentenceTransformersKind};
+        use crate::model_library::declarations::{
+            module_role, ModuleRole, Pooling, SentenceTransformersKind,
+        };
         let cross_encoder = model_type == "reranker"
             || declarations.is_some_and(|declared| {
                 declared.model_kind == SentenceTransformersKind::CrossEncoder
@@ -218,11 +264,32 @@ impl OnnxSessionTask {
                      has no relevance output, so serve it through llama.cpp or Torch",
                 ));
             }
-            return Ok(Self::Rerank);
+            return Ok(Self::Rerank {
+                activation: OnnxScoreActivation::from_declared(
+                    declarations.and_then(|declared| declared.activation.as_deref()),
+                )?,
+            });
         }
         let Some(declared) = declarations else {
             return Ok(Self::default());
         };
+        let mut requires_pooled_output = false;
+        for module in &declared.modules {
+            match module_role(module) {
+                ModuleRole::Transformer | ModuleRole::Pooling | ModuleRole::Normalize => {}
+                // Stages the graph applies before a pooled output, or nowhere.
+                ModuleRole::Dense | ModuleRole::LayerNorm => requires_pooled_output = true,
+                ModuleRole::LogitScore | ModuleRole::Other => {
+                    return Err(OnnxRuntimeError::validation(
+                        "model",
+                        format!(
+                            "the model declares a {module} module, which the ONNX adapter \
+                             cannot apply to embeddings"
+                        ),
+                    ))
+                }
+            }
+        }
         let pooling = match declared.pooling {
             None => None,
             Some(Pooling::Mean) => Some(OnnxEmbeddingPooling::Mean),
@@ -239,6 +306,7 @@ impl OnnxSessionTask {
         Ok(Self::Embedding {
             pooling: pooling.or(Some(OnnxEmbeddingPooling::Mean)),
             normalize: declared.normalize,
+            requires_pooled_output,
         })
     }
 }
@@ -248,6 +316,7 @@ impl Default for OnnxSessionTask {
         Self::Embedding {
             pooling: None,
             normalize: true,
+            requires_pooled_output: false,
         }
     }
 }
@@ -358,7 +427,8 @@ impl OnnxRerankRequest {
     }
 }
 
-/// One document's raw relevance logit, by its position in the request.
+/// One document's relevance score (its logit under the declared activation),
+/// by its position in the request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct OnnxRerankScore {

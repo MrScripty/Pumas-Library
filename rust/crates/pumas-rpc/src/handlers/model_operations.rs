@@ -920,7 +920,7 @@ async fn describe(
                     Some(pumas_library::OnnxSessionTask::Embedding { .. })
                 ) | (
                     Capability::Rerank,
-                    Some(pumas_library::OnnxSessionTask::Rerank)
+                    Some(pumas_library::OnnxSessionTask::Rerank { .. })
                 )
             )),
             _ => semantics_of(capability),

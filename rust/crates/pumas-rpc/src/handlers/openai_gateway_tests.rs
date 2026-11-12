@@ -523,7 +523,9 @@ async fn load_onnx_cross_encoder(temp_dir: &TempDir, state: &AppState) {
         "model.onnx",
         "embeddings/nomic",
         OnnxLoadOptions {
-            task: pumas_library::OnnxSessionTask::Rerank,
+            task: pumas_library::OnnxSessionTask::Rerank {
+                activation: Default::default(),
+            },
             ..OnnxLoadOptions::cpu(4).unwrap()
         },
     )

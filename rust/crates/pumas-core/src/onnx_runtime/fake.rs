@@ -93,7 +93,7 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
                 .cloned()
                 .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?
         };
-        if status.task == OnnxSessionTask::Rerank {
+        if matches!(status.task, OnnxSessionTask::Rerank { .. }) {
             return Err(OnnxRuntimeError::validation(
                 "model",
                 "this ONNX session is a cross-encoder; it scores rerank pairs, not embeddings",
@@ -146,7 +146,7 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
             .get(&request.model_id)
             .map(|status| status.task)
             .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?;
-        if task != OnnxSessionTask::Rerank {
+        if !matches!(task, OnnxSessionTask::Rerank { .. }) {
             return Err(OnnxRuntimeError::validation(
                 "model",
                 "this ONNX session produces embeddings, not rerank scores",

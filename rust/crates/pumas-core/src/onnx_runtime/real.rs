@@ -177,7 +177,12 @@ impl OnnxRuntimeSession {
         if request.model_id != self.model_id {
             return Err(OnnxRuntimeError::not_loaded(&request.model_id));
         }
-        let OnnxSessionTask::Embedding { pooling, normalize } = self.task else {
+        let OnnxSessionTask::Embedding {
+            pooling,
+            normalize,
+            requires_pooled_output,
+        } = self.task
+        else {
             return Err(OnnxRuntimeError::validation(
                 "model",
                 "this ONNX session is a cross-encoder; it scores rerank pairs, not embeddings",
@@ -197,6 +202,7 @@ impl OnnxRuntimeSession {
             let output = extract_embedding_output(
                 outputs,
                 &postprocess_config.output_tensor,
+                requires_pooled_output,
                 tensors.batch_size,
                 tensors.sequence_len,
                 embedding_dimensions,
@@ -235,12 +241,12 @@ impl OnnxRuntimeSession {
         if request.model_id != self.model_id {
             return Err(OnnxRuntimeError::not_loaded(&request.model_id));
         }
-        if self.task != OnnxSessionTask::Rerank {
+        let OnnxSessionTask::Rerank { activation } = self.task else {
             return Err(OnnxRuntimeError::validation(
                 "model",
                 "this ONNX session produces embeddings, not rerank scores",
             ));
-        }
+        };
         let tokenized = self.tokenizer.tokenize_pairs_within(
             request.model_id.as_str(),
             &request.query,
@@ -252,6 +258,7 @@ impl OnnxRuntimeSession {
         let scores = self.run(&tensors, |outputs| {
             extract_scores(outputs, tensors.batch_size)
         })?;
+        let scores = activate_scores(scores, activation)?;
         Ok(OnnxRerankResponse {
             model: self.model_id.as_str().to_string(),
             results: scores
@@ -299,6 +306,28 @@ impl OnnxRuntimeSession {
             .iter()
             .any(|input_name| input_name.as_str() == name)
     }
+}
+
+/// The graph's logits under the declared activation, as the Torch adapter
+/// scores the same model.
+fn activate_scores(
+    logits: Vec<f32>,
+    activation: super::OnnxScoreActivation,
+) -> Result<Vec<f32>, OnnxRuntimeError> {
+    logits
+        .into_iter()
+        .map(|logit| {
+            let score = activation.apply(logit);
+            if score.is_finite() {
+                Ok(score)
+            } else {
+                Err(OnnxRuntimeError::validation(
+                    "output",
+                    "the model produced a non-finite relevance score",
+                ))
+            }
+        })
+        .collect()
 }
 
 fn tensor<'a>(
@@ -349,4 +378,23 @@ fn apply_session_options(
     builder
         .with_inter_threads(ONNX_RUNTIME_INTER_THREADS)
         .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime inter-thread setup failed"))
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::*;
+    use crate::onnx_runtime::OnnxScoreActivation;
+
+    #[test]
+    fn declared_sigmoid_activates_logits_and_identity_keeps_them() {
+        let logits = vec![0.0, 2.0, -2.0];
+        assert_eq!(
+            activate_scores(logits.clone(), OnnxScoreActivation::Identity).unwrap(),
+            logits
+        );
+        let activated = activate_scores(logits, OnnxScoreActivation::Sigmoid).unwrap();
+        assert!((activated[0] - 0.5).abs() < 1e-6);
+        assert!((activated[1] - 0.880_797).abs() < 1e-5);
+        assert!((activated[2] - 0.119_203).abs() < 1e-5);
+    }
 }

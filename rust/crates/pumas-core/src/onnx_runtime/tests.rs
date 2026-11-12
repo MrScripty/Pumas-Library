@@ -706,8 +706,8 @@ fn execution_provider_has_stable_log_label() {
 
 mod task_and_rerank_requests {
     use super::super::{
-        OnnxEmbeddingPooling, OnnxRerankRequest, OnnxRuntimeErrorCode, OnnxSessionTask,
-        MAX_EMBEDDING_INPUTS, MAX_EMBEDDING_INPUT_CHARS,
+        OnnxEmbeddingPooling, OnnxRerankRequest, OnnxRuntimeErrorCode, OnnxScoreActivation,
+        OnnxSessionTask, MAX_EMBEDDING_INPUTS, MAX_EMBEDDING_INPUT_CHARS,
     };
     use crate::model_library::declarations::{
         DeclarationSource, LogitScore, Pooling, SentenceTransformersDeclarations,
@@ -752,7 +752,9 @@ mod task_and_rerank_requests {
         );
         assert_eq!(
             OnnxSessionTask::for_model("reranker", None).unwrap(),
-            OnnxSessionTask::Rerank
+            OnnxSessionTask::Rerank {
+                activation: OnnxScoreActivation::Identity
+            }
         );
         assert_eq!(
             OnnxSessionTask::for_model(
@@ -760,7 +762,9 @@ mod task_and_rerank_requests {
                 Some(&declared(CrossEncoder, None, false, false))
             )
             .unwrap(),
-            OnnxSessionTask::Rerank
+            OnnxSessionTask::Rerank {
+                activation: OnnxScoreActivation::Identity
+            }
         );
         assert_eq!(
             OnnxSessionTask::for_model(
@@ -775,7 +779,8 @@ mod task_and_rerank_requests {
             .unwrap(),
             OnnxSessionTask::Embedding {
                 pooling: Some(OnnxEmbeddingPooling::LastToken),
-                normalize: true
+                normalize: true,
+                requires_pooled_output: false
             }
         );
         assert_eq!(
@@ -786,7 +791,8 @@ mod task_and_rerank_requests {
             .unwrap(),
             OnnxSessionTask::Embedding {
                 pooling: Some(OnnxEmbeddingPooling::Mean),
-                normalize: false
+                normalize: false,
+                requires_pooled_output: false
             }
         );
         let causal = OnnxSessionTask::for_model(
@@ -807,6 +813,96 @@ mod task_and_rerank_requests {
         )
         .unwrap_err();
         assert!(weighted.message.contains("WeightedMean"));
+    }
+
+    fn with_modules(
+        mut declared: SentenceTransformersDeclarations,
+        modules: &[&str],
+    ) -> SentenceTransformersDeclarations {
+        declared.modules = modules.iter().map(|module| module.to_string()).collect();
+        declared
+    }
+
+    #[test]
+    fn stages_after_pooling_require_the_graph_pooled_output_and_unknown_modules_are_refused() {
+        use SentenceTransformersKind::*;
+        // EmbeddingGemma: Transformer, Pooling, Dense, Dense, Normalize.
+        let gemma = with_modules(
+            declared(SentenceTransformer, Some(Pooling::Mean), true, false),
+            &[
+                "sentence_transformers.models.Transformer",
+                "sentence_transformers.models.Pooling",
+                "sentence_transformers.models.Dense",
+                "sentence_transformers.models.Dense",
+                "sentence_transformers.models.Normalize",
+            ],
+        );
+        assert_eq!(
+            OnnxSessionTask::for_model("embedding", Some(&gemma)).unwrap(),
+            OnnxSessionTask::Embedding {
+                pooling: Some(OnnxEmbeddingPooling::Mean),
+                normalize: true,
+                requires_pooled_output: true
+            }
+        );
+        // Pooling and Normalize alone are applied by the adapter itself.
+        let plain = with_modules(
+            declared(SentenceTransformer, Some(Pooling::Cls), true, false),
+            &[
+                "sentence_transformers.models.Transformer",
+                "sentence_transformers.models.Pooling",
+                "sentence_transformers.models.Normalize",
+            ],
+        );
+        assert!(matches!(
+            OnnxSessionTask::for_model("embedding", Some(&plain)).unwrap(),
+            OnnxSessionTask::Embedding {
+                requires_pooled_output: false,
+                ..
+            }
+        ));
+        let custom = with_modules(
+            declared(SentenceTransformer, Some(Pooling::Mean), true, false),
+            &[
+                "sentence_transformers.models.Transformer",
+                "acme.modules.Projection",
+            ],
+        );
+        let refused = OnnxSessionTask::for_model("embedding", Some(&custom)).unwrap_err();
+        assert_eq!(refused.code, OnnxRuntimeErrorCode::Validation);
+        assert!(refused.message.contains("acme.modules.Projection"));
+    }
+
+    #[test]
+    fn a_declared_activation_reaches_the_rerank_task() {
+        use SentenceTransformersKind::*;
+        let mut sigmoid = declared(CrossEncoder, None, false, false);
+        sigmoid.activation = Some("torch.nn.modules.activation.Sigmoid".into());
+        assert_eq!(
+            OnnxSessionTask::for_model("reranker", Some(&sigmoid)).unwrap(),
+            OnnxSessionTask::Rerank {
+                activation: OnnxScoreActivation::Sigmoid
+            }
+        );
+        let mut tanh = declared(CrossEncoder, None, false, false);
+        tanh.activation = Some("torch.nn.modules.activation.Tanh".into());
+        let refused = OnnxSessionTask::for_model("reranker", Some(&tanh)).unwrap_err();
+        assert!(refused.message.contains("Tanh"));
+        // The task's wire form stays the earlier one for identity scoring.
+        assert_eq!(
+            serde_json::to_value(OnnxSessionTask::Rerank {
+                activation: OnnxScoreActivation::Identity
+            })
+            .unwrap(),
+            serde_json::json!({"kind": "rerank"})
+        );
+        assert_eq!(
+            serde_json::from_value::<OnnxSessionTask>(serde_json::json!({"kind": "rerank"}))
+                .unwrap(),
+            OnnxSessionTask::Rerank {
+                activation: OnnxScoreActivation::Identity
+            }
+        );
     }
 
     #[test]
@@ -914,4 +1010,30 @@ fn already_pooled_vectors_are_truncated_and_normalized_without_pooling() {
     assert!(postprocessor
         .postprocess_pooled(vec![vec![1.0; 3]], 2, None)
         .is_err());
+}
+
+mod embedding_output_selection {
+    use super::super::output::select_embedding_output;
+
+    #[test]
+    fn token_states_are_preferred_unless_stages_follow_pooling() {
+        // A graph that exports both token states and its pooled embedding
+        // (bge, harrier exports).
+        let both = [("last_hidden_state", 3), ("sentence_embedding", 2)];
+        assert_eq!(select_embedding_output(&both, false).unwrap(), Some(0));
+        assert_eq!(select_embedding_output(&both, true).unwrap(), Some(1));
+        // Only pooled: read as pooled either way.
+        let pooled = [("sentence_embedding", 2)];
+        assert_eq!(select_embedding_output(&pooled, false).unwrap(), Some(0));
+        assert_eq!(select_embedding_output(&pooled, true).unwrap(), Some(0));
+        // A named sentence_embedding wins over another pooled output.
+        let named = [("pooler_output", 2), ("sentence_embedding", 2)];
+        assert_eq!(select_embedding_output(&named, true).unwrap(), Some(1));
+        // Token states alone cannot carry Dense or LayerNorm stages.
+        let tokens = [("last_hidden_state", 3)];
+        assert_eq!(select_embedding_output(&tokens, false).unwrap(), Some(0));
+        let refused = select_embedding_output(&tokens, true).unwrap_err();
+        assert!(refused.message.contains("Dense or LayerNorm"));
+        assert_eq!(select_embedding_output(&[], false).unwrap(), None);
+    }
 }

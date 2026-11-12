@@ -12,27 +12,40 @@ pub(super) enum EmbeddingOutput {
     Pooled(Vec<Vec<f32>>),
 }
 
+/// Name of the pooled output sentence-transformers ONNX exports end in.
+pub const SENTENCE_EMBEDDING_OUTPUT: &str = "sentence_embedding";
+
 /// Select and read the embedding output. A named output may be token-level or
 /// pooled. Otherwise the first token-level floating output wins, so declared
 /// pooling applies when the graph exposes token states; a graph with only a
 /// pooled output is read as already pooled.
+///
+/// When the declared pipeline continues past pooling (`requires_pooled`:
+/// Dense or LayerNorm modules), token states would skip those stages, so only
+/// a pooled output is read: `sentence_embedding` first, else the first
+/// `[batch, dimensions]` floating output. A graph without one is refused.
 pub(super) fn extract_embedding_output(
     outputs: &ort::session::SessionOutputs<'_>,
     selection: &OnnxOutputTensorSelection,
+    requires_pooled: bool,
     expected_batch: usize,
     expected_tokens: usize,
     expected_dimensions: usize,
 ) -> Result<EmbeddingOutput, OnnxRuntimeError> {
     let read = |value: ValueRef<'_>, name: &str| {
-        let (shape, values) = floating_values(value, name)?;
-        embedding_output_from_values(
+        let (shape, values) = float_values(value, name)?;
+        let output = embedding_output_from_values(
             &shape,
             values,
             name,
             expected_batch,
             expected_tokens,
             expected_dimensions,
-        )
+        )?;
+        if requires_pooled && matches!(output, EmbeddingOutput::Tokens(_)) {
+            return Err(pooled_output_missing(Some(name)));
+        }
+        Ok(output)
     };
     match selection {
         OnnxOutputTensorSelection::Named(name) => {
@@ -54,14 +67,16 @@ pub(super) fn extract_embedding_output(
                 ValueType::Tensor { shape, .. } => shape.len(),
                 _ => 0,
             };
-            if let Some((name, value)) = floating().find(|(_, value)| rank(value) == 3) {
-                return read(value, name);
-            }
-            if let Some((name, value)) = floating().find(|(_, value)| rank(value) == 2) {
-                return read(value, name);
-            }
-            match floating().next() {
-                Some((name, value)) => read(value, name),
+            let ranks = floating()
+                .map(|(name, value)| (name, rank(&value)))
+                .collect::<Vec<_>>();
+            match select_embedding_output(&ranks, requires_pooled)? {
+                Some(index) => {
+                    let (name, value) = floating()
+                        .nth(index)
+                        .ok_or_else(|| pooled_output_missing(None))?;
+                    read(value, name)
+                }
                 None => Err(OnnxRuntimeError::validation(
                     "output",
                     "ONNX Runtime did not return a floating tensor output",
@@ -69,6 +84,37 @@ pub(super) fn extract_embedding_output(
             }
         }
     }
+}
+
+/// Which of the graph's floating outputs (name, rank) to read, by position.
+pub(super) fn select_embedding_output(
+    outputs: &[(&str, usize)],
+    requires_pooled: bool,
+) -> Result<Option<usize>, OnnxRuntimeError> {
+    let position = |wanted: &dyn Fn(&(&str, usize)) -> bool| outputs.iter().position(wanted);
+    if requires_pooled {
+        return position(&|(name, rank)| *name == SENTENCE_EMBEDDING_OUTPUT && *rank == 2)
+            .or_else(|| position(&|(_, rank)| *rank == 2))
+            .map(Some)
+            .ok_or_else(|| pooled_output_missing(None));
+    }
+    Ok(position(&|(_, rank)| *rank == 3)
+        .or_else(|| position(&|(_, rank)| *rank == 2))
+        .or_else(|| (!outputs.is_empty()).then_some(0)))
+}
+
+fn pooled_output_missing(read: Option<&str>) -> OnnxRuntimeError {
+    let read = read
+        .map(|name| format!("its output '{name}' holds token states"))
+        .unwrap_or_else(|| "it exports no pooled [batch, dimensions] output".to_string());
+    OnnxRuntimeError::validation(
+        "model",
+        format!(
+            "the model declares Dense or LayerNorm modules after pooling, which only a graph \
+             that pools in-graph ({SENTENCE_EMBEDDING_OUTPUT}) applies, and {read}; serve it \
+             through Torch or with an ONNX export that includes those modules"
+        ),
+    )
 }
 
 fn is_floating_tensor(value_type: &ValueType) -> bool {
@@ -81,52 +127,6 @@ fn is_floating_tensor(value_type: &ValueType) -> bool {
             ..
         }
     )
-}
-
-/// The tensor's shape and its values as f32.
-fn floating_values(
-    value: ValueRef<'_>,
-    output_name: &str,
-) -> Result<(Vec<i64>, Vec<f32>), OnnxRuntimeError> {
-    match value.dtype() {
-        ValueType::Tensor {
-            ty: TensorElementType::Float32,
-            ..
-        } => {
-            let (shape, values) = value.try_extract_tensor::<f32>().map_err(|_| {
-                OnnxRuntimeError::validation("output", "ONNX f32 output tensor extraction failed")
-            })?;
-            Ok((shape.to_vec(), values.to_vec()))
-        }
-        ValueType::Tensor {
-            ty: TensorElementType::Float16,
-            ..
-        } => {
-            let (shape, values) = value.try_extract_tensor::<f16>().map_err(|_| {
-                OnnxRuntimeError::validation("output", "ONNX f16 output tensor extraction failed")
-            })?;
-            Ok((
-                shape.to_vec(),
-                values.iter().map(|value| value.to_f32()).collect(),
-            ))
-        }
-        ValueType::Tensor {
-            ty: TensorElementType::Bfloat16,
-            ..
-        } => {
-            let (shape, values) = value.try_extract_tensor::<bf16>().map_err(|_| {
-                OnnxRuntimeError::validation("output", "ONNX bf16 output tensor extraction failed")
-            })?;
-            Ok((
-                shape.to_vec(),
-                values.iter().map(|value| value.to_f32()).collect(),
-            ))
-        }
-        _ => Err(OnnxRuntimeError::validation(
-            "output",
-            format!("ONNX output tensor '{output_name}' is not a supported floating tensor"),
-        )),
-    }
 }
 
 pub(super) fn embedding_output_from_values(

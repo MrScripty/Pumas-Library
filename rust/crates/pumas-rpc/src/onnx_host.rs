@@ -430,6 +430,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_loads_of_one_model_on_two_hosts_leave_one_holder() {
+        let (first, first_server) = serve_fake_host(true).await;
+        let (second, second_server) = serve_fake_host(true).await;
+        let manager =
+            OnnxSessionManager::new(RemoteOnnxEmbeddingBackend::new().unwrap(), 2).unwrap();
+        let (_fixture, request) = model_fixture();
+        let (left, right) = tokio::join!(
+            manager.load_on_host(request.clone(), first.clone()),
+            manager.load_on_host(request, second.clone()),
+        );
+        assert_eq!(
+            usize::from(left.is_ok()) + usize::from(right.is_ok()),
+            1,
+            "{left:?} {right:?}"
+        );
+        let refused = left.err().or(right.err()).unwrap();
+        assert!(refused.message.contains("already loaded by the ONNX host"));
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let mut holders = 0;
+        for host in [&first, &second] {
+            let held: Vec<OnnxSessionStatus> = client
+                .get(format!("{}{}", host.as_str(), host_protocol::SESSIONS_PATH))
+                .header(host_protocol::TOKEN_HEADER, host_protocol::host_api_token())
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            holders += held.len();
+        }
+        assert_eq!(holders, 1);
+        first_server.abort();
+        second_server.abort();
+    }
+
+    #[tokio::test]
     async fn a_host_that_failed_to_initialize_refuses_loads_with_its_reason() {
         let (endpoint, server) = serve_fake_host(false).await;
         let health: OnnxHostHealth = reqwest::Client::builder()

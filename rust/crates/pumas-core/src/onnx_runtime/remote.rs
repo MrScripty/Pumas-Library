@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -68,6 +68,9 @@ struct RemoteSession {
 pub struct RemoteOnnxEmbeddingBackend {
     http: reqwest::Client,
     sessions: Mutex<HashMap<OnnxModelId, RemoteSession>>,
+    /// One gate per model being loaded, so the check of which host holds a
+    /// model and the load that records its new host never interleave.
+    load_gates: Mutex<HashMap<OnnxModelId, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl RemoteOnnxEmbeddingBackend {
@@ -82,6 +85,7 @@ impl RemoteOnnxEmbeddingBackend {
         Ok(Self {
             http,
             sessions: Mutex::new(HashMap::new()),
+            load_gates: Mutex::new(HashMap::new()),
         })
     }
 
@@ -160,7 +164,46 @@ impl RemoteOnnxEmbeddingBackend {
             .ok_or_else(|| OnnxRuntimeError::not_loaded(model_id))
     }
 
+    fn load_gate(
+        &self,
+        model_id: &OnnxModelId,
+    ) -> Result<Arc<tokio::sync::Mutex<()>>, OnnxRuntimeError> {
+        let mut gates = self
+            .load_gates
+            .lock()
+            .map_err(|_| OnnxRuntimeError::backend("ONNX host load gates poisoned"))?;
+        Ok(gates.entry(model_id.clone()).or_default().clone())
+    }
+
+    /// Forget a model's gate once no other load waits on it.
+    fn release_load_gate(&self, model_id: &OnnxModelId, gate: Arc<tokio::sync::Mutex<()>>) {
+        if let Ok(mut gates) = self.load_gates.lock() {
+            // The map and `gate` are the only holders when no load waits.
+            if Arc::strong_count(&gate) == 2 {
+                gates.remove(model_id);
+            }
+        }
+    }
+
+    /// Loads of one model are serialized: two profiles loading the same model
+    /// at once must not both pass the holder check and overwrite each other's
+    /// record.
     async fn load_into(
+        &self,
+        request: OnnxLoadRequest,
+        host: OnnxHostEndpoint,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        let model_id = request.model_id.clone();
+        let gate = self.load_gate(&model_id)?;
+        let result = {
+            let _serialized = gate.lock().await;
+            self.load_into_serialized(request, host).await
+        };
+        self.release_load_gate(&model_id, gate);
+        result
+    }
+
+    async fn load_into_serialized(
         &self,
         request: OnnxLoadRequest,
         host: OnnxHostEndpoint,
@@ -323,6 +366,22 @@ mod tests {
                 .as_str(),
             "http://127.0.0.1:19081"
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_loads_of_one_model_share_a_gate_that_is_released_after() {
+        let backend = RemoteOnnxEmbeddingBackend::new().unwrap();
+        let model_id = OnnxModelId::parse("fixture/model").unwrap();
+        let first = backend.load_gate(&model_id).unwrap();
+        let second = backend.load_gate(&model_id).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        let held = first.lock().await;
+        assert!(second.try_lock().is_err());
+        drop(held);
+        backend.release_load_gate(&model_id, second);
+        assert!(backend.load_gates.lock().unwrap().contains_key(&model_id));
+        backend.release_load_gate(&model_id, first);
+        assert!(backend.load_gates.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

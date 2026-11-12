@@ -221,6 +221,28 @@ pub(super) async fn resolve(
     cuda_major: u32,
     platform: WheelPlatform,
 ) -> Result<CudaWheelSelection> {
+    resolve_excluding(
+        sources,
+        tag,
+        release,
+        cuda_major,
+        platform,
+        &BTreeSet::new(),
+    )
+    .await
+}
+
+/// [`resolve`] without the wheel files named in `excluded`, such as a file a
+/// kept selection found gone, so a release whose only host wheel is excluded
+/// gives way to another.
+pub(super) async fn resolve_excluding(
+    sources: &CudaWheelSources,
+    tag: &str,
+    release: &semver::Version,
+    cuda_major: u32,
+    platform: WheelPlatform,
+    skipped_files: &BTreeSet<String>,
+) -> Result<CudaWheelSelection> {
     let client = sources.client()?;
     let release_version = PyVersion::parse(&release.to_string()).ok_or_else(|| {
         refused(format!(
@@ -362,7 +384,12 @@ pub(super) async fn resolve(
                 })?;
                 listings.insert(name.clone(), files);
             }
-            let files = &listings[&name];
+            let files: Vec<IndexFile> = listings[&name]
+                .iter()
+                .filter(|file| !skipped_files.contains(&file.filename))
+                .cloned()
+                .collect();
+            let files = &files;
             let ranges = || {
                 wanted
                     .requirements
@@ -498,50 +525,81 @@ pub(super) async fn resolve(
     })
 }
 
+/// A wheel of a kept selection that can no longer be downloaded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct VanishedWheel {
+    pub(super) filename: String,
+    pub(super) reason: String,
+}
+
 /// Why a saved selection can no longer be downloaded: one of its wheels is
 /// gone from its index (the project or the file answers not found, or the
 /// project page no longer lists it) or its file URL answers 404 or 410. `None`
 /// keeps the selection: every wheel is still there, or an index or file
 /// answered something else, such as a server error or a different digest
 /// for the same file name, which a retry or the verified download decides.
+///
+/// Wheels are checked concurrently, as many at once as a version listing
+/// resolves builds, and index pages come from the shared index cache.
 pub(super) async fn vanished_wheel(
     sources: &CudaWheelSources,
     selection: &CudaWheelSelection,
-) -> Option<String> {
+) -> Option<VanishedWheel> {
+    use futures::StreamExt;
     let index = PackageIndex::new(
         &sources.wheel_index,
         sources.client().ok()?,
         sources.cache.clone(),
     )
     .ok()?;
-    for wheel in &selection.wheels {
-        match index.files(&wheel.project).await {
-            Ok(None) => {
-                return Some(format!(
-                    "{} is no longer on {}: the project answers not found",
-                    wheel.project,
-                    index.display()
-                ))
-            }
-            Ok(Some(files)) if !files.iter().any(|file| file.filename == wheel.filename) => {
-                return Some(format!(
-                    "{} no longer lists {}",
-                    index.display(),
-                    wheel.filename
-                ))
-            }
-            _ => {}
-        }
-        if let Some(status) = index.head_status(&wheel.url).await {
-            if super::python_index::is_not_found(status) {
-                return Some(format!(
-                    "{} answers {status} at its file URL",
-                    wheel.filename
-                ));
-            }
-        }
-    }
-    None
+    let mut found: Vec<(usize, VanishedWheel)> =
+        futures::stream::iter(selection.wheels.clone().into_iter().enumerate())
+            .map(|(position, wheel)| {
+                let index = index.clone();
+                async move {
+                    let vanished = |reason: String| {
+                        Some((
+                            position,
+                            VanishedWheel {
+                                filename: wheel.filename.clone(),
+                                reason,
+                            },
+                        ))
+                    };
+                    match index.files(&wheel.project).await {
+                        Ok(None) => {
+                            return vanished(format!(
+                                "{} is no longer on {}: the project answers not found",
+                                wheel.project,
+                                index.display()
+                            ))
+                        }
+                        Ok(Some(files))
+                            if !files.iter().any(|file| file.filename == wheel.filename) =>
+                        {
+                            return vanished(format!(
+                                "{} no longer lists {}",
+                                index.display(),
+                                wheel.filename
+                            ))
+                        }
+                        _ => {}
+                    }
+                    match index.head_status(&wheel.url).await {
+                        Some(status) if super::python_index::is_not_found(status) => vanished(
+                            format!("{} answers {status} at its file URL", wheel.filename),
+                        ),
+                        _ => None,
+                    }
+                }
+            })
+            .buffer_unordered(super::onnx_cuda_availability::LISTING_CONCURRENCY)
+            .filter_map(|found| async move { found })
+            .collect()
+            .await;
+    // Report the first gone wheel in selection order, whatever finished first.
+    found.sort_by_key(|(position, _)| *position);
+    found.into_iter().next().map(|(_, vanished)| vanished)
 }
 
 /// The selection kept with an install attempt, if one is there.

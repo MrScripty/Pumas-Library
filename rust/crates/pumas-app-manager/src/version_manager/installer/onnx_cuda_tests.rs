@@ -1018,13 +1018,14 @@ async fn a_kept_selection_is_replaced_only_when_a_wheel_is_not_found() {
     server.unroute(&path);
     let reason = check(&server)
         .await
-        .expect("a missing file replaces the selection");
+        .expect("a missing file replaces the selection")
+        .reason;
     assert!(reason.contains("404"), "{reason}");
     assert!(reason.contains("nvidia_cufft_cu12-11.4.1.4"), "{reason}");
 
     // The index no longer lists it.
     publish(&server, "/pypi/simple", cufft.project, vec![]);
-    let reason = check(&server).await.unwrap();
+    let reason = check(&server).await.unwrap().reason;
     assert!(
         reason.contains("no longer lists nvidia_cufft_cu12-11.4.1.4"),
         "{reason}"
@@ -1032,7 +1033,7 @@ async fn a_kept_selection_is_replaced_only_when_a_wheel_is_not_found() {
 
     // The project itself is gone.
     server.unroute("/pypi/simple/nvidia-cufft-cu12/");
-    let reason = check(&server).await.unwrap();
+    let reason = check(&server).await.unwrap().reason;
     assert!(
         reason.contains("nvidia-cufft-cu12 is no longer on"),
         "{reason}"
@@ -1740,7 +1741,10 @@ mod installs {
         );
         // The install log says why.
         let log = install_log(root.path());
-        assert!(log.contains("cannot be downloaded any more"), "{log}");
+        assert!(
+            log.contains("Replaced the earlier install attempt"),
+            "{log}"
+        );
         assert!(log.contains(&old_wheel), "{log}");
         let leftovers: Vec<_> = std::fs::read_dir(manager.versions_dir())
             .unwrap()
@@ -1785,7 +1789,7 @@ mod installs {
             !phases.iter().any(|phase| phase == "Withdrawn"),
             "{phases:?}"
         );
-        assert!(!install_log(root.path()).contains("cannot be downloaded any more"));
+        assert!(!install_log(root.path()).contains("Replaced the earlier install attempt"));
 
         // Once the file answers, the same selection finishes.
         server.state.lock().unwrap().failing.clear();
@@ -1802,6 +1806,154 @@ mod installs {
         )
         .unwrap();
         assert!(record.contains("12.9.86"), "{record}");
+        manager.shutdown_installations().await.ok();
+    }
+
+    /// The workspace of the live install attempt of `tag`.
+    fn live_workspace(manager: &VersionManager) -> PathBuf {
+        std::fs::read_dir(manager.versions_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.starts_with(".llama-install-") && !name.ends_with(".lock")
+                    })
+                    && path.is_dir()
+            })
+            .expect("a live install attempt")
+    }
+
+    #[tokio::test]
+    async fn a_retry_checks_only_the_wheels_it_still_needs() {
+        let root = tempfile::TempDir::new().unwrap();
+        let server = FixtureServer::start().await;
+        publish_release(&server, root.path());
+        let nvjitlink = package("nvidia-nvjitlink-cu12");
+        let missing = wheel_path(nvjitlink);
+        let missing_bytes = package_entry(WheelPlatform::LinuxX64, nvjitlink, WHEEL_PAYLOAD).bytes;
+        server.unroute(&missing);
+        let api = test_api(root.path()).await;
+        let manager = onnx_manager(root.path(), &api, &server).await;
+        install(&manager, CUDA_TAG).await.unwrap_err();
+
+        // Every finished wheel now answers 404; the retry does not ask, so
+        // it neither replaces the set nor fails on them.
+        for package in CUDA12_PACKAGES
+            .iter()
+            .filter(|package| package.project != nvjitlink.project)
+        {
+            server.unroute(&wheel_path(package));
+        }
+        server.route(&missing, missing_bytes, "application/octet-stream");
+        install(&manager, CUDA_TAG).await.unwrap();
+        let heads: Vec<_> = server
+            .requested_paths()
+            .into_iter()
+            .filter(|path| path.starts_with("HEAD "))
+            .collect();
+        assert_eq!(heads, vec![format!("HEAD {missing}")]);
+        assert!(!install_log(root.path()).contains("Replaced the earlier install attempt"));
+        manager.shutdown_installations().await.ok();
+    }
+
+    #[tokio::test]
+    async fn a_retry_with_an_unusable_kept_selection_replaces_a_differing_download() {
+        let root = tempfile::TempDir::new().unwrap();
+        let server = FixtureServer::start().await;
+        publish_release(&server, root.path());
+        let platform = WheelPlatform::LinuxX64;
+        let nvjitlink = package("nvidia-nvjitlink-cu12");
+        let missing = wheel_path(nvjitlink);
+        let missing_bytes = package_entry(platform, nvjitlink, WHEEL_PAYLOAD).bytes;
+        server.unroute(&missing);
+        let api = test_api(root.path()).await;
+        let manager = onnx_manager(root.path(), &api, &server).await;
+        install(&manager, CUDA_TAG).await.unwrap_err();
+
+        // The kept selection cannot be read any more, and the index now
+        // resolves to a different set than the retained download holds.
+        std::fs::write(
+            live_workspace(&manager).join("cuda-wheels.json"),
+            b"{ not json",
+        )
+        .unwrap();
+        let cudnn = package("nvidia-cudnn-cu12");
+        let newer = IndexEntry::wheel(
+            &wheel_filename(platform, cudnn.distribution, "9.29.0.1"),
+            nvidia_wheel(
+                platform,
+                cudnn.distribution,
+                "9.29.0.1",
+                cudnn.component,
+                cudnn.libraries,
+                64,
+            ),
+            cudnn.requires,
+        );
+        publish(
+            &server,
+            "/pypi/simple",
+            cudnn.project,
+            vec![package_entry(platform, cudnn, WHEEL_PAYLOAD), newer],
+        );
+        server.route(&missing, missing_bytes, "application/octet-stream");
+
+        install(&manager, CUDA_TAG).await.unwrap();
+        let record = std::fs::read_to_string(
+            manager
+                .version_path(CUDA_TAG)
+                .unwrap()
+                .join("cuda/libraries.json"),
+        )
+        .unwrap();
+        assert!(record.contains("9.29.0.1"), "{record}");
+        let log = install_log(root.path());
+        assert!(
+            log.contains("Replaced the earlier install attempt"),
+            "{log}"
+        );
+        assert!(log.contains("differs from the current one"), "{log}");
+        let phases = retained_record_phases(&api).await;
+        assert!(
+            phases.iter().any(|phase| phase == "Withdrawn"),
+            "{phases:?}"
+        );
+        manager.shutdown_installations().await.ok();
+    }
+
+    #[tokio::test]
+    async fn a_wheel_whose_file_is_gone_but_still_listed_is_not_selected_again() {
+        let root = tempfile::TempDir::new().unwrap();
+        let server = FixtureServer::start().await;
+        publish_release(&server, root.path());
+        let nvjitlink = package("nvidia-nvjitlink-cu12");
+        server.unroute(&wheel_path(nvjitlink));
+        let api = test_api(root.path()).await;
+        let manager = onnx_manager(root.path(), &api, &server).await;
+        install(&manager, CUDA_TAG).await.unwrap_err();
+
+        // The index still lists the file, which answers 404, and no other
+        // release has a host wheel: resolving without it is refused with the
+        // reason every time, instead of selecting the same file again, and
+        // the earlier attempt is left as it was.
+        for _ in 0..2 {
+            let refused = install(&manager, CUDA_TAG).await.unwrap_err();
+            // nvJitLink has no other release, so cuFFT, which requires it,
+            // has none that can install either.
+            assert!(
+                refused.contains("No release of nvidia-cufft-cu12")
+                    && refused.contains("cannot be installed"),
+                "{refused}"
+            );
+        }
+        let phases = retained_record_phases(&api).await;
+        assert!(
+            !phases.iter().any(|phase| phase == "Withdrawn"),
+            "{phases:?}"
+        );
+        assert!(!install_log(root.path()).contains("Replaced the earlier install attempt"));
         manager.shutdown_installations().await.ok();
     }
 }

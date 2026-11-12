@@ -116,7 +116,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   or file answers not found). The retry resolves the libraries again,
   withdraws the earlier unfinished download, reuses the finished downloads the
   new selection still names after verifying them, and records why in the
-  install log. A server error or network failure keeps the earlier selection.
+  install log. A server error or network failure keeps the earlier selection,
+  and a retry checks only the wheels it still has to download. A retry whose
+  kept selection cannot be read or no longer applies replaces the earlier
+  download the same way instead of failing on it.
 
 ## [0.8.0] - 2026-11-08
 

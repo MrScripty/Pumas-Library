@@ -246,17 +246,27 @@ reuses that set, so completed wheels are not downloaded again and partial ones
 resume, even after NVIDIA publishes newer releases. Cancelling or finishing the
 attempt removes it with the workspace; the next install resolves again.
 
-A kept set is replaced only when one of its wheels can no longer be
+A kept set is replaced only when a wheel it still needs can no longer be
 downloaded: its project or file answers not found (404 or 410) on the index,
-the index no longer lists it, or its file URL answers 404 or 410. The retry
-then resolves against the current indexes, withdraws the earlier attempt's
-unfinished download through the acquisition owner
-(`withdraw_unfinished_transfer`), and carries the finished files the new set
-still names (same name and SHA-256, the release archive included) into the new
-attempt, where acquisition verifies them again before using them. The install
-log says which wheel vanished and what was selected instead. A server error,
-a network failure or a different digest for the same file name keeps the set:
-a retry or the verified download decides those.
+the index no longer lists it, or its file URL answers 404 or 410. Wheels the
+attempt already holds in full are not checked, and nothing is checked once
+its download is complete, so such a retry needs no network. The retry then
+resolves against the current indexes without the vanished file, so the same
+file is never selected again; if nothing can replace it, the install is
+refused with the reason and the earlier attempt is left as it was.
+
+Whenever a live attempt's retained download cannot serve the set an install
+now uses (a vanished wheel, or a kept selection that could not be read or no
+longer applies), the install withdraws that unfinished download through the
+acquisition owner (`withdraw_unfinished_transfer`), carries the finished files
+the new set still names (same name and SHA-256, the release archive included)
+into the new attempt, where acquisition verifies them again before using them,
+and revokes the old attempt. The install log records the replacement and its
+reason after it succeeds, or why it failed. A server error, a network failure
+or a different digest for the same file name keeps the set: a retry or the
+verified download decides those. Carried files that no live attempt can pick
+up are removed when the version is removed and when Pumas recovers its
+installs at startup.
 
 **Search path.** When the installed version has `cuda/lib` and its record, the
 ONNX host starts with `LD_LIBRARY_PATH` set to that directory on Linux (the

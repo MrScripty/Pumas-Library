@@ -2106,12 +2106,7 @@ impl VersionInstaller {
             "Pumas shared download unavailable ({reason}); pip downloads these wheels and \
              cannot resume them after a network failure\n"
         );
-        if let Err(error) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .and_then(|mut log| std::io::Write::write_all(&mut log, note.as_bytes()))
-        {
+        if let Err(error) = super::append_install_log_line(log_path, &note) {
             warn!(%error, "Torch download fallback note was not written to the install log");
         }
     }

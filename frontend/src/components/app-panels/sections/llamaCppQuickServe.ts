@@ -39,7 +39,10 @@ export function buildQuickServeConfig(profile: RuntimeProfileConfig): ModelServi
         ? profile.device.device_id.trim()
         : null,
     gpu_layers: controls.showGpuLayers ? profile.device.gpu_layers ?? null : null,
-    tensor_split: controls.showTensorSplit ? profile.device.tensor_split ?? null : null,
+    tensor_split:
+      controls.showTensorSplit && profile.device.tensor_split
+        ? [...profile.device.tensor_split]
+        : null,
     context_size: Number(defaultContextSizeForProfile(profile)),
     keep_loaded: true,
     model_alias: null,

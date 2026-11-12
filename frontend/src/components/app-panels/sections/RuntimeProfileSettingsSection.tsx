@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, RefreshCw, Server } from 'lucide-react';
 import { getElectronAPI } from '../../../api/adapter';
+import { useInstalledRuntimeVersions } from '../../../hooks/useInstalledRuntimeVersions';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
 import type { RuntimeProviderId } from '../../../types/api-runtime-profiles';
 import {
@@ -27,6 +28,7 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
     error,
     refreshRuntimeProfiles,
   } = useRuntimeProfiles();
+  const installedVersions = useInstalledRuntimeVersions(provider);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [draft, setDraft] = useState<RuntimeProfileDraft>(() => newProfileDraft(provider));
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
@@ -111,6 +113,9 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
       if (key === 'management_mode' && value === 'managed') {
         next.endpoint_url = '';
         next.port = '';
+      }
+      if (key === 'management_mode' && value === 'external') {
+        next.runtime_version = '';
       }
       return next;
     });
@@ -234,7 +239,10 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void refreshRuntimeProfiles()}
+            onClick={() => {
+              void refreshRuntimeProfiles();
+              void installedVersions.refresh();
+            }}
             className="p-1.5 rounded-md border border-[hsl(var(--launcher-border)/0.35)] text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))]"
             aria-label="Refresh runtime profiles"
           >
@@ -261,6 +269,7 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
         />
         <RuntimeProfileEditor
           draft={draft}
+          installedVersions={installedVersions}
           selectedProfileId={selectedProfileId}
           selectedStatus={selectedStatus}
           isSaving={isSaving || isRuntimeActionRunning}

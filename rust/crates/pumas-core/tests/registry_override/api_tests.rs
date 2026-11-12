@@ -570,8 +570,10 @@ async fn test_onnx_profile_without_a_host_is_refused_and_leaves_no_shutdown_work
         .await
         .unwrap_err()
         .to_string();
+    // Builds without ONNX Runtime support refuse for that reason instead.
     assert!(
-        refusal.contains("registered no ONNX host executable"),
+        refusal.contains("registered no ONNX host executable")
+            || refusal.contains("no ONNX Runtime support"),
         "{refusal}"
     );
 

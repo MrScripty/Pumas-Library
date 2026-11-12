@@ -2039,11 +2039,10 @@ impl VersionInstaller {
         }
         let root = super::super::torch_workspace::managed_torch_wheel_dir(&self.launcher_root)
             .map_err(|error| format!("the wheel workspace root is unavailable: {error}"))?;
-        let client = reqwest::Client::builder()
-            .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
-            .user_agent("pumas-library")
-            .build()
-            .map_err(|error| format!("the wheel HTTP client could not be created: {error}"))?;
+        let client = super::torch_wheels::wheel_http_client(
+            super::torch_wheels::WHEEL_TRANSFER_STALL_TIMEOUT,
+        )
+        .map_err(|error| format!("the wheel HTTP client could not be created: {error}"))?;
         Ok(super::torch_wheels::TorchWheelAcquisition {
             consumer,
             root,
@@ -2096,13 +2095,14 @@ impl VersionInstaller {
         });
     }
 
-    /// How a failed or successful attempt leaves its wheels: a cancelled
-    /// attempt removes them; any other failure keeps them for the next try.
+    /// How a failed or successful attempt leaves its wheels: a user-cancelled
+    /// attempt removes them; shutdown (which also sets the cancel flag) and
+    /// any other failure keep them for the next try.
     fn torch_wheel_use(&self, succeeded: bool) -> super::torch_wheels::WheelUse {
         if succeeded {
             super::torch_wheels::WheelUse::Consumed
         } else if self.cancel_flag.load(Ordering::SeqCst)
-            || self.shutdown_flag.load(Ordering::SeqCst)
+            && !self.shutdown_flag.load(Ordering::SeqCst)
         {
             super::torch_wheels::WheelUse::Discard
         } else {
@@ -2354,6 +2354,7 @@ impl VersionInstaller {
             selected_torch = Some(selected);
         }
 
+        let mut held_rest = None;
         let outcome = async {
             let local_torch = held_torch.as_ref().map(|(held, wheel)| held.file(wheel));
             // Phase 1: resolve once (a pip dry run) into a per-install hash
@@ -2445,7 +2446,6 @@ impl VersionInstaller {
                 local_files.insert(wheel.name.clone(), local.clone());
                 wheel_dirs.push(held.directory().to_path_buf());
             }
-            let mut held_rest = None;
             if let Some(acquisition) = &wheel_acquisition {
                 let rest = resolution
                     .artifacts
@@ -2544,13 +2544,7 @@ impl VersionInstaller {
                 )
             }
             .await;
-            match held_rest {
-                Some(held) => {
-                    let usage = self.torch_wheel_use(installed.is_ok());
-                    settled_result(installed, held.finish(usage).await)?;
-                }
-                None => installed?,
-            }
+            installed?;
             for name in [
                 "requirements.txt",
                 "resolution.json",
@@ -2589,15 +2583,21 @@ impl VersionInstaller {
             Ok(DirectTorchAttempt::Installed(runtime.clone()))
         }
         .await;
-        let Some((held, _)) = held_torch else {
-            return outcome;
-        };
-        // A retry moves to another wheel; this one is no longer wanted.
+        // Both sets stay held until the attempt's outcome, including the
+        // runtime probe, is known; a failed attempt keeps them both for the
+        // next try. A retry moves to another wheel, so its set is discarded.
         let usage = match &outcome {
             Ok(DirectTorchAttempt::Retry) => super::torch_wheels::WheelUse::Discard,
             outcome => self.torch_wheel_use(outcome.is_ok()),
         };
-        settled_result(outcome, held.finish(usage).await)
+        let mut outcome = outcome;
+        for held in [held_rest, held_torch.map(|(held, _)| held)]
+            .into_iter()
+            .flatten()
+        {
+            outcome = settled_result(outcome, held.finish(usage).await);
+        }
+        outcome
     }
 
     pub(super) async fn install_torch_runtime(

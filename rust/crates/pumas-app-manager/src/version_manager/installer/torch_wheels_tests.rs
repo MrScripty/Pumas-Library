@@ -25,7 +25,13 @@ enum Reply {
     Ranged,
     /// Send the whole body.
     Full,
+    /// Announce the whole body, send this many bytes, then go silent while
+    /// keeping the connection open.
+    Stalled(usize),
 }
+
+/// Test stall bound: long enough for loopback, short enough for a test.
+const TEST_STALL: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone)]
 struct Served {
@@ -52,12 +58,18 @@ impl WheelOrigin {
 }
 
 async fn serve_wheel(body: Vec<u8>, script: Vec<Reply>) -> WheelOrigin {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     // The CDN-style path escapes the local-version `+`, as the PyTorch index does.
-    let url = format!(
-        "http://{}/whl/cpu/torch-2.10.0%2Bcpu-cp312-cp312-linux_x86_64.whl",
-        listener.local_addr().unwrap()
-    );
+    serve_named(
+        "whl/cpu/torch-2.10.0%2Bcpu-cp312-cp312-linux_x86_64.whl",
+        body,
+        script,
+    )
+    .await
+}
+
+async fn serve_named(path: &str, body: Vec<u8>, script: Vec<Reply>) -> WheelOrigin {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/{path}", listener.local_addr().unwrap());
     let served = Arc::new(StdMutex::new(Vec::new()));
     let log = served.clone();
     let server = tokio::spawn(async move {
@@ -91,7 +103,7 @@ async fn serve_wheel(body: Vec<u8>, script: Vec<Reply>) -> WheelOrigin {
                     ),
                     &body[start..],
                 ),
-                (Reply::Truncated(sent), _) => (
+                (Reply::Truncated(sent) | Reply::Stalled(sent), _) => (
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"wheel-v1\"\r\nConnection: close\r\n\r\n",
                         body.len()
@@ -113,6 +125,13 @@ async fn serve_wheel(body: Vec<u8>, script: Vec<Reply>) -> WheelOrigin {
             let _ = stream.write_all(status.as_bytes()).await;
             let _ = stream.write_all(payload).await;
             let _ = stream.flush().await;
+            if matches!(reply, Reply::Stalled(_)) {
+                // Hold the connection open and silent; keep serving others.
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    drop(stream);
+                });
+            }
             // Dropping the stream ends a truncated body mid-transfer.
         }
     });
@@ -149,7 +168,7 @@ impl Owner {
                 root.join("cache"),
             ))),
             log_path: root.join("install.log"),
-            client: reqwest::Client::new(),
+            client: wheel_http_client(TEST_STALL).unwrap(),
             retry: AcquisitionRetryPolicy {
                 attempts: Some(attempts),
                 elapsed: Duration::ZERO,
@@ -555,6 +574,133 @@ async fn settled_workspaces_of_other_selections_are_removed_and_unfinished_ones_
         "{remaining:?}"
     );
     assert_eq!(remaining.len(), 2, "{remaining:?}");
+    held.finish(WheelUse::Consumed).await.unwrap();
+    owner.close().await;
+}
+
+/// The connection stays open but goes silent mid-wheel. The stall bound ends
+/// the attempt and the retry resumes from the bytes already received.
+#[tokio::test]
+async fn stalled_wheel_transfer_retries_and_resumes() {
+    let root = tempfile::TempDir::new().unwrap();
+    let body = wheel_bytes();
+    let cut = body.len() / 4;
+    let origin = serve_wheel(body.clone(), vec![Reply::Stalled(cut), Reply::Ranged]).await;
+    let owner = Owner::open(root.path(), 3);
+    let wheel = locked(&origin, &body);
+
+    let held = tokio::time::timeout(
+        Duration::from_secs(20),
+        owner.acquisition.hold(vec![wheel.clone()], false),
+    )
+    .await
+    .expect("a stalled transfer must not hang the install")
+    .unwrap()
+    .unwrap();
+    assert_eq!(std::fs::read(held.file(&wheel)).unwrap(), body);
+    let served = origin.served();
+    assert_eq!(served.len(), 2, "{served:?}");
+    assert_eq!(served[1].range_start, Some(cut), "{served:?}");
+    held.finish(WheelUse::Consumed).await.unwrap();
+    owner.close().await;
+}
+
+/// Shutdown sets both the shutdown and cancel flags. It pauses the transfer
+/// and keeps its bytes; the next start resumes them.
+#[tokio::test]
+async fn shutdown_keeps_partial_wheels_for_the_next_start() {
+    let root = tempfile::TempDir::new().unwrap();
+    let body = wheel_bytes();
+    let cut = body.len() / 2;
+    let origin = serve_wheel(body.clone(), vec![Reply::Truncated(cut), Reply::Ranged]).await;
+    let wheel = locked(&origin, &body);
+
+    let first = Owner::open(root.path(), 1);
+    assert!(first
+        .acquisition
+        .hold(vec![wheel.clone()], false)
+        .await
+        .is_err());
+    first
+        .acquisition
+        .shutdown_flag
+        .store(true, Ordering::SeqCst);
+    first.acquisition.cancel_flag.store(true, Ordering::SeqCst);
+    let stopped = match first.acquisition.hold(vec![wheel.clone()], false).await {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("shutdown must not hand off"),
+    };
+    assert!(stopped.contains("cancelled"), "{stopped}");
+    assert_eq!(
+        partial_files(root.path()),
+        vec![(format!("{WHEEL_NAME}.part"), cut as u64)]
+    );
+    assert_eq!(
+        first.records().await[0].phase,
+        AcquisitionPhase::Transferring
+    );
+    first.close().await;
+
+    let second = Owner::open(root.path(), 1);
+    let held = second
+        .acquisition
+        .hold(vec![wheel.clone()], false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(std::fs::read(held.file(&wheel)).unwrap(), body);
+    assert_eq!(origin.served().last().unwrap().range_start, Some(cut));
+    held.finish(WheelUse::Consumed).await.unwrap();
+    second.close().await;
+}
+
+/// The resolver may list the same closure in another order on the next
+/// attempt; that attempt still resumes the same durable demand.
+#[tokio::test]
+async fn the_same_wheel_set_in_another_order_resumes() {
+    let root = tempfile::TempDir::new().unwrap();
+    let alpha_body = vec![1_u8; 4096];
+    let beta_body = wheel_bytes();
+    let cut = beta_body.len() / 2;
+    let alpha = serve_named(
+        "packages/alpha-1.0-py3-none-any.whl",
+        alpha_body.clone(),
+        vec![Reply::Full],
+    )
+    .await;
+    let beta = serve_named(
+        "packages/beta-1.0-py3-none-any.whl",
+        beta_body.clone(),
+        vec![Reply::Truncated(cut), Reply::Ranged],
+    )
+    .await;
+    let alpha_wheel = LockedWheel::new("alpha", &alpha.url, &sha256_hex(&alpha_body)).unwrap();
+    let beta_wheel = LockedWheel::new("beta", &beta.url, &sha256_hex(&beta_body)).unwrap();
+    let owner = Owner::open(root.path(), 1);
+
+    assert!(owner
+        .acquisition
+        .hold(vec![alpha_wheel.clone(), beta_wheel.clone()], true)
+        .await
+        .is_err());
+    let interrupted = owner.records().await;
+    let held = owner
+        .acquisition
+        .hold(vec![beta_wheel.clone(), alpha_wheel.clone()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(std::fs::read(held.file(&beta_wheel)).unwrap(), beta_body);
+    assert_eq!(std::fs::read(held.file(&alpha_wheel)).unwrap(), alpha_body);
+    assert_eq!(
+        alpha.served().len(),
+        1,
+        "the verified wheel was not fetched again"
+    );
+    assert_eq!(beta.served().last().unwrap().range_start, Some(cut));
+    let resumed = owner.records().await;
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].demand, interrupted[0].demand);
     held.finish(WheelUse::Consumed).await.unwrap();
     owner.close().await;
 }

@@ -28,6 +28,22 @@ const WHEEL_SET_DIGEST_CHARS: usize = 32;
 const DEMAND_PREFIX: &str = "wheels";
 const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// A wheel connection that delivers no bytes for this long is treated as
+/// lost, so the acquisition retries and resumes from the bytes it has. It
+/// bounds silence, not transfer time: a slow link that keeps sending finishes.
+pub(super) const WHEEL_TRANSFER_STALL_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(60);
+
+/// The HTTP client for wheel transfers. `stall` is the longest silence a
+/// connection may show before the attempt fails and is retried.
+pub(super) fn wheel_http_client(stall: std::time::Duration) -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
+        .read_timeout(stall)
+        .user_agent("pumas-library")
+        .build()
+}
+
 /// One wheel the resolver locked, with the SHA-256 its index published.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct LockedWheel {
@@ -192,6 +208,12 @@ impl TorchWheelAcquisition {
         wheels: Vec<LockedWheel>,
         collect_settled: bool,
     ) -> Result<std::result::Result<HeldWheels, String>> {
+        // One canonical order for the workspace key, manifest and sources, so
+        // the same set in another order resumes the same durable demand.
+        let mut wheels = wheels;
+        wheels.sort_by(|left, right| {
+            (&left.filename, &left.sha256).cmp(&(&right.filename, &right.sha256))
+        });
         let (key, manifest) = match wheel_set(&wheels) {
             Ok(selection) => selection,
             Err(reason) => return Ok(Err(reason)),
@@ -358,10 +380,10 @@ impl TorchWheelAcquisition {
                         ))
                     }
                 };
-                if self.cancel_flag.load(Ordering::SeqCst)
-                    || self.shutdown_flag.load(Ordering::SeqCst)
-                {
-                    if matches!(error, PumasError::DownloadCancelled) {
+                let shutting_down = self.shutdown_flag.load(Ordering::SeqCst);
+                if shutting_down || self.cancel_flag.load(Ordering::SeqCst) {
+                    // A user cancel discards; shutdown pauses and keeps bytes.
+                    if !shutting_down && matches!(error, PumasError::DownloadCancelled) {
                         remove_workspace(&self.consumer, grant).await;
                     }
                     return Err(VersionInstaller::cancellation_error());
@@ -589,8 +611,10 @@ impl HttpAttemptHost for TorchWheelHost {
         self.shutdown_flag.load(Ordering::SeqCst)
     }
 
+    /// Shutdown also sets the cancel flag; it takes precedence so the
+    /// transfer pauses and keeps its bytes instead of discarding them.
     fn cancel_requested(&self) -> bool {
-        self.cancel_flag.load(Ordering::SeqCst)
+        self.cancel_flag.load(Ordering::SeqCst) && !self.shutdown_flag.load(Ordering::SeqCst)
     }
 
     async fn record_progress(&mut self, downloaded_for_file: u64) -> Result<()> {

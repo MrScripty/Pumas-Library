@@ -9,7 +9,7 @@ use ort::{
 use tracing::info;
 
 use super::{
-    output::{extract_hidden_states, extract_scores},
+    output::{extract_embedding_output, extract_scores, EmbeddingOutput},
     tensors::TokenTensors,
     OnnxEmbedding, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
     OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider,
@@ -194,15 +194,25 @@ impl OnnxRuntimeSession {
         };
         let embedding_dimensions = self.embedding_dimensions;
         let embeddings = self.run(&tensors, |outputs| {
-            let hidden_states = extract_hidden_states(
+            let output = extract_embedding_output(
                 outputs,
                 &postprocess_config.output_tensor,
                 tensors.batch_size,
                 tensors.sequence_len,
                 embedding_dimensions,
             )?;
-            OnnxEmbeddingPostprocessor::new(postprocess_config.clone(), embedding_dimensions)?
-                .postprocess_hidden_states(&hidden_states, &tokenized, request.dimensions)
+            let postprocessor =
+                OnnxEmbeddingPostprocessor::new(postprocess_config.clone(), embedding_dimensions)?;
+            match output {
+                EmbeddingOutput::Tokens(hidden_states) => postprocessor.postprocess_hidden_states(
+                    &hidden_states,
+                    &tokenized,
+                    request.dimensions,
+                ),
+                EmbeddingOutput::Pooled(pooled) => {
+                    postprocessor.postprocess_pooled(pooled, tensors.batch_size, request.dimensions)
+                }
+            }
         })?;
         let data = embeddings
             .into_iter()

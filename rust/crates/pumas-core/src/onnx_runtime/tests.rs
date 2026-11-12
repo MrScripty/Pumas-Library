@@ -847,3 +847,70 @@ fn library_model_ids_longer_than_128_bytes_are_accepted() {
         error.message
     );
 }
+
+#[test]
+fn embedding_outputs_are_read_token_level_or_already_pooled() {
+    use super::output::{embedding_output_from_values, EmbeddingOutput};
+    // [batch=2, tokens=2, dims=2]
+    let tokens = embedding_output_from_values(
+        &[2, 2, 2],
+        (0..8).map(|v| v as f32).collect(),
+        "last_hidden_state",
+        2,
+        2,
+        2,
+    )
+    .unwrap();
+    assert_eq!(
+        tokens,
+        EmbeddingOutput::Tokens(vec![
+            vec![vec![0.0, 1.0], vec![2.0, 3.0]],
+            vec![vec![4.0, 5.0], vec![6.0, 7.0]],
+        ])
+    );
+    // [batch=2, dims=2], as exports ending in sentence_embedding produce.
+    let pooled = embedding_output_from_values(
+        &[2, 2],
+        vec![3.0, 4.0, 0.0, 2.0],
+        "sentence_embedding",
+        2,
+        5,
+        2,
+    )
+    .unwrap();
+    assert_eq!(
+        pooled,
+        EmbeddingOutput::Pooled(vec![vec![3.0, 4.0], vec![0.0, 2.0]])
+    );
+    let error = embedding_output_from_values(&[2, 3], vec![0.0; 6], "sentence_embedding", 2, 5, 2)
+        .unwrap_err();
+    assert!(
+        error.message.contains("pooled [batch, dimensions]"),
+        "{}",
+        error.message
+    );
+    let error = embedding_output_from_values(&[8], vec![0.0; 8], "odd", 2, 2, 2).unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("already pooled, [batch, dimensions]"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn already_pooled_vectors_are_truncated_and_normalized_without_pooling() {
+    let postprocessor = OnnxEmbeddingPostprocessor::new(
+        OnnxEmbeddingPostprocessConfig::declared(OnnxEmbeddingPooling::LastToken, true),
+        3,
+    )
+    .unwrap();
+    let out = postprocessor
+        .postprocess_pooled(vec![vec![3.0, 4.0, 12.0]], 1, Some(2))
+        .unwrap();
+    assert_eq!(out, vec![vec![0.6, 0.8]]);
+    assert!(postprocessor
+        .postprocess_pooled(vec![vec![1.0; 3]], 2, None)
+        .is_err());
+}

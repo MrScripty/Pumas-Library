@@ -115,6 +115,45 @@ impl OnnxEmbeddingPostprocessor {
     }
 }
 
+impl OnnxEmbeddingPostprocessor {
+    /// Finish vectors the graph already pooled: the configured layer norm,
+    /// truncation to `dimensions`, then normalization.
+    pub fn postprocess_pooled(
+        &self,
+        pooled: Vec<Vec<f32>>,
+        batch: usize,
+        dimensions: Option<usize>,
+    ) -> Result<Vec<Vec<f32>>, OnnxRuntimeError> {
+        if pooled.len() != batch {
+            return Err(OnnxRuntimeError::validation(
+                "output",
+                "ONNX output batch size must match tokenized input batch size",
+            ));
+        }
+        let dimensions = dimensions.unwrap_or(self.source_dimensions);
+        validate_dimensions(dimensions)?;
+        if dimensions > self.source_dimensions {
+            return Err(OnnxRuntimeError::validation(
+                "dimensions",
+                "requested embedding dimensions exceed ONNX output dimensions",
+            ));
+        }
+        Ok(pooled
+            .into_iter()
+            .map(|mut vector| {
+                if self.config.apply_layer_norm {
+                    apply_layer_norm(&mut vector);
+                }
+                vector.truncate(dimensions);
+                if self.config.l2_normalize {
+                    l2_normalize(&mut vector);
+                }
+                vector
+            })
+            .collect())
+    }
+}
+
 fn pool(
     pooling: OnnxEmbeddingPooling,
     token_embeddings: &[Vec<f32>],

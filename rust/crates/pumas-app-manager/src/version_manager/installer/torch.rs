@@ -1324,7 +1324,7 @@ async fn automatic_torch_builds() -> Vec<&'static str> {
     automatic_torch_builds_for_driver(lowest)
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct DirectTorchResolution {
     release: String,
     torch: String,
@@ -1334,15 +1334,54 @@ struct DirectTorchResolution {
     implementation: String,
     platform: String,
     machine: String,
-    adapter: String,
+    /// General modalities this resolution carries.
+    modalities: Vec<String>,
+    /// General modalities left out, each with the resolver's reason.
+    #[serde(default)]
+    omitted_modalities: std::collections::BTreeMap<String, String>,
+    /// Optional extras the resolution added.
+    extras: Vec<String>,
     artifacts: Vec<crate::version_manager::TorchArtifact>,
+}
+
+/// Packages each general modality needs, as `resolve_runtime.py` resolves
+/// them (image and audio models use the text stack too). A test keeps this
+/// table equal to the resolver's.
+const MODALITY_PACKAGES: &[(&str, &[&str])] = &[
+    (
+        "text",
+        &[
+            "transformers",
+            "tokenizers",
+            "huggingface-hub",
+            "jinja2",
+            "sentencepiece",
+            "protobuf",
+        ],
+    ),
+    ("image", &["torchvision", "diffusers", "accelerate", "peft"]),
+    ("audio", &["librosa", "soundfile", "soxr", "numpy", "scipy"]),
+];
+
+fn modality_packages(modality: &str) -> impl Iterator<Item = &'static str> {
+    let own = MODALITY_PACKAGES
+        .iter()
+        .find(|(name, _)| *name == modality)
+        .map_or(&[][..], |(_, packages)| *packages);
+    let text = if modality == "text" {
+        &[][..]
+    } else {
+        MODALITY_PACKAGES[0].1
+    };
+    text.iter().chain(own).copied()
 }
 
 struct DirectTorchSelection<'a> {
     version: &'a str,
     build: &'a str,
     minor: &'a str,
-    adapter: &'a str,
+    /// Optional extras added to the general modalities.
+    extras: &'a [String],
     python: &'a Path,
     /// The verified local copy of the official Torch wheel that pip resolved
     /// against, when shared acquisition downloaded it.
@@ -1389,7 +1428,7 @@ fn torch_wheel_selection(
     tag: &str,
     build: &str,
     minor: &str,
-    adapter: &str,
+    extras: &[String],
     verified_constraints: Option<&str>,
     role: &str,
 ) -> String {
@@ -1397,11 +1436,42 @@ fn torch_wheel_selection(
         || "current".to_owned(),
         |constraints| format!("verified-{:x}", Sha256::digest(constraints.as_bytes())),
     );
+    let extras = if extras.is_empty() {
+        "general".to_owned()
+    } else {
+        extras.join("+")
+    };
     format!(
-        "{tag}|{build}|python{minor}|{adapter}|{}-{}|{version_choice}|{role}",
+        "{tag}|{build}|python{minor}|{extras}|{}-{}|{version_choice}|{role}",
         std::env::consts::OS,
         std::env::consts::ARCH
     )
+}
+
+/// Recorded when the text stack (Transformers, tokenizers, Jinja) imports, so
+/// text models such as embedders and rerankers can load. Not a sidecar
+/// protocol capability.
+const TORCH_TEXT_CAPABILITY: &str = "text_models";
+
+/// Serving capabilities a probe found importable: image generation needs the
+/// image modality, audio transcription the Cohere ASR family, and text work
+/// the text modality. A capability the probe could not import is absent.
+fn serving_capabilities(probed: &serde_json::Value) -> Vec<&'static str> {
+    let importable = |key: &str| {
+        matches!(
+            probed[key]["status"].as_str(),
+            Some("passed" | "inconclusive")
+        )
+    };
+    [
+        ("text_modality", TORCH_TEXT_CAPABILITY),
+        ("image_modality", TORCH_IMAGE_GENERATION_CAPABILITY),
+        ("cohere_asr", TORCH_AUDIO_TRANSCRIPTION_CAPABILITY),
+    ]
+    .into_iter()
+    .filter(|(key, _)| importable(key))
+    .map(|(_, capability)| capability)
+    .collect()
 }
 
 /// The resolver's selected official Torch wheel, before acquisition.
@@ -1501,7 +1571,7 @@ fn validate_direct_torch_report(
     let version = selection.version;
     let build = selection.build;
     let minor = selection.minor;
-    let adapter = selection.adapter;
+    let extras = selection.extras;
     let python = selection.python;
     let expected_torch = if cfg!(target_os = "macos") && build == "cpu" {
         version.to_owned()
@@ -1512,7 +1582,7 @@ fn validate_direct_torch_report(
         || resolution.torch != expected_torch
         || resolution.build != build
         || resolution.python != minor
-        || resolution.adapter != adapter
+        || resolution.extras != extras
         || resolution.implementation != "cpython"
         || !same_interpreter(Path::new(&resolution.interpreter), python)
         || resolution.artifacts.is_empty()
@@ -1575,8 +1645,9 @@ fn validate_direct_torch_report(
                         &artifact.version,
                         cfg!(target_os = "macos") && build == "cpu",
                     )
-            } else if adapter == "nunchaku" && artifact.name == "nunchaku" {
-                // The adapter's own wheel comes from its project's releases;
+            } else if extras.iter().any(|extra| extra == "nunchaku") && artifact.name == "nunchaku"
+            {
+                // The extra's own wheel comes from its project's releases;
                 // the resolver admits only its exact URL and hash.
                 url.host_str() == Some("github.com")
                     && url
@@ -1602,7 +1673,10 @@ fn validate_direct_torch_report(
             }
         }
         if artifact.name == "torchvision"
-            && (adapter == "none"
+            && (!resolution
+                .modalities
+                .iter()
+                .any(|modality| modality == "image")
                 || !(artifact.version.ends_with(&format!("+{build}"))
                     || (cfg!(target_os = "macos")
                         && build == "cpu"
@@ -1659,26 +1733,46 @@ fn validate_direct_torch_report(
             return Err(failed("Torch report omitted a required core dependency"));
         }
     }
-    if adapter == "flux2" || adapter == "nunchaku" {
-        for required in [
-            "torchvision",
-            "diffusers",
-            "transformers",
-            "accelerate",
-            "peft",
-            "sentencepiece",
-            "protobuf",
-        ] {
-            if !names.contains(required) {
-                return Err(failed("Torch report omitted an image dependency"));
-            }
-        }
-        if adapter == "nunchaku" && !names.contains("nunchaku") {
-            return Err(failed("Torch report omitted the Nunchaku adapter wheel"));
+    // Every general modality is resolved or left out with a reason, and a
+    // resolved modality brings all of its packages.
+    let known = |modality: &str| MODALITY_PACKAGES.iter().any(|(name, _)| *name == modality);
+    if resolution
+        .modalities
+        .iter()
+        .any(|modality| !known(modality))
+        || resolution
+            .omitted_modalities
+            .iter()
+            .any(|(modality, reason)| {
+                !known(modality)
+                    || reason.trim().is_empty()
+                    || resolution.modalities.contains(modality)
+            })
+        || MODALITY_PACKAGES.iter().any(|(modality, _)| {
+            !resolution
+                .modalities
+                .iter()
+                .any(|resolved| resolved == modality)
+                && !resolution.omitted_modalities.contains_key(*modality)
+        })
+    {
+        return Err(failed(
+            "Torch report must resolve each general modality or name why it was left out",
+        ));
+    }
+    for modality in &resolution.modalities {
+        if modality_packages(modality).any(|required| !names.contains(required)) {
+            return Err(failed(format!(
+                "Torch report omitted a {modality} dependency"
+            )));
         }
     }
-    if adapter == "cohere-asr" {
-        super::super::cohere_asr_profile::validate(version, &resolution.artifacts)?;
+    for extra in extras {
+        if !super::super::torch_preview::EXTRAS.contains(&extra.as_str())
+            || !names.contains(extra.as_str())
+        {
+            return Err(failed("Torch report omitted a requested extra's wheel"));
+        }
     }
     Ok(())
 }
@@ -2142,13 +2236,12 @@ impl VersionInstaller {
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        if !["none", "flux2", "nunchaku", "cohere-asr"].contains(&selection.adapter.as_str()) {
-            return Err(failed("Unknown Torch dependency profile"));
-        }
-        if selection.adapter == "cohere-asr" {
-            super::super::cohere_asr_profile::validate_selection(
-                selection.tag.trim_start_matches('v'),
-            )?;
+        if selection
+            .extras
+            .iter()
+            .any(|extra| !super::super::torch_preview::EXTRAS.contains(&extra.as_str()))
+        {
+            return Err(failed("Unknown Torch extra"));
         }
         let builds: Vec<String> = if selection.build == "auto" {
             automatic_torch_builds()
@@ -2289,7 +2382,12 @@ impl VersionInstaller {
                 .arg(runtime.join("resolve_runtime.py"))
                 .args(phase)
                 .args(["--version", version, "--build", build])
-                .args(["--adapter", &selection.adapter])
+                .args(
+                    selection
+                        .extras
+                        .iter()
+                        .flat_map(|extra| ["--extra", extra.as_str()]),
+                )
                 .arg("--progress-file")
                 .arg(&download_progress_path)
                 .arg("--output")
@@ -2310,7 +2408,7 @@ impl VersionInstaller {
                 &selection.tag,
                 build,
                 minor,
-                &selection.adapter,
+                &selection.extras,
                 selection.verified_constraints.as_deref(),
                 role,
             )
@@ -2337,7 +2435,12 @@ impl VersionInstaller {
                 .arg(runtime.join("resolve_runtime.py"))
                 .arg("--select-torch-wheel")
                 .args(["--version", version, "--build", build])
-                .args(["--adapter", &selection.adapter])
+                .args(
+                    selection
+                        .extras
+                        .iter()
+                        .flat_map(|extra| ["--extra", extra.as_str()]),
+                )
                 .arg("--output")
                 .arg(&resolver_output);
             let status = self
@@ -2460,7 +2563,7 @@ impl VersionInstaller {
                 version,
                 build,
                 minor,
-                adapter: &selection.adapter,
+                extras: &selection.extras,
                 python: &python,
                 local_torch_wheel: local_torch.as_deref(),
             };
@@ -2595,14 +2698,21 @@ impl VersionInstaller {
                 std::fs::copy(resolver_output.join(name), runtime.join(name))
                     .map_err(PumasError::from)?;
             }
-            let recipe = serde_json::json!({
-                "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, selection.adapter),
+            let extras_label = if selection.extras.is_empty() {
+                "general".to_owned()
+            } else {
+                selection.extras.join("+")
+            };
+            let mut recipe = serde_json::json!({
+                "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, extras_label),
                 "protocol": SUPPORTED_TORCH_PROTOCOL,
-                "capabilities": if selection.adapter == "cohere-asr" { vec![TORCH_AUDIO_TRANSCRIPTION_CAPABILITY] } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
+                "capabilities": [],
                 "qualification": "not verified by Pumas",
                 "build": build,
                 "python": format!("python{minor}"),
-                "adapter": selection.adapter,
+                "modalities": resolution.modalities,
+                "omitted_modalities": resolution.omitted_modalities,
+                "extras": selection.extras,
                 "managed_python": managed_python_identity_record(&managed_python, &interpreter_hash),
                 "artifacts": resolution.artifacts,
             });
@@ -2620,6 +2730,17 @@ impl VersionInstaller {
                 Some(staging.clone()),
             )
             .await?;
+            // Record what the probe found importable, not what was selected.
+            let probed: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(runtime.join("probe-results.json")).map_err(PumasError::from)?,
+            )
+            .map_err(|error| failed(format!("Invalid Torch probe results: {error}")))?;
+            recipe["capabilities"] = serde_json::json!(serving_capabilities(&probed["capabilities"]));
+            std::fs::write(
+                runtime.join("runtime.json"),
+                serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
+            )
+            .map_err(PumasError::from)?;
             Ok(DirectTorchAttempt::Installed(runtime.clone()))
         }
         .await;
@@ -3257,7 +3378,12 @@ mod managed_python_provenance_tests {
             implementation: "cpython".into(),
             platform: platform.into(),
             machine: machine.into(),
-            adapter: "none".into(),
+            modalities: Vec::new(),
+            omitted_modalities: ["text", "image", "audio"]
+                .into_iter()
+                .map(|modality| (modality.to_owned(), "fixture resolves core only".to_owned()))
+                .collect(),
+            extras: Vec::new(),
             artifacts,
         };
         let report = serde_json::json!({
@@ -3282,7 +3408,7 @@ mod managed_python_provenance_tests {
             version: "2.14.0",
             build: "cpu",
             minor: "3.12",
-            adapter: "none",
+            extras: &[],
             python,
             local_torch_wheel: None,
         };
@@ -3409,7 +3535,7 @@ mod managed_python_provenance_tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn cohere_asr_direct_report_refuses_bad_profile_before_staged_publication() {
+    fn general_modality_report_is_complete_before_staged_publication() {
         let names = [
             "torch",
             "fastapi",
@@ -3418,14 +3544,14 @@ mod managed_python_provenance_tests {
             "pillow",
             "safetensors",
             "transformers",
-            "accelerate",
-            "huggingface-hub",
             "tokenizers",
-            "librosa",
-            "soxr",
-            "soundfile",
+            "huggingface-hub",
+            "jinja2",
             "sentencepiece",
             "protobuf",
+            "librosa",
+            "soundfile",
+            "soxr",
             "numpy",
             "scipy",
             "numba",
@@ -3440,18 +3566,23 @@ mod managed_python_provenance_tests {
             implementation: "cpython".into(),
             platform: "Linux-fixture".into(),
             machine: "x86_64".into(),
-            adapter: "cohere-asr".into(),
+            // The image packages had no compatible wheel here.
+            modalities: vec!["text".into(), "audio".into()],
+            omitted_modalities: [(
+                "image".to_owned(),
+                "No compatible binary wheel for torchvision".to_owned(),
+            )]
+            .into_iter()
+            .collect(),
+            extras: Vec::new(),
             artifacts: names
                 .iter()
                 .map(|name| crate::version_manager::TorchArtifact {
                     name: (*name).into(),
-                    version: match *name {
-                        "torch" => "2.14.0+cpu",
-                        "transformers" => "5.4.0",
-                        "accelerate" => "1.12.0",
-                        "huggingface-hub" => "1.5.0",
-                        "tokenizers" => "0.22.2",
-                        _ => "1.0.0",
+                    version: if *name == "torch" {
+                        "2.14.0+cpu"
+                    } else {
+                        "1.0.0"
                     }
                     .into(),
                     url: if *name == "torch" {
@@ -3467,7 +3598,7 @@ mod managed_python_provenance_tests {
             version: "2.14.0",
             build: "cpu",
             minor: "3.12",
-            adapter: "cohere-asr",
+            extras: &[],
             python: Path::new("/fixture/python"),
             local_torch_wheel: None,
         };
@@ -3481,6 +3612,60 @@ mod managed_python_provenance_tests {
                 .join("\n");
             (report, lock)
         };
+        let check = |resolution: &DirectTorchResolution| {
+            let (report, lock) = records(resolution);
+            validate_direct_torch_report(resolution, &report, &lock, &selection)
+        };
+        check(&resolution).unwrap();
+
+        // A resolved modality must bring all of its packages.
+        let mut incomplete = resolution.artifacts.clone();
+        incomplete.retain(|artifact| artifact.name != "soundfile");
+        let complete = std::mem::replace(&mut resolution.artifacts, incomplete);
+        assert!(check(&resolution)
+            .unwrap_err()
+            .to_string()
+            .contains("audio dependency"));
+        resolution.artifacts = complete;
+
+        // A modality is resolved or left out with a reason, never silently.
+        let reason = resolution.omitted_modalities.remove("image").unwrap();
+        assert!(check(&resolution).is_err());
+        resolution
+            .omitted_modalities
+            .insert("image".into(), "  ".into());
+        assert!(check(&resolution).is_err());
+        resolution.omitted_modalities.insert("image".into(), reason);
+
+        // Torchvision belongs to the image modality.
+        let mut with_vision = resolution.clone();
+        with_vision
+            .artifacts
+            .push(crate::version_manager::TorchArtifact {
+                name: "torchvision".into(),
+                version: "0.29.0+cpu".into(),
+                url: "https://download.pytorch.org/whl/cpu/torchvision-fixture.whl".into(),
+                sha256: "a".repeat(64),
+            });
+        assert!(check(&with_vision).is_err());
+
+        // A requested extra must be in the report.
+        let nunchaku = ["nunchaku".to_owned()];
+        let extra_selection = DirectTorchSelection {
+            extras: &nunchaku,
+            ..selection
+        };
+        let mut with_extra = resolution.clone();
+        with_extra.extras = nunchaku.to_vec();
+        let (report, lock) = records(&with_extra);
+        assert!(
+            validate_direct_torch_report(&with_extra, &report, &lock, &extra_selection)
+                .unwrap_err()
+                .to_string()
+                .contains("extra")
+        );
+
+        // A complete report stages its packages.
         let directory = tempfile::tempdir().unwrap();
         let runtime = directory.path().join("runtime");
         let target = runtime.join("staged-packages");
@@ -3494,32 +3679,8 @@ mod managed_python_provenance_tests {
                 size: bytes.len() as u64,
             }],
         };
-        let index = resolution
-            .artifacts
-            .iter()
-            .position(|a| a.name == "transformers")
-            .unwrap();
         std::fs::create_dir_all(venv_packages_dir(&runtime, "3.12")).unwrap();
         let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
-        // Below the Transformers floor is refused before publication.
-        for wrong in ["4.57.6", "5.3.9"] {
-            resolution.artifacts[index].version = wrong.into();
-            let (report, lock) = records(&resolution);
-            assert!(validate_and_move_direct_torch_packages(
-                &resolution,
-                &report,
-                &lock,
-                &selection,
-                &target,
-                &bootstrap,
-                &manifest
-            )
-            .is_err());
-            assert!(target.join("selected.py").exists());
-            assert!(std::fs::read_dir(&bootstrap.root).unwrap().next().is_none());
-        }
-        // Releases above the floor are current versions, not drift.
-        resolution.artifacts[index].version = "5.12.0".into();
         let (report, lock) = records(&resolution);
         validate_and_move_direct_torch_packages(
             &resolution,
@@ -3534,7 +3695,35 @@ mod managed_python_provenance_tests {
         assert!(runtime
             .join("venv/lib/python3.12/site-packages/selected.py")
             .exists());
-        assert!(!target.exists());
+    }
+
+    #[test]
+    fn modality_packages_match_the_resolver() {
+        let resolver = include_str!("../../../../../../torch-server/resolve_runtime.py");
+        let tuple = |name: &str| {
+            let start = resolver
+                .find(&format!("\n{name} = ("))
+                .unwrap_or_else(|| panic!("resolver defines {name}"));
+            let body = &resolver[start..];
+            let end = body.find(')').unwrap();
+            body[..end]
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        for (modality, constant) in [("text", "TEXT"), ("image", "IMAGE"), ("audio", "AUDIO")] {
+            let own = MODALITY_PACKAGES
+                .iter()
+                .find(|(name, _)| *name == modality)
+                .unwrap()
+                .1;
+            assert_eq!(own.to_vec(), tuple(constant), "{modality}");
+        }
+        assert!(modality_packages("image").any(|name| name == "transformers"));
+        assert!(modality_packages("audio").any(|name| name == "jinja2"));
+        assert!(!modality_packages("text").any(|name| name == "diffusers"));
     }
 
     #[test]
@@ -3688,7 +3877,7 @@ mod managed_python_provenance_tests {
     #[test]
     fn verified_version_choice_is_its_own_wheel_selection() {
         let select = |constraints: Option<&str>, role: &str| {
-            torch_wheel_selection("v2.9.1", "cu130", "3.12", "flux2", constraints, role)
+            torch_wheel_selection("v2.9.1", "cu130", "3.12", &[], constraints, role)
         };
         let current = select(None, "dependencies");
         let verified = select(Some("transformers==4.57.6\n"), "dependencies");
@@ -3723,7 +3912,9 @@ mod managed_python_provenance_tests {
             implementation: "cpython".into(),
             platform: "Linux-fixture".into(),
             machine: "x86_64".into(),
-            adapter: "none".into(),
+            modalities: Vec::new(),
+            omitted_modalities: Default::default(),
+            extras: Vec::new(),
             artifacts: vec![artifact("torch", 'a'), artifact("fastapi", 'b')],
         };
         let report_of = |artifacts: &[crate::version_manager::TorchArtifact]| {

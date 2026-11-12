@@ -80,18 +80,19 @@ describe('Torch desktop projection', () => {
     const getOptions = vi.fn().mockResolvedValue({
       builds: ['cpu', 'cu130'], defaultBuild: 'auto',
       pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
-      adapters: ['none', 'flux2'],
+      adapters: ['none'],
       defaultAdapter: 'none',
+      modalities: ['text', 'image', 'audio'], extras: [],
       verified: [], adapterRequirements: [],
       installed: [
-        { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },
-        { tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'flux2', qualification: 'unverified' },
+        { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled', extras: ['nunchaku'], qualification: 'qualified', capabilities: [{ name: 'image', status: 'available', reason: null }] },
+        { tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'none', extras: [], qualification: 'unverified', capabilities: [{ name: 'image', status: 'available', reason: null }] },
       ],
     });
     const getReleaseOptions = vi.fn();
     const preview = vi.fn().mockResolvedValue({
       status: 'ready', preview: {
-        previewId, expiresInSeconds: 300, tag: releaseTag, build: 'auto', python: 'auto', adapter: 'none',
+        previewId, expiresInSeconds: 300, tag: releaseTag, build: 'auto', python: 'auto', adapter: 'none', extras: [],
         qualification: 'unverified', artifacts: [],
       },
     });
@@ -124,7 +125,7 @@ describe('Torch desktop projection', () => {
     fireEvent.click(screen.getByTitle(/New version available:/));
     await waitFor(() => expect(refreshAll).toHaveBeenCalledWith(true));
     expect(await screen.findByRole('heading', { name: '2.9.1' })).toBeInTheDocument();
-    expect(screen.getByText('Installed cu130 · python3.12 · bundled · qualified')).toBeInTheDocument();
+    expect(screen.getByText('Installed cu130 · python3.12 · nunchaku · qualified · serves image')).toBeInTheDocument();
 
     const releaseRow = screen.getByRole('heading', { name: '2.10.0' }).closest('div.w-full');
     if (!(releaseRow instanceof HTMLElement)) throw new TypeError('Expected release row');
@@ -137,7 +138,7 @@ describe('Torch desktop projection', () => {
     await waitFor(() => expect(confirmInstall).toBeEnabled());
     expect(getReleaseOptions).not.toHaveBeenCalled();
     fireEvent.click(confirmInstall);
-    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'auto', python: 'auto', adapter: 'none' });
+    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'auto', python: 'auto', extras: [] });
     await waitFor(() => expect(installVersion).toHaveBeenCalledWith(releaseTag, previewId));
     expect(switchVersion).not.toHaveBeenCalled();
 
@@ -150,7 +151,7 @@ describe('Torch desktop projection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Inspect active Torch runtime' }));
     expect(await screen.findByRole('region', { name: `Torch probe results for ${releaseTag}` })).toBeInTheDocument();
     expect(probe).toHaveBeenCalledWith(releaseTag);
-    expect(await screen.findByText('Installed: cpu · python3.12 · flux2 · unverified')).toBeInTheDocument();
+    expect(await screen.findByText('Installed: cpu · python3.12 · general · unverified · serves image')).toBeInTheDocument();
 
     expect(screen.getByRole('button', { name: 'Trial startup' })).toBeDisabled();
     expect(await screen.findByRole('option', { name: 'Managed Torch' })).toBeInTheDocument();

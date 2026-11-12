@@ -1,7 +1,10 @@
 //! Torch runtime combinations Pumas has verified, kept as evidence.
 //!
-//! A record says which Torch release, build, Python and adapters worked
-//! together, with which package versions, and when. It does not constrain an
+//! A record says which Torch release, build, Python and optional extras worked
+//! together, with which package versions, and when. Records name adapters
+//! from before every install carried all general modalities: a `nunchaku`
+//! record is the Nunchaku extra, and any other record (such as `flux2`) is a
+//! general install whose recorded packages were verified. It does not constrain an
 //! installation unless the user opts into its versions: packages are
 //! otherwise resolved when the user installs. "Verified" is a version match:
 //! a selection matches a record only when its resolved packages include every
@@ -22,6 +25,8 @@ pub struct TorchVerifiedRuntime {
     /// Managed Python choice, such as `python3.12`.
     pub python: String,
     pub adapters: Vec<String>,
+    /// Optional extras the record verified, derived from `adapters`.
+    pub extras: Vec<String>,
     /// ISO date of the verification.
     pub verified_on: String,
     /// What the verification exercised.
@@ -93,6 +98,7 @@ fn parse(source: &str, platform: &str) -> Result<Vec<TorchVerifiedRuntime>, Stri
             tag: format!("v{}", record.torch),
             build: record.build,
             python: format!("python{}", record.python),
+            extras: record_extras(&record.adapters),
             adapters: record.adapters,
             verified_on: record.verified_on,
             scope: record.scope,
@@ -104,6 +110,15 @@ fn parse(source: &str, platform: &str) -> Result<Vec<TorchVerifiedRuntime>, Stri
                 .collect(),
         })
         .collect())
+}
+
+/// The optional extras a record's legacy adapter names stand for.
+fn record_extras(adapters: &[String]) -> Vec<String> {
+    if adapters.iter().any(|adapter| adapter == "nunchaku") {
+        vec!["nunchaku".to_owned()]
+    } else {
+        Vec::new()
+    }
 }
 
 /// Verified combinations for this host's platform.
@@ -118,9 +133,9 @@ pub(crate) fn verified_constraints(
     tag: &str,
     build: &str,
     python: &str,
-    adapter: &str,
+    extras: &[String],
 ) -> Option<String> {
-    constraints_for(&RECORDS, tag, build, python, adapter)
+    constraints_for(&RECORDS, tag, build, python, extras)
 }
 
 fn constraints_for(
@@ -128,13 +143,13 @@ fn constraints_for(
     tag: &str,
     build: &str,
     python: &str,
-    adapter: &str,
+    extras: &[String],
 ) -> Option<String> {
     let record = records.iter().find(|record| {
         record.tag == tag
             && record.build == build
             && record.python == python
-            && record.adapters.iter().any(|recorded| recorded == adapter)
+            && record.extras == extras
     })?;
     Some(
         record
@@ -153,10 +168,10 @@ pub(crate) fn is_verified(
     tag: &str,
     build: &str,
     python: &str,
-    adapter: &str,
+    extras: &[String],
     artifacts: &[TorchArtifact],
 ) -> bool {
-    matches(&RECORDS, tag, build, python, adapter, artifacts)
+    matches(&RECORDS, tag, build, python, extras, artifacts)
 }
 
 fn matches(
@@ -164,7 +179,7 @@ fn matches(
     tag: &str,
     build: &str,
     python: &str,
-    adapter: &str,
+    extras: &[String],
     artifacts: &[TorchArtifact],
 ) -> bool {
     let version_of = |name: &str| {
@@ -178,7 +193,7 @@ fn matches(
             record.tag == tag
                 && record.build == build
                 && record.python == python
-                && record.adapters.iter().any(|recorded| recorded == adapter)
+                && record.extras == extras
                 && record
                     .packages
                     .iter()
@@ -236,49 +251,61 @@ mod tests {
         };
         let flux2 = installed_as_recorded(record_for("flux2"));
         let nunchaku = installed_as_recorded(record_for("nunchaku"));
-        let check = |tag, build, python, adapter, artifacts: &[TorchArtifact]| {
-            matches(&records, tag, build, python, adapter, artifacts)
+        let general: &[String] = &[];
+        let with_nunchaku = &["nunchaku".to_owned()];
+        let check = |tag, build, python, extras: &[String], artifacts: &[TorchArtifact]| {
+            matches(&records, tag, build, python, extras, artifacts)
         };
-        assert!(check("v2.9.1", "cu130", "python3.12", "flux2", &flux2));
+        // A general install (no extras) is checked against the former Flux 2
+        // record, whose image packages every install now carries.
+        assert!(check("v2.9.1", "cu130", "python3.12", general, &flux2));
         assert!(check(
             "v2.9.1",
             "cu130",
             "python3.12",
-            "nunchaku",
+            with_nunchaku,
             &nunchaku
         ));
-        // A Flux 2 install has no Nunchaku wheel, so it cannot match that record.
-        assert!(!check("v2.9.1", "cu130", "python3.12", "nunchaku", &flux2));
-        assert!(!check("v2.9.1", "cu130", "python3.12", "none", &flux2));
-        assert!(!check("v2.9.1", "cpu", "python3.12", "flux2", &flux2));
-        assert!(!check("v2.9.1", "cu130", "python3.13", "flux2", &flux2));
-        assert!(!check("v2.10.0", "cu130", "python3.12", "flux2", &flux2));
+        // A general install has no Nunchaku wheel, so it cannot match that record.
+        assert!(!check(
+            "v2.9.1",
+            "cu130",
+            "python3.12",
+            with_nunchaku,
+            &flux2
+        ));
+        assert!(!check("v2.9.1", "cpu", "python3.12", general, &flux2));
+        assert!(!check("v2.9.1", "cu130", "python3.13", general, &flux2));
+        assert!(!check("v2.10.0", "cu130", "python3.12", general, &flux2));
 
         let mut newer = flux2.clone();
         let pillow = newer.iter().position(|item| item.name == "pillow").unwrap();
         newer[pillow] = artifact("Pillow", "13.0.0");
-        assert!(!check("v2.9.1", "cu130", "python3.12", "flux2", &newer));
+        assert!(!check("v2.9.1", "cu130", "python3.12", general, &newer));
 
         // An absent recorded package fails the match.
         let mut missing = flux2.clone();
         missing.retain(|item| item.name != "diffusers");
-        assert!(!check("v2.9.1", "cu130", "python3.12", "flux2", &missing));
+        assert!(!check("v2.9.1", "cu130", "python3.12", general, &missing));
+        assert_eq!(record_for("nunchaku").extras, vec!["nunchaku".to_owned()]);
+        assert!(record_for("flux2").extras.is_empty());
     }
 
     #[test]
     fn verified_constraints_pin_exactly_the_matching_record() {
         let source = include_str!("../../../../../torch-server/runtime/verified-runtimes.json");
         let records = parse(source, "linux-x86_64").unwrap();
+        let nunchaku = &["nunchaku".to_owned()];
         let constraints =
-            constraints_for(&records, "v2.9.1", "cu130", "python3.12", "nunchaku").unwrap();
+            constraints_for(&records, "v2.9.1", "cu130", "python3.12", nunchaku).unwrap();
         assert!(constraints.contains("torch==2.9.1+cu130\n"));
         assert!(constraints.contains("nunchaku==1.2.0+torch2.9\n"));
         assert!(
-            !constraints_for(&records, "v2.9.1", "cu130", "python3.12", "flux2")
+            !constraints_for(&records, "v2.9.1", "cu130", "python3.12", &[])
                 .unwrap()
                 .contains("nunchaku")
         );
-        assert!(constraints_for(&records, "v2.9.1", "auto", "python3.12", "flux2").is_none());
-        assert!(constraints_for(&records, "v2.9.1", "cu130", "python3.12", "none").is_none());
+        assert!(constraints_for(&records, "v2.9.1", "auto", "python3.12", &[]).is_none());
+        assert!(constraints_for(&records, "v2.9.1", "cu130", "python3.13", &[]).is_none());
     }
 }

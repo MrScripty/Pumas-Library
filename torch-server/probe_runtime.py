@@ -1,4 +1,9 @@
-"""Record installed Torch, sidecar, device, and selected adapter evidence."""
+"""Record installed Torch, sidecar, device, modality and model-family evidence.
+
+Capabilities come from what this interpreter can import, not from a recorded
+selection: every install carries the general modalities, so each modality and
+model family is probed and reported available or unavailable with a reason.
+"""
 
 import asyncio
 import hashlib
@@ -22,6 +27,39 @@ ADAPTER_IMPORTS = {
         (("diffusers", "ZImagePipeline"), ("nunchaku", "NunchakuZImageTransformer2DModel")),
     ),
 }
+# The general modalities' import surface, matching the packages
+# resolve_runtime.py resolves for each (image and audio models use text too).
+TEXT_IMPORTS = (
+    "transformers",
+    "tokenizers",
+    "huggingface_hub",
+    "jinja2",
+    "sentencepiece",
+    "google.protobuf",
+)
+MODALITY_IMPORTS = {
+    "text": TEXT_IMPORTS,
+    "image": (*TEXT_IMPORTS, "torchvision", "diffusers", "accelerate", "peft"),
+    "audio": (*TEXT_IMPORTS, "librosa", "soundfile", "soxr", "numpy", "scipy"),
+}
+
+
+def modality_probe(modality: str, omitted: dict) -> dict:
+    """Whether a general modality's packages import; a modality the resolver
+    could not include reports the reason it gave."""
+    if modality in omitted:
+        return {
+            "status": "unavailable",
+            "scope": "modality packages",
+            "reason": str(omitted[modality]),
+        }
+    result = adapter_import_probe(MODALITY_IMPORTS[modality], ())
+    result["scope"] = (
+        "modality packages import; no model loaded"
+        if result["status"] != "unavailable"
+        else "modality packages"
+    )
+    return result
 
 
 def runtime_file_hashes(root: Path) -> dict[str, str]:
@@ -231,18 +269,18 @@ def probe(root: Path) -> dict:
             "error": str(error),
             "scope": "in-process app construction and health endpoint",
         }
-    selected = resolution.get("adapter", "none")
-    for adapter, (modules, symbols) in ADAPTER_IMPORTS.items():
-        key = "nunchaku_z_image" if adapter == "nunchaku" else "flux2_klein"
-        capabilities[key] = (
-            adapter_import_probe(modules, symbols)
-            if selected == adapter
-            else {"status": "not selected", "scope": "optional adapter"}
-        )
-    capabilities["cohere_asr"] = (
-        cohere_asr_import_probe()
-        if selected == "cohere-asr"
-        else {"status": "not selected", "scope": "optional adapter"}
+    extras = tuple(resolution.get("extras", ()))
+    omitted = resolution.get("omitted_modalities", {})
+    for modality in MODALITY_IMPORTS:
+        capabilities[f"{modality}_modality"] = modality_probe(modality, omitted)
+    # Model families every install can serve are probed on every install;
+    # an extra is probed only when it was requested.
+    capabilities["flux2_klein"] = adapter_import_probe(*ADAPTER_IMPORTS["flux2"])
+    capabilities["cohere_asr"] = cohere_asr_import_probe()
+    capabilities["nunchaku_z_image"] = (
+        adapter_import_probe(*ADAPTER_IMPORTS["nunchaku"])
+        if "nunchaku" in extras
+        else {"status": "not selected", "scope": "optional extra"}
     )
     capabilities["audio_transcription"] = {
         "status": "not tested",
@@ -272,19 +310,30 @@ def probe(root: Path) -> dict:
         if all(capabilities[key]["status"] == "passed" for key in core_checks)
         else "failed"
     )
-    if selected == "none":
+    # `adapter_status` now describes the optional extra (Nunchaku), the only
+    # selection left; the general modalities are reported per capability.
+    if "nunchaku" not in extras:
         adapter_status = "not selected"
-    elif selected == "cohere-asr":
-        adapter_status = capabilities["cohere_asr"]["status"]
     else:
-        adapter_keys = ("nunchaku_z_image",) if selected == "nunchaku" else ("flux2_klein",)
         adapter_status = (
             "unavailable"
-            if any(capabilities[key]["status"] == "unavailable" for key in adapter_keys)
+            if capabilities["nunchaku_z_image"]["status"] == "unavailable"
             or capabilities["image_device"]["status"] != "passed"
             else "inconclusive"
         )
-    status = "failed" if core_status == "failed" else "partial" if selected != "none" else "passed"
+    reported = [
+        *(f"{modality}_modality" for modality in MODALITY_IMPORTS),
+        "flux2_klein",
+        "cohere_asr",
+        *(["nunchaku_z_image"] if "nunchaku" in extras else []),
+    ]
+    status = (
+        "failed"
+        if core_status == "failed"
+        else "partial"
+        if any(capabilities[key]["status"] == "unavailable" for key in reported)
+        else "passed"
+    )
     hardware_identity = {
         "cuda": hardware["cuda"],
         "hip": hardware["hip"],
@@ -337,9 +386,12 @@ def main() -> None:
     result = probe(root)
     (root / "probe-results.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
+    # A general modality or model family that does not import is reported,
+    # not fatal. A requested extra that does not import refuses publication:
+    # the install was made for it.
     if result["core_status"] != "passed" or (
-        result["environment"].get("adapter") == "cohere-asr"
-        and result["adapter_status"] != "inconclusive"
+        "nunchaku" in result["environment"].get("extras", ())
+        and result["capabilities"]["nunchaku_z_image"]["status"] == "unavailable"
     ):
         raise SystemExit(1)
 

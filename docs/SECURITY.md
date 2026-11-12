@@ -152,9 +152,11 @@ whose distributions are exactly those in its hash lock, `requirements.txt`; its
 evidence: a runtime is verified when every package a record lists is installed
 at exactly the recorded version (a recorded package that is absent fails the
 match), which is a version comparison, not a hash or provenance claim. It installs nothing unless the user
-opts into a record's versions. Every adapter, including `cohere-asr`, resolves
-current versions; adapters state only compatibility floors (Cohere ASR needs
-Transformers 5.4 or newer).
+opts into a record's versions. Every install resolves the general text, image
+and audio packages at current versions; model families state only
+compatibility floors (Cohere ASR needs Transformers 5.4 or newer), and a floor
+that the selected Torch or a chosen record excludes is skipped, with the
+install probe reporting that family unavailable and why.
 `torch-server/requirements.txt` is an unpinned direct-development input, not a
 shipped dependency set. Its lower bounds sit past the known advisories, because
 scanners such as Scorecard read each bound as the installed version.

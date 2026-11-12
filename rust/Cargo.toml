@@ -46,7 +46,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # System information
-sysinfo = { version = "0.32", default-features = false, features = ["system", "disk", "multithread"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system", "disk", "multithread"] }
 
 # Cross-platform signal handling
 ctrlc = "3.4"

@@ -51,6 +51,7 @@ async fn main() -> pumas_library::Result<()> {
         archive_size: None,
         dependencies_size: None,
         unavailable_reason: None,
+        install_availability: None,
     };
     let (tx, mut rx) = mpsc::channel(32);
     let install = installer.install_version(&release.tag_name, &release, tx);

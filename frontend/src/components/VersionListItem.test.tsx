@@ -231,7 +231,7 @@ describe('VersionListItem', () => {
     const reason =
       'ONNX Runtime 1.31.1 has no published CUDA 12 package metadata. Builds that install instead: v1.29.0+cuda12 installs';
     const { props } = renderVersionListItem({
-      release: { ...release, tagName: 'v1.31.1+cuda12', unavailableReason: reason },
+      release: { ...release, tagName: 'v1.31.1+cuda12', installAvailability: 'unavailable', unavailableReason: reason },
     });
 
     expect(screen.getByText(reason)).toBeInTheDocument();
@@ -240,5 +240,25 @@ describe('VersionListItem', () => {
     expect(screen.queryByRole('button', { name: 'Install version' })).not.toBeInTheDocument();
     fireEvent.click(unavailable);
     expect(props.onInstall).not.toHaveBeenCalled();
+  });
+
+  it('shows checking in place of install while the backend checks the build', () => {
+    const { props } = renderVersionListItem({
+      release: { ...release, tagName: 'v1.31.1+cuda12', installAvailability: 'checking' },
+    });
+    const checking = screen.getByRole('button', { name: 'Checking whether this version can be installed' });
+    expect(checking).toBeDisabled();
+    expect(checking).toHaveTextContent('Checking…');
+    expect(screen.queryByRole('button', { name: 'Install version' })).not.toBeInTheDocument();
+    fireEvent.click(checking);
+    expect(props.onInstall).not.toHaveBeenCalled();
+  });
+
+  it('keeps install enabled when the backend could not tell', () => {
+    const { props } = renderVersionListItem({
+      release: { ...release, tagName: 'v1.31.1+cuda12', installAvailability: 'unknown' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Install version' }));
+    expect(props.onInstall).toHaveBeenCalledTimes(1);
   });
 });

@@ -1519,6 +1519,7 @@ impl VersionManager {
             archive_size: None,
             dependencies_size: None,
             unavailable_reason: None,
+            install_availability: None,
         })
     }
 
@@ -1993,6 +1994,7 @@ mod tests {
                     archive_size: Some(size),
                     dependencies_size: None,
                     unavailable_reason: None,
+                    install_availability: None,
                 }],
             )
             .unwrap();
@@ -2196,6 +2198,7 @@ mod tests {
                         archive_size: Some(100),
                         dependencies_size: None,
                         unavailable_reason: None,
+                        install_availability: None,
                     }],
                 )
                 .unwrap();
@@ -5488,6 +5491,7 @@ mod tests {
                 archive_size: Some(4),
                 dependencies_size: None,
                 unavailable_reason: None,
+                install_availability: None,
             }],
         )
         .unwrap();
@@ -6113,6 +6117,7 @@ mod tests {
                     archive_size: None,
                     dependencies_size: None,
                     unavailable_reason: None,
+                    install_availability: None,
                 }],
             )
             .unwrap();

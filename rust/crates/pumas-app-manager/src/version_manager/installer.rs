@@ -4473,6 +4473,7 @@ mod tests {
             archive_size: None,
             dependencies_size: None,
             unavailable_reason: None,
+            install_availability: None,
         };
         let (progress, _updates) = mpsc::channel(1);
         let error = installer

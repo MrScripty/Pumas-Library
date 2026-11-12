@@ -1796,6 +1796,7 @@ mod tests {
             archive_size: None,
             dependencies_size: None,
             unavailable_reason: None,
+            install_availability: None,
         }];
 
         // Save to disk
@@ -1827,6 +1828,7 @@ mod tests {
             archive_size: None,
             dependencies_size: None,
             unavailable_reason: None,
+            install_availability: None,
         }];
 
         cache.set_memory("test/repo", releases.clone());
@@ -1860,6 +1862,7 @@ mod tests {
             archive_size: None,
             dependencies_size: None,
             unavailable_reason: None,
+            install_availability: None,
         }];
         cache.set_disk("test/repo", &releases).unwrap();
 
@@ -1888,6 +1891,7 @@ mod tests {
             archive_size: None,
             dependencies_size: None,
             unavailable_reason: None,
+            install_availability: None,
         }];
 
         cache.set_memory("test/repo", releases.clone());
@@ -2015,6 +2019,7 @@ mod tests {
             archive_size: None,
             dependencies_size: None,
             unavailable_reason: None,
+            install_availability: None,
         }
     }
 

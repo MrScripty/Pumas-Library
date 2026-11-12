@@ -13,6 +13,25 @@ pub struct GitHubAsset {
     pub content_type: Option<String>,
 }
 
+/// Whether a listed build can be installed on this host, as far as the
+/// listing knows. Only builds whose installability depends on more than their
+/// archive (ONNX Runtime CUDA builds, which also need NVIDIA's libraries)
+/// carry one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
+pub enum InstallAvailability {
+    /// The lookup is still running; list the versions again for its result.
+    Checking,
+    /// The build installs.
+    Available,
+    /// The build cannot install; `unavailable_reason` says why.
+    Unavailable,
+    /// The lookup could not reach the package indexes. Installing still
+    /// checks, and decides.
+    Unknown,
+}
+
 /// GitHub release information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubRelease {
@@ -42,6 +61,10 @@ pub struct GitHubRelease {
     /// never part of the publisher's release data.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unavailable_reason: Option<String>,
+    /// Whether this build installs, for builds where the listing checks it.
+    /// Computed per listing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_availability: Option<InstallAvailability>,
 }
 
 impl GitHubRelease {
@@ -83,6 +106,10 @@ pub struct VersionReleaseInfo {
     /// user sees the reason and the builds that install instead.
     #[serde(default)]
     pub unavailable_reason: Option<String>,
+    /// Whether this build installs, for builds the backend checks before an
+    /// install (ONNX Runtime CUDA builds); `null` for every other build.
+    #[serde(default)]
+    pub install_availability: Option<InstallAvailability>,
 }
 
 /// Release asset for frontend.
@@ -119,6 +146,7 @@ impl From<GitHubRelease> for VersionReleaseInfo {
             dependencies_size: release.dependencies_size,
             installing: None,
             unavailable_reason: release.unavailable_reason,
+            install_availability: release.install_availability,
         }
     }
 }
@@ -195,6 +223,7 @@ mod tests {
             archive_size: Some(1024),
             dependencies_size: Some(1024),
             unavailable_reason: None,
+            install_availability: None,
         };
 
         let info: VersionReleaseInfo = release.clone().into();

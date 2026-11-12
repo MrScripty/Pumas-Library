@@ -2,33 +2,37 @@
 //!
 //! A CUDA build installs only when Microsoft's metadata for it names CUDA
 //! libraries that NVIDIA publishes for the host (see [`super::onnx_cuda`]).
-//! The version listing asks this owner about every CUDA build it lists, so a
-//! build that cannot install is reported with its reason, and the reason names
-//! the builds that do install. The answers come from the same resolution an
-//! install runs, never from a table.
+//! The version listing asks this owner about every CUDA build it lists and
+//! gives each one an explicit state: `checking` while its lookup runs,
+//! `available`, `unavailable` with the reason (which names the builds that do
+//! install), or `unknown` when the indexes could not be read, in which case an
+//! install still decides. The answers come from the same resolution an install
+//! runs, never from a table.
 //!
-//! An answer is kept per build until the package indexes change or a refresh
-//! is asked for: it is tied to the [`IndexCache`] generation, and a newer
-//! generation revalidates the index pages it read (conditional requests the
-//! index answers with "not modified" when nothing changed). An answer the
-//! indexes could not give, such as a network failure, is not kept and does not
-//! mark a build unavailable.
+//! One lookup runs per build and generation; listings that arrive while it
+//! runs wait on the same lookup. An answer is kept until the package indexes
+//! change or a refresh is asked for: it is tied to the [`IndexCache`]
+//! generation, and a newer generation revalidates the index pages it read
+//! (conditional requests the index answers with "not modified" when nothing
+//! changed).
+//!
+//! [`IndexCache`]: super::python_index::IndexCache
 
 use super::onnx_cuda::{self, CudaWheelSources};
 use super::python_index::WheelPlatform;
 use futures::StreamExt;
-use pumas_library::models::GitHubRelease;
+use pumas_library::models::{GitHubRelease, InstallAvailability};
 use pumas_library::onnx_runtime_distribution::{release_version, OnnxRuntimeVariant};
 use pumas_library::PumasError;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
+use tokio::sync::OnceCell;
 
 /// Builds resolved at once while a listing is annotated.
 const LISTING_CONCURRENCY: usize = 4;
-/// How long a listing waits for answers. Lookups still running afterwards
-/// finish in the background and answer the next listing; until then the build
-/// is listed without a reason, and an install of it still checks.
+/// How long a listing waits for answers. A lookup still running afterwards is
+/// listed as `checking` and keeps running; the next listing waits on it.
 const LISTING_DEADLINE: Duration = Duration::from_secs(10);
 
 /// Whether a CUDA build installs, as the package indexes say.
@@ -39,29 +43,25 @@ pub(crate) enum CudaBuildOutcome {
     Unavailable(String),
 }
 
-#[derive(Clone)]
-struct Entry {
+/// A finished lookup: the outcome, or `None` when the indexes could not be
+/// read (the build's state is unknown).
+type Answer = Option<CudaBuildOutcome>;
+
+/// The lookup of one build in one index generation.
+#[derive(Debug)]
+struct Slot {
     generation: u64,
-    outcome: CudaBuildOutcome,
+    answer: Arc<OnceCell<Answer>>,
 }
 
 /// The CUDA builds a listing offers and whether each installs.
 #[derive(Debug)]
 pub(crate) struct CudaAvailability {
     sources: CudaWheelSources,
-    entries: StdMutex<HashMap<String, Entry>>,
+    slots: StdMutex<HashMap<String, Slot>>,
     /// The CUDA build tags of the latest listing.
     listed: StdMutex<Vec<String>>,
-}
-
-impl std::fmt::Debug for Entry {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Entry")
-            .field("generation", &self.generation)
-            .field("outcome", &self.outcome)
-            .finish()
-    }
+    listing_deadline: Duration,
 }
 
 /// The message of a resolution refusal, or `None` when the failure says
@@ -83,9 +83,16 @@ impl CudaAvailability {
     pub(crate) fn new(sources: CudaWheelSources) -> Self {
         Self {
             sources,
-            entries: StdMutex::default(),
+            slots: StdMutex::default(),
             listed: StdMutex::default(),
+            listing_deadline: LISTING_DEADLINE,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_listing_deadline(mut self, deadline: Duration) -> Self {
+        self.listing_deadline = deadline;
+        self
     }
 
     pub(crate) fn sources(&self) -> &CudaWheelSources {
@@ -97,88 +104,88 @@ impl CudaAvailability {
         self.sources.cache.refresh();
     }
 
-    fn kept(&self, tag: &str) -> Option<CudaBuildOutcome> {
+    /// The lookup of `tag` in the current generation, started or not.
+    fn slot(&self, tag: &str) -> Arc<OnceCell<Answer>> {
         let generation = self.sources.cache.generation();
-        self.entries
+        let mut slots = self
+            .slots
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(tag)
-            .filter(|entry| entry.generation == generation)
-            .map(|entry| entry.outcome.clone())
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let slot = slots.entry(tag.to_owned()).or_insert_with(|| Slot {
+            generation,
+            answer: Arc::default(),
+        });
+        if slot.generation != generation {
+            *slot = Slot {
+                generation,
+                answer: Arc::default(),
+            };
+        }
+        slot.answer.clone()
+    }
+
+    /// The finished lookup of `tag` in the current generation, if any.
+    fn finished(&self, tag: &str) -> Option<Answer> {
+        self.slot(tag).get().cloned()
     }
 
     /// Keep what an install's own resolution found for `tag`.
     pub(crate) fn record(&self, tag: &str, outcome: CudaBuildOutcome) {
         let generation = self.sources.cache.generation();
-        self.entries
+        self.slots
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(
                 tag.to_owned(),
-                Entry {
+                Slot {
                     generation,
-                    outcome,
+                    answer: Arc::new(OnceCell::new_with(Some(Some(outcome)))),
                 },
             );
     }
 
     /// Whether the CUDA build `tag` installs on this host, or `None` when the
-    /// indexes could not say.
-    pub(crate) async fn outcome(&self, tag: &str) -> Option<CudaBuildOutcome> {
-        if let Some(outcome) = self.kept(tag) {
-            return Some(outcome);
-        }
-        let (release, major) = cuda_build(tag)?;
-        let platform = WheelPlatform::host()?;
-        let generation = self.sources.cache.generation();
-        let outcome = match onnx_cuda::resolve(&self.sources, tag, &release, major, platform).await
-        {
-            Ok(_) => CudaBuildOutcome::Installs,
-            Err(error) => CudaBuildOutcome::Unavailable(refusal_reason(&error)?),
-        };
-        self.entries
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(
-                tag.to_owned(),
-                Entry {
-                    generation,
-                    outcome: outcome.clone(),
-                },
-            );
-        Some(outcome)
+    /// indexes could not say. Concurrent callers share one lookup.
+    pub(crate) async fn outcome(&self, tag: &str) -> Answer {
+        self.slot(tag)
+            .get_or_init(|| self.look_up(tag))
+            .await
+            .clone()
     }
 
-    /// The answers for `tags`, waiting at most [`LISTING_DEADLINE`] for those
-    /// not known yet. A lookup that takes longer keeps running and keeps its
-    /// answer for the next caller.
-    async fn outcomes(self: &Arc<Self>, tags: &[String]) -> HashMap<String, CudaBuildOutcome> {
+    async fn look_up(&self, tag: &str) -> Answer {
+        let (release, major) = cuda_build(tag)?;
+        let platform = WheelPlatform::host()?;
+        match onnx_cuda::resolve(&self.sources, tag, &release, major, platform).await {
+            Ok(_) => Some(CudaBuildOutcome::Installs),
+            Err(error) => refusal_reason(&error).map(CudaBuildOutcome::Unavailable),
+        }
+    }
+
+    /// The finished lookups of `tags`, after waiting at most
+    /// [`LISTING_DEADLINE`] for those still running. A build missing from the
+    /// result is still being checked; its lookup keeps running.
+    async fn answers(self: &Arc<Self>, tags: &[String]) -> HashMap<String, Answer> {
         let owner = Arc::clone(self);
         let pending = tags.to_vec();
         let lookups = tokio::spawn(async move {
             futures::stream::iter(pending)
                 .map(|tag| {
                     let owner = Arc::clone(&owner);
-                    async move {
-                        let outcome = owner.outcome(&tag).await;
-                        (tag, outcome)
-                    }
+                    async move { owner.outcome(&tag).await }
                 })
                 .buffer_unordered(LISTING_CONCURRENCY)
-                .filter_map(|(tag, outcome)| async move { outcome.map(|outcome| (tag, outcome)) })
-                .collect::<HashMap<_, _>>()
+                .collect::<Vec<_>>()
                 .await
         });
-        match tokio::time::timeout(LISTING_DEADLINE, lookups).await {
-            Ok(Ok(outcomes)) => outcomes,
-            _ => tags
-                .iter()
-                .filter_map(|tag| self.kept(tag).map(|outcome| (tag.clone(), outcome)))
-                .collect(),
-        }
+        let _ = tokio::time::timeout(self.listing_deadline, lookups).await;
+        tags.iter()
+            .filter_map(|tag| self.finished(tag).map(|answer| (tag.clone(), answer)))
+            .collect()
     }
 
-    /// Mark every listed CUDA build that cannot install with its reason.
+    /// Give every listed CUDA build its install state, and a build that
+    /// cannot install its reason.
     pub(crate) async fn annotate(self: &Arc<Self>, releases: &mut [GitHubRelease]) {
         let tags: Vec<String> = releases
             .iter()
@@ -189,12 +196,22 @@ impl CudaAvailability {
             .listed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = tags.clone();
-        let outcomes = self.outcomes(&tags).await;
+        let answers = self.answers(&tags).await;
+        let outcomes = known(&answers);
         for release in releases.iter_mut() {
-            if let Some(CudaBuildOutcome::Unavailable(reason)) = outcomes.get(&release.tag_name) {
-                release.unavailable_reason =
-                    Some(explain(&release.tag_name, reason, &tags, &outcomes));
+            if cuda_build(&release.tag_name).is_none() {
+                continue;
             }
+            release.install_availability = Some(match answers.get(&release.tag_name) {
+                None => InstallAvailability::Checking,
+                Some(None) => InstallAvailability::Unknown,
+                Some(Some(CudaBuildOutcome::Installs)) => InstallAvailability::Available,
+                Some(Some(CudaBuildOutcome::Unavailable(reason))) => {
+                    release.unavailable_reason =
+                        Some(explain(&release.tag_name, reason, &tags, &outcomes));
+                    InstallAvailability::Unavailable
+                }
+            });
         }
     }
 
@@ -205,9 +222,17 @@ impl CudaAvailability {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let outcomes = self.outcomes(&listed).await;
-        explain(tag, reason, &listed, &outcomes)
+        let answers = self.answers(&listed).await;
+        explain(tag, reason, &listed, &known(&answers))
     }
+}
+
+/// The builds whose outcome is known.
+fn known(answers: &HashMap<String, Answer>) -> HashMap<String, CudaBuildOutcome> {
+    answers
+        .iter()
+        .filter_map(|(tag, answer)| answer.clone().map(|outcome| (tag.clone(), outcome)))
+        .collect()
 }
 
 /// The installing builds of CUDA `major` among `listed`, newest first, and

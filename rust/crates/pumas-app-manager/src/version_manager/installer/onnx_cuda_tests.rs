@@ -45,8 +45,10 @@ struct ServerState {
     truncate_once: HashSet<String>,
     /// Every request: its path and any `Range` header.
     log: Vec<(String, Option<String>)>,
-    /// Paths that are never answered.
+    /// Paths answered only once they are released.
     stalled: HashSet<String>,
+    /// Paths answered with a server error.
+    failing: HashSet<String>,
 }
 
 /// A loopback HTTP origin with byte-range support.
@@ -94,6 +96,14 @@ impl FixtureServer {
 
     fn stall(&self, path: &str) {
         self.state.lock().unwrap().stalled.insert(path.to_owned());
+    }
+
+    fn fail(&self, path: &str) {
+        self.state.lock().unwrap().failing.insert(path.to_owned());
+    }
+
+    fn release(&self, path: &str) {
+        self.state.lock().unwrap().stalled.remove(path);
     }
 
     fn unroute(&self, path: &str) {
@@ -154,15 +164,28 @@ async fn serve(mut stream: tokio::net::TcpStream, state: Arc<StdMutex<ServerStat
         name.eq_ignore_ascii_case("range")
             .then(|| value.trim().to_owned())
     });
-    let (route, truncate, stalled) = {
+    let mut stalled = {
         let mut state = state.lock().unwrap();
         state.log.push((path.clone(), range.clone()));
+        state.stalled.contains(&path)
+    };
+    // A stalled path answers once it is released.
+    while stalled {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        stalled = state.lock().unwrap().stalled.contains(&path);
+    }
+    let (route, truncate) = {
+        let mut state = state.lock().unwrap();
         let route = state.routes.get(&path).cloned();
         let truncate = range.is_none() && state.truncate_once.remove(&path);
-        (route, truncate, state.stalled.contains(&path))
+        (route, truncate)
     };
-    if stalled {
-        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    if state.lock().unwrap().failing.contains(&path) {
+        let _ = stream
+            .write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await;
         return;
     }
     let Some(route) = route else {
@@ -935,6 +958,109 @@ fn a_wheel_that_ships_a_library_as_a_link_is_refused() {
     assert!(refused.contains("as a link"), "{refused}");
 }
 
+fn listed(tag: &str) -> pumas_library::models::GitHubRelease {
+    pumas_library::models::GitHubRelease {
+        tag_name: tag.into(),
+        name: tag.into(),
+        published_at: "2026-10-01T00:00:00Z".into(),
+        body: None,
+        tarball_url: None,
+        zipball_url: None,
+        prerelease: false,
+        assets: vec![],
+        html_url: String::new(),
+        total_size: None,
+        archive_size: None,
+        dependencies_size: None,
+        unavailable_reason: None,
+        install_availability: None,
+    }
+}
+
+#[cfg(all(
+    any(target_os = "linux", target_os = "windows"),
+    target_arch = "x86_64"
+))]
+#[tokio::test]
+async fn listed_cuda_builds_carry_their_install_state() {
+    use pumas_library::models::InstallAvailability as State;
+    let server = FixtureServer::start().await;
+    let platform = WheelPlatform::host().unwrap();
+    publish_onnxruntime_gpu(&server, "/pypi/simple", platform, CUDA12_EXTRAS);
+    publish_cuda12_closure(&server, platform, 64);
+    // The CUDA 13 lookup is slow; the CUDA 12 feed cannot be reached.
+    let feed13 = "/feed13/simple/onnxruntime-gpu/";
+    server.stall(feed13);
+    server.fail("/feed12/simple/onnxruntime-gpu/");
+    let availability = Arc::new(
+        CudaAvailability::new(sources(&server))
+            .with_listing_deadline(std::time::Duration::from_millis(300)),
+    );
+    let tags = [
+        "v1.24.2+cpu",
+        "v1.24.2+cuda12",
+        "v1.24.2+cuda13",
+        // Not on PyPI, and its feed answers 503.
+        "v1.25.0+cuda12",
+    ];
+    let list = || async {
+        let mut releases: Vec<_> = tags.iter().map(|tag| listed(tag)).collect();
+        availability.annotate(&mut releases).await;
+        releases
+            .into_iter()
+            .map(|release| {
+                (
+                    release.tag_name,
+                    (release.install_availability, release.unavailable_reason),
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    };
+
+    let first = list().await;
+    assert_eq!(first["v1.24.2+cpu"], (None, None));
+    assert_eq!(first["v1.24.2+cuda12"], (Some(State::Available), None));
+    assert_eq!(first["v1.24.2+cuda13"], (Some(State::Checking), None));
+    // A network failure is not a verdict: installing still decides.
+    assert_eq!(first["v1.25.0+cuda12"], (Some(State::Unknown), None));
+    assert_eq!(server.requests(feed13).len(), 1);
+
+    // The next listing waits on the same lookup instead of starting another.
+    let second = list().await;
+    assert_eq!(second["v1.24.2+cuda13"].0, Some(State::Checking));
+    assert_eq!(server.requests(feed13).len(), 1);
+
+    server.release(feed13);
+    let third = list().await;
+    let (state, reason) = &third["v1.24.2+cuda13"];
+    assert_eq!(*state, Some(State::Unavailable));
+    let reason = reason.as_deref().unwrap();
+    assert!(
+        reason.contains("no published CUDA 13 package metadata"),
+        "{reason}"
+    );
+    assert!(reason.contains("v1.24.2+cuda12 installs"), "{reason}");
+    assert_eq!(server.requests(feed13).len(), 1);
+    assert_eq!(third["v1.25.0+cuda12"].0, Some(State::Unknown));
+
+    // Settled answers are kept: listing again asks no index.
+    let asked = server.requested_paths().len();
+    let fourth = list().await;
+    assert_eq!(server.requested_paths().len(), asked);
+    assert_eq!(fourth, third);
+
+    // A refresh asks again; the unreachable feed now answers.
+    server.state.lock().unwrap().failing.clear();
+    availability.refresh();
+    let fifth = list().await;
+    let (state, reason) = &fifth["v1.25.0+cuda12"];
+    assert_eq!(*state, Some(State::Unavailable));
+    assert!(reason
+        .as_deref()
+        .unwrap()
+        .contains("has no onnxruntime-gpu"));
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod installs {
     //! Installing ONNX Runtime CUDA builds through the version manager.
@@ -1063,6 +1189,7 @@ mod installs {
                     archive_size: None,
                     dependencies_size: None,
                     unavailable_reason: None,
+                    install_availability: None,
                 }],
             )
             .unwrap();

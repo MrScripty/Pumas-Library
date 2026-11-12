@@ -36,10 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   removing the version removes them. A build without usable metadata (CUDA 12
   builds from 1.30, CUDA 13 builds before 1.28, as published today) is refused
   with the reason, and the reason names the builds that install instead. The
-  version listing reports such builds up front in the new
-  `unavailableReason` field of each listed release, and the desktop app shows
-  the reason in place of an install button. These lookups are kept until the
-  package indexes change or the list is refreshed. The NVIDIA driver remains
+  version listing gives each CUDA build an `installAvailability` (`checking`,
+  `available`, `unavailable` with `unavailableReason`, or `unknown` when the
+  indexes could not be read, which leaves install to decide) and reports
+  `availability_pending` while any check runs; the desktop app shows
+  "Checking…" or the reason in place of Install and lists again until nothing
+  is pending. These lookups are kept until the package indexes change or the
+  list is refreshed. The NVIDIA driver remains
   the operating system's. CPU builds are unchanged. See
   [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md#amendment-2026-11-12-cuda-libraries).
 

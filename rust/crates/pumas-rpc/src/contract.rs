@@ -2703,6 +2703,10 @@ pub(crate) enum AvailableVersionsOutcome {
 pub(crate) struct AvailableVersionsSuccess {
     success: bool,
     versions: Vec<pumas_library::models::VersionReleaseInfo>,
+    /// Some listed build is still `checking` whether it installs. List the
+    /// versions again for the result; each listing waits for running checks
+    /// for a while before it answers.
+    availability_pending: bool,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -2736,9 +2740,14 @@ impl AvailableVersionsOutcome {
         }) {
             return Err(invalid_domain_outcome("available versions"));
         }
+        let availability_pending = versions.iter().any(|version| {
+            version.install_availability
+                == Some(pumas_library::models::InstallAvailability::Checking)
+        });
         Ok(Self::Available(AvailableVersionsSuccess {
             success: true,
             versions,
+            availability_pending,
         }))
     }
     pub(crate) fn rate_limited(retry_after_secs: Option<u64>) -> Result<Self, PumasError> {
@@ -2775,6 +2784,7 @@ fn available_versions_fixture() -> Vec<pumas_library::models::VersionReleaseInfo
             dependencies_size: Some(42),
             installing: Some(false),
             unavailable_reason: None,
+            install_availability: None,
         },
         VersionReleaseInfo {
             tag_name: "v2".into(),
@@ -2788,7 +2798,10 @@ fn available_versions_fixture() -> Vec<pumas_library::models::VersionReleaseInfo
             archive_size: None,
             dependencies_size: None,
             installing: None,
-            unavailable_reason: None,
+            unavailable_reason: Some(
+                "No CUDA 12 metadata. Builds that install instead: v1.29.0+cuda12 installs.".into(),
+            ),
+            install_availability: Some(pumas_library::models::InstallAvailability::Unavailable),
         },
     ]
 }
@@ -2799,14 +2812,15 @@ mod available_versions_tests {
     #[test]
     fn available_versions_preserve_core_fields_nulls_and_rate_limit_shape() {
         let versions = available_versions_fixture();
-        let expected = serde_json::json!({"success":true,"versions":versions});
+        let expected =
+            serde_json::json!({"success":true,"versions":versions,"availability_pending":false});
         assert_eq!(
             serde_json::to_value(AvailableVersionsOutcome::available(versions).unwrap()).unwrap(),
             expected
         );
         assert_eq!(
             serde_json::to_value(AvailableVersionsOutcome::available(vec![]).unwrap()).unwrap(),
-            serde_json::json!({"success":true,"versions":[]})
+            serde_json::json!({"success":true,"versions":[],"availability_pending":false})
         );
         for retry in [None, Some(0), Some(MAX_JS_SAFE_INTEGER)] {
             assert_eq!(
@@ -2816,6 +2830,30 @@ mod available_versions_tests {
             );
         }
     }
+    #[test]
+    fn a_build_still_being_checked_makes_the_listing_pending() {
+        use pumas_library::models::InstallAvailability;
+        let mut versions = available_versions_fixture();
+        versions[0].install_availability = Some(InstallAvailability::Checking);
+        let value =
+            serde_json::to_value(AvailableVersionsOutcome::available(versions).unwrap()).unwrap();
+        assert_eq!(value["availability_pending"], true);
+        assert_eq!(value["versions"][0]["installAvailability"], "checking");
+        assert_eq!(value["versions"][1]["installAvailability"], "unavailable");
+        for settled in [
+            InstallAvailability::Available,
+            InstallAvailability::Unavailable,
+            InstallAvailability::Unknown,
+        ] {
+            let mut versions = available_versions_fixture();
+            versions[0].install_availability = Some(settled);
+            let value =
+                serde_json::to_value(AvailableVersionsOutcome::available(versions).unwrap())
+                    .unwrap();
+            assert_eq!(value["availability_pending"], false, "{settled:?}");
+        }
+    }
+
     #[test]
     fn available_versions_reject_unsafe_sizes_and_retry_without_normalization() {
         for field in 0..4 {

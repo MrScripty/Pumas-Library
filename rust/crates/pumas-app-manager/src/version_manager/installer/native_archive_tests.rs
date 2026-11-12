@@ -170,6 +170,7 @@ fn ollama_release(fixture: &OllamaFixture, size: u64) -> GitHubRelease {
         archive_size: Some(size),
         dependencies_size: None,
         unavailable_reason: None,
+        install_availability: None,
     }
 }
 

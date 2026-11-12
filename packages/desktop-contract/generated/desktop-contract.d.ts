@@ -1,9 +1,9 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ac9b6da32a69149bf7f2ec8edff71727e222f401f9e7f0d5140990ea3d142aa5. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 6008641b2ce8976afb08ca62a437c76b0295a6d340bc24640d7c599e35851f83. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
 export type AvailableVersionsRateLimited = { "error": string; "rate_limited": true; "retry_after_secs": number | null; "success": false };
-export type AvailableVersionsSuccess = { "success": true; "versions": ReadonlyArray<VersionReleaseInfo> };
+export type AvailableVersionsSuccess = { "availability_pending": boolean; "success": true; "versions": ReadonlyArray<VersionReleaseInfo> };
 export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
 export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
 export type BundleComponentManifestEntry = { "class_name": string | null; "name": string; "relative_path": string; "source_library": string | null; "state": BundleComponentState };
@@ -77,6 +77,7 @@ export type InferenceParamSchema = { "constraints": (ParamConstraints) | (null);
 export type InferenceSettingInput = { "constraints"?: (InferenceConstraintsInput) | (null); "default": DesktopJsonValue; "description"?: string | null; "key": string; "label": string; "param_type": ParamType };
 export type InferenceSettingsOutcome = { "inference_settings": ReadonlyArray<InferenceParamSchema>; "model_id": string; "success": true };
 export type InstallationProgressOutcome = (RuntimeInstallationProgress) | (null);
+export type InstallAvailability = ("checking") | ("available") | ("unavailable") | ("unknown");
 export type InstalledVersionsOutcome = { "success": true; "versions": ReadonlyArray<string> };
 export type InstallVersionDependenciesOutcome = { "success": boolean };
 export type InstallVersionDependenciesParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
@@ -261,7 +262,7 @@ export type UpdateStreamError = { "message": string };
 export type ValidateInstallationsOutcome = { "orphaned_dirs": ReadonlyArray<string>; "removed_tags": ReadonlyArray<string>; "valid_count": number };
 export type VersionInfoOutcome = { "info": RuntimeVersionInfo; "success": true };
 export type VersionReleaseAsset = { "downloadUrl": string; "name": string; "size": number };
-export type VersionReleaseInfo = { "archiveSize": number | null; "assets": ReadonlyArray<VersionReleaseAsset>; "body": string | null; "dependenciesSize": number | null; "htmlUrl": string; "installing": boolean | null; "name": string; "prerelease": boolean; "publishedAt": string; "tagName": string; "totalSize": number | null; "unavailableReason": string | null };
+export type VersionReleaseInfo = { "archiveSize": number | null; "assets": ReadonlyArray<VersionReleaseAsset>; "body": string | null; "dependenciesSize": number | null; "htmlUrl": string; "installAvailability": (InstallAvailability) | (null); "installing": boolean | null; "name": string; "prerelease": boolean; "publishedAt": string; "tagName": string; "totalSize": number | null; "unavailableReason": string | null };
 export type VersionStatusOutcome = { "status": RuntimeVersionStatus; "success": true };
 
 export type DecodeOutcome<T> = { readonly status: 'valid'; readonly value: T } | { readonly status: 'invalid' | 'unsupported' | 'unavailable'; readonly message: string };

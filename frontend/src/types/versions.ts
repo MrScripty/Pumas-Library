@@ -18,6 +18,11 @@ export interface VersionRelease {
   installing?: boolean;
   /** Why the backend cannot install this build on this host; null when it can. */
   unavailableReason?: string | null;
+  /**
+   * Whether the backend can install this build, for builds it checks before an
+   * install (ONNX Runtime CUDA builds); null for every other build.
+   */
+  installAvailability?: 'checking' | 'available' | 'unavailable' | 'unknown' | null;
 }
 
 export type VersionStatus = import('@pumas/desktop-contract').VersionStatusOutcome['status'];

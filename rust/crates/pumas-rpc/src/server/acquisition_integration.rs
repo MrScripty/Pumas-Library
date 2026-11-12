@@ -322,6 +322,7 @@ async fn native_transfer(
                     content_type: None,
                 }],
                 unavailable_reason: None,
+                install_availability: None,
             }],
         )
         .unwrap();

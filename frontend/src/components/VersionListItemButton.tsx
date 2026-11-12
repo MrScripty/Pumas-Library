@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
-import { Ban, Check, Download, Pause, X, XCircle } from 'lucide-react';
+import { Ban, Check, Download, Loader2, Pause, X, XCircle } from 'lucide-react';
 import { formatGB } from '../utils/installationFormatters';
 import { ProgressRing } from './ProgressRing';
 import type { VersionInstallDisplayState } from './VersionListItemState';
@@ -10,6 +10,8 @@ interface VersionListItemButtonProps {
   isCancelHovered: boolean;
   isInstalled: boolean;
   isInstalling: boolean;
+  /** Whether the backend can install this build, when it checks that first. */
+  installAvailability?: 'checking' | 'available' | 'unavailable' | 'unknown' | null;
   /** The backend's reason this build cannot install; the button is disabled. */
   unavailableReason?: string | null;
   onCancel: () => void;
@@ -190,11 +192,27 @@ function UnavailableButton({ reason }: { reason: string }) {
   );
 }
 
+function CheckingButton() {
+  return (
+    <button
+      type="button"
+      disabled
+      aria-label="Checking whether this version can be installed"
+      title="Checking whether this version can be installed"
+      className="flex items-center gap-2 px-3 py-2 rounded text-sm font-medium border w-[120px] min-w-[120px] overflow-hidden cursor-wait bg-[hsl(var(--surface-lowest))] border-[hsl(var(--border-control))] text-[hsl(var(--text-muted))]"
+    >
+      <Loader2 size={16} className="shrink-0 animate-spin" />
+      <span className="text-xs font-semibold truncate whitespace-nowrap flex-1 min-w-0">Checking…</span>
+    </button>
+  );
+}
+
 export function VersionListItemButton({
   displayState,
   isCancelHovered,
   isInstalled,
   isInstalling,
+  installAvailability,
   unavailableReason,
   onCancel,
   onCancelMouseEnter,
@@ -208,8 +226,13 @@ export function VersionListItemButton({
     ? displayState
     : { ...displayState, showUninstall };
   const canCancel = isInstalling && !isInstalled;
-  if (unavailableReason && !isInstalled && !isInstalling) {
-    return <UnavailableButton reason={unavailableReason} />;
+  if (!isInstalled && !isInstalling) {
+    if (installAvailability === 'checking') {
+      return <CheckingButton />;
+    }
+    if (installAvailability === 'unavailable' && unavailableReason) {
+      return <UnavailableButton reason={unavailableReason} />;
+    }
   }
   const handleButtonClick = () => {
     if (canCancel) {

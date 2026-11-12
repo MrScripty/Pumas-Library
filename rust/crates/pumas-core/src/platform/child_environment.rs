@@ -155,12 +155,18 @@ pub fn inherited_environment(
 /// - `DO_NOT_TRACK`: the cross-tool convention, also honored by
 ///   `huggingface_hub`.
 ///
-/// ONNX Runtime has no environment switch; its host disables telemetry
-/// through the ORT API. pip, uv, PyTorch, llama.cpp and Ollama send none.
+/// - `ORT_DISABLE_TELEMETRY`: ONNX Runtime (1.31 reads it before setting up
+///   its telemetry storage). The ONNX host also turns telemetry off through
+///   the ORT API, which is the switch Windows ETW honours.
+///
+/// pip, uv, PyTorch, llama.cpp and Ollama send none.
 /// These are always set, even when the user's environment says otherwise:
 /// Pumas does not let third-party libraries report usage.
-pub const THIRD_PARTY_TELEMETRY_OPT_OUT: &[(&str, &str)] =
-    &[("HF_HUB_DISABLE_TELEMETRY", "1"), ("DO_NOT_TRACK", "1")];
+pub const THIRD_PARTY_TELEMETRY_OPT_OUT: &[(&str, &str)] = &[
+    ("HF_HUB_DISABLE_TELEMETRY", "1"),
+    ("DO_NOT_TRACK", "1"),
+    ("ORT_DISABLE_TELEMETRY", "1"),
+];
 
 /// Clear `command`'s environment and inherit only the allowlisted variables
 /// from this process, with third-party telemetry disabled. Apply

@@ -170,7 +170,7 @@ impl BinaryLaunchConfig {
         use crate::onnx_runtime::host_protocol;
         let tag = tag.into();
         let version_dir = version_dir.as_ref().to_path_buf();
-        let env_vars = HashMap::from([
+        let mut env_vars = HashMap::from([
             (
                 host_protocol::RUNTIME_DIR_ENV.to_string(),
                 version_dir.to_string_lossy().into_owned(),
@@ -181,6 +181,14 @@ impl BinaryLaunchConfig {
                 "1".to_string(),
             ),
         ]);
+        // The owned child environment drops inherited variables, so a
+        // developer's explicit library override is forwarded on purpose.
+        if let Some(library) = std::env::var_os(host_protocol::ORT_DYLIB_PATH_ENV) {
+            env_vars.insert(
+                host_protocol::ORT_DYLIB_PATH_ENV.to_string(),
+                library.to_string_lossy().into_owned(),
+            );
+        }
         Self {
             tag,
             pid_file: version_dir.join("onnx-host.pid"),

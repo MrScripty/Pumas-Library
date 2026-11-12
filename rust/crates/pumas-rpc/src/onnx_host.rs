@@ -163,6 +163,7 @@ where
         .route(host_protocol::HEALTH_PATH, get(health::<B>))
         .route(host_protocol::LOAD_PATH, post(load::<B>))
         .route(host_protocol::UNLOAD_PATH, post(unload::<B>))
+        .route(host_protocol::SESSIONS_PATH, get(sessions::<B>))
         .route(host_protocol::EMBED_PATH, post(embed::<B>))
         .with_state(state)
 }
@@ -255,6 +256,20 @@ async fn unload<B: OnnxEmbeddingBackend>(
     }
 }
 
+async fn sessions<B: OnnxEmbeddingBackend>(
+    State(state): State<Arc<HostState<B>>>,
+    headers: HeaderMap,
+) -> Response {
+    let manager = match admitted(&state, &headers) {
+        Ok(manager) => manager,
+        Err(response) => return *response,
+    };
+    match manager.list().await {
+        Ok(sessions) => Json(sessions).into_response(),
+        Err(error) => error_response(error),
+    }
+}
+
 async fn embed<B: OnnxEmbeddingBackend>(
     State(state): State<Arc<HostState<B>>>,
     headers: HeaderMap,
@@ -280,7 +295,8 @@ async fn embed<B: OnnxEmbeddingBackend>(
 mod tests {
     use super::*;
     use pumas_library::{
-        FakeOnnxEmbeddingBackend, OnnxHostEndpoint, OnnxSessionManager, RemoteOnnxEmbeddingBackend,
+        FakeOnnxEmbeddingBackend, OnnxHostEndpoint, OnnxSessionManager, OnnxSessionStatus,
+        RemoteOnnxEmbeddingBackend,
     };
 
     async fn serve_fake_host(ready: bool) -> (OnnxHostEndpoint, tokio::task::JoinHandle<()>) {
@@ -355,6 +371,62 @@ mod tests {
             .unwrap_err();
         assert_eq!(not_loaded.code, OnnxRuntimeErrorCode::NotLoaded);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_model_moves_to_another_host_only_once_its_first_host_dropped_it() {
+        let (first, first_server) = serve_fake_host(true).await;
+        let (second, second_server) = serve_fake_host(true).await;
+        let manager =
+            OnnxSessionManager::new(RemoteOnnxEmbeddingBackend::new().unwrap(), 2).unwrap();
+        let (_fixture, request) = model_fixture();
+        manager
+            .load_on_host(request.clone(), first.clone())
+            .await
+            .unwrap();
+
+        // The first host still holds the model: loading it elsewhere is refused.
+        let refused = manager
+            .load_on_host(request.clone(), second.clone())
+            .await
+            .unwrap_err();
+        assert!(
+            refused.message.contains(first.as_str()),
+            "{}",
+            refused.message
+        );
+
+        // The first host lost the session (as when its profile stops): the
+        // stale record no longer blocks the second host.
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let dropped = client
+            .post(format!("{}{}", first.as_str(), host_protocol::UNLOAD_PATH))
+            .header(host_protocol::TOKEN_HEADER, host_protocol::host_api_token())
+            .json(&OnnxHostUnloadRequest {
+                model_id: "fixture/embedder".into(),
+            })
+            .send()
+            .await
+            .unwrap();
+        assert!(dropped.status().is_success());
+        let moved = manager.load_on_host(request, second.clone()).await.unwrap();
+        assert_eq!(moved.model_id.as_str(), "fixture/embedder");
+        let held: Vec<OnnxSessionStatus> = client
+            .get(format!(
+                "{}{}",
+                second.as_str(),
+                host_protocol::SESSIONS_PATH
+            ))
+            .header(host_protocol::TOKEN_HEADER, host_protocol::host_api_token())
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(held.len(), 1);
+        first_server.abort();
+        second_server.abort();
     }
 
     #[tokio::test]

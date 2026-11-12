@@ -77,7 +77,10 @@ fn runtime_library_error(reason: &str) -> OnnxRuntimeError {
 pub(super) fn ensure_runtime_library(
     selected: Option<&OnnxRuntimeLibrary>,
 ) -> Result<(), OnnxRuntimeError> {
-    let path = runtime_library_path(std::env::var_os("ORT_DYLIB_PATH"), selected)?;
+    let path = runtime_library_path(
+        std::env::var_os(super::host_protocol::ORT_DYLIB_PATH_ENV),
+        selected,
+    )?;
     // Pinned ORT constructs native errors while handling loader failures, which
     // re-enters initialization. Reject those failures before entering ORT.
     let (_held_library, preflighted_api) = preflight_library(&path)?;

@@ -38,6 +38,10 @@ pub const RUNTIME_VERSION_ENV: &str = "PUMAS_ONNX_HOST_RUNTIME_VERSION";
 /// Linux and macOS it stops the 1DS uploader and its device-id and event
 /// database under the user cache (`Microsoft/DeveloperTools/.onnxruntime`).
 pub const ORT_DISABLE_TELEMETRY_ENV: &str = "ORT_DISABLE_TELEMETRY";
+/// Developer override naming an absolute ONNX Runtime library file. When the
+/// backend has it set, its hosts load that library instead of the installed
+/// version's.
+pub const ORT_DYLIB_PATH_ENV: &str = "ORT_DYLIB_PATH";
 
 /// Readiness and runtime identity; never needs the token.
 pub const HEALTH_PATH: &str = "/health";
@@ -45,6 +49,8 @@ pub const HEALTH_PATH: &str = "/health";
 pub const LOAD_PATH: &str = "/v1/sessions/load";
 /// Unload a model's session.
 pub const UNLOAD_PATH: &str = "/v1/sessions/unload";
+/// List the sessions the host holds (`GET`, token required).
+pub const SESSIONS_PATH: &str = "/v1/sessions";
 /// Embed with a loaded model.
 pub const EMBED_PATH: &str = "/v1/embeddings";
 

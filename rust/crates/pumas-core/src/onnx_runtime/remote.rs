@@ -17,7 +17,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use super::host_protocol::{
     host_api_token, OnnxHostLoadRequest, OnnxHostUnloadRequest, EMBED_PATH, LOAD_PATH,
-    TOKEN_HEADER, UNLOAD_PATH,
+    SESSIONS_PATH, TOKEN_HEADER, UNLOAD_PATH,
 };
 use super::{
     OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest,
@@ -128,6 +128,31 @@ impl RemoteOnnxEmbeddingBackend {
         }
     }
 
+    /// Whether `host` still holds `model_id`. A host that is gone (its
+    /// profile stopped or crashed) or that no longer lists the session does
+    /// not; any other answer counts as holding it, so a live host's session is
+    /// never taken over.
+    async fn host_holds(&self, host: &OnnxHostEndpoint, model_id: &OnnxModelId) -> bool {
+        let response = match self
+            .http
+            .get(format!("{}{SESSIONS_PATH}", host.as_str()))
+            .header(TOKEN_HEADER, host_api_token())
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if error.is_connect() => return false,
+            Err(_) => return true,
+        };
+        if !response.status().is_success() {
+            return true;
+        }
+        match response.json::<Vec<OnnxSessionStatus>>().await {
+            Ok(sessions) => sessions.iter().any(|session| &session.model_id == model_id),
+            Err(_) => true,
+        }
+    }
+
     fn host_of(&self, model_id: &OnnxModelId) -> Result<OnnxHostEndpoint, OnnxRuntimeError> {
         self.sessions()?
             .get(model_id)
@@ -140,18 +165,36 @@ impl RemoteOnnxEmbeddingBackend {
         request: OnnxLoadRequest,
         host: OnnxHostEndpoint,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        if let Some(existing) = self.sessions()?.get(&request.model_id) {
-            if existing.host != host {
+        let other_host = self
+            .sessions()?
+            .get(&request.model_id)
+            .map(|existing| existing.host.clone())
+            .filter(|existing| *existing != host);
+        if let Some(existing) = other_host {
+            if self.host_holds(&existing, &request.model_id).await {
                 return Err(OnnxRuntimeError::validation(
                     "model_id",
                     format!(
                         "ONNX model '{}' is already loaded by the ONNX host at {}; unload it there \
                          first",
                         request.model_id.as_str(),
-                        existing.host.as_str()
+                        existing.as_str()
                     ),
                 ));
             }
+            // That host stopped or dropped the session: the record is stale.
+            let mut sessions = self.sessions()?;
+            if sessions
+                .get(&request.model_id)
+                .is_some_and(|session| session.host == existing)
+            {
+                sessions.remove(&request.model_id);
+            }
+            tracing::info!(
+                model_id = %request.model_id.as_str(),
+                stale_host = %existing.as_str(),
+                "dropping the session of an ONNX host that no longer holds it"
+            );
         }
         let body = OnnxHostLoadRequest {
             model_id: request.model_id.as_str().to_string(),
@@ -280,6 +323,17 @@ mod tests {
                 .as_str(),
             "http://127.0.0.1:19081"
         );
+    }
+
+    #[tokio::test]
+    async fn a_host_that_is_gone_holds_no_session() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let backend = RemoteOnnxEmbeddingBackend::new().unwrap();
+        let host = OnnxHostEndpoint::parse(&format!("http://{address}")).unwrap();
+        let model_id = OnnxModelId::parse("fixture/model").unwrap();
+        assert!(!backend.host_holds(&host, &model_id).await);
     }
 
     #[tokio::test]

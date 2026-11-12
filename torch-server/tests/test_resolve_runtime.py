@@ -2,6 +2,7 @@
 
 import importlib.util
 import base64
+from collections import namedtuple
 import hashlib
 import json
 import pathlib
@@ -19,6 +20,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("resolve_runtime", ROOT / "resolve_runtime.py")
 resolver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(resolver)
+# platform.platform() runs `uname` through subprocess on first use. Cache it
+# now so tests that patch subprocess.run see only the resolver's own calls.
+resolver.platform.platform()
+VERSION_3_12 = namedtuple("version_info", "major minor micro")(3, 12, 0)
 
 
 def entry(name, version="1.0", url=None, digest="b"):
@@ -35,46 +40,38 @@ def native_wheel(version="2.10.0", build="cpu"):
     return f"https://download.pytorch.org/whl/{build}/torch/torch-{version}%2B{build}-{tag}.whl"
 
 
+MODALITY_VERSIONS = {"transformers": "5.4.0", "accelerate": "1.12.0"}
+
+
 def report(
     version="2.10.0+cpu",
     url=None,
-    adapter="none",
+    modalities=resolver.MODALITIES,
+    extras=(),
 ):
+    """A pip report for torch, core packages, the given general modalities and
+    extras, as every install now resolves them."""
     if url is None:
         url = native_wheel()
     entries = [entry("torch", version, url, "a"), *(entry(name) for name in resolver.CORE)]
-    if adapter in ("flux2", "nunchaku"):
-        build = version.split("+", 1)[1]
-        entries.append(
-            entry(
-                "torchvision",
-                f"0.25.0+{build}",
-                f"https://download.pytorch.org/whl/{build}/torchvision-0.25.0.whl",
+    build = version.split("+", 1)[1] if "+" in version else "cpu"
+    names = []
+    for modality in modalities:
+        for name in resolver.MODALITY_PACKAGES[modality]:
+            if name not in names:
+                names.append(name)
+    for name in names:
+        if name == "torchvision":
+            entries.append(
+                entry(
+                    "torchvision",
+                    f"0.25.0+{build}",
+                    f"https://download.pytorch.org/whl/{build}/torchvision-0.25.0.whl",
+                )
             )
-        )
-        entries.extend(
-            entry(name)
-            for name in (
-                "diffusers",
-                "transformers",
-                "accelerate",
-                "peft",
-                "sentencepiece",
-                "protobuf",
-            )
-        )
-    if adapter == "cohere-asr":
-        versions = {
-            "transformers": "5.4.0",
-            "accelerate": "1.12.0",
-            "huggingface-hub": "1.5.0",
-            "tokenizers": "0.22.2",
-        }
-        entries.extend(
-            entry(name, versions.get(name, "1.0.0"))
-            for name in sorted(resolver.COHERE_ASR_PACKAGES)
-        )
-    if adapter == "nunchaku":
+        else:
+            entries.append(entry(name, MODALITY_VERSIONS.get(name, "1.0")))
+    if "nunchaku" in extras:
         entries.append(entry("nunchaku", "1.2.0+torch2.9", resolver.NUNCHAKU_URL, "c"))
         entries[-1]["download_info"]["archive_info"]["hashes"]["sha256"] = resolver.NUNCHAKU_SHA256
     return {"install": entries}
@@ -108,10 +105,12 @@ def stage_dist_info(fixture, target_dir):
         )
 
 
-def write_lock(output, fixture, version="2.10.0", build="cpu", adapter="none"):
+def write_lock(output, fixture, version="2.10.0", build="cpu", extras=()):
     """Write the phase-1 hash lock and resolution for a report fixture."""
     with patch.object(resolver, "native_target", return_value="linux"):
-        lines, resolution = resolver.requirements_from_report(fixture, version, build, adapter)
+        lines, resolution = resolver.requirements_from_report(
+            fixture, version, build, extras=extras
+        )
     output.mkdir(parents=True, exist_ok=True)
     (output / "requirements.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (output / "resolution.json").write_text(json.dumps(resolution), encoding="utf-8")
@@ -588,6 +587,247 @@ class ResolverTests(unittest.TestCase):
             self.assertEqual(
                 len(json.loads((output / "installed-files.json").read_text())["files"]),
                 2 * len(fixture["install"]),
+            )
+
+    def test_selection_mode_publishes_only_the_official_torch_wheel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--select-torch-wheel",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(
+                    resolver,
+                    "select_official_torch_wheel",
+                    return_value={**selected_wheel(), "sha256": "A" * 64},
+                ),
+                patch.object(resolver.subprocess, "run") as run,
+            ):
+                resolver.main()
+            run.assert_not_called()
+            self.assertEqual(
+                json.loads((output / "torch-wheel.json").read_text()),
+                {"url": native_wheel(), "sha256": "a" * 64},
+            )
+            self.assertFalse((output / "requirements.txt").exists())
+
+    def test_selection_mode_classifies_an_unreachable_index_as_inconclusive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            argv = ["resolve_runtime.py", "--select-torch-wheel", "--version", "2.10.0"]
+            with (
+                patch.object(
+                    resolver.sys, "argv", [*argv, "--build", "cpu", "--output", str(output)]
+                ),
+                patch.object(resolver, "select_official_torch_wheel", side_effect=OSError("dns")),
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 75)
+            self.assertFalse((output / "torch-wheel.json").exists())
+
+    def test_lock_phase_resolves_against_the_acquired_torch_wheel_and_keeps_its_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            acquired = pathlib.Path(directory) / "acquired wheels"
+            acquired.mkdir()
+            local = acquired / resolver.wheel_filename(native_wheel())
+            local.write_bytes(b"verified torch wheel")
+            output = pathlib.Path(directory) / "manifest"
+            commands = []
+
+            def fake_run(command, local_url=local.as_uri(), **_kwargs):
+                commands.append(command)
+                fixture = report(url=local_url)
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(fixture), encoding="utf-8"
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            argv = [
+                "resolve_runtime.py",
+                "--version",
+                "2.10.0",
+                "--build",
+                "cpu",
+                "--torch-wheel",
+                native_wheel(),
+                "--torch-sha256",
+                "a" * 64,
+                "--torch-local-wheel",
+                str(local),
+                "--output",
+                str(output),
+            ]
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver, "select_official_torch_wheel") as select,
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            select.assert_not_called()
+            # pip reads the verified local copy instead of downloading Torch.
+            self.assertIn(f"torch @ {local.as_uri()}#sha256={'a' * 64}", commands[0])
+            self.assertNotIn(f"torch @ {native_wheel()}#sha256={'a' * 64}", commands[0])
+            artifacts = json.loads((output / "resolution.json").read_text())["artifacts"]
+            self.assertEqual(artifacts[0]["url"], native_wheel())
+            self.assertIn(
+                f"torch @ {native_wheel()} --hash=sha256:{'a' * 64}",
+                (output / "requirements.txt").read_text(),
+            )
+
+            # A report naming another file is not the acquired wheel.
+            other = acquired / "other.whl"
+            other.write_bytes(b"other")
+            fresh = pathlib.Path(directory) / "fresh"
+            argv[argv.index(str(output))] = str(fresh)
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver.subprocess,
+                    "run",
+                    side_effect=lambda command, **kw: fake_run(command, other.as_uri()),
+                ),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("not the acquired local wheel", stderr.getvalue())
+            self.assertFalse((fresh / "requirements.txt").exists())
+
+    def test_local_torch_wheel_must_be_the_named_acquired_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wrong = pathlib.Path(directory) / "renamed.whl"
+            wrong.write_bytes(b"wheel")
+            argv = [
+                "resolve_runtime.py",
+                "--version",
+                "2.10.0",
+                "--build",
+                "cpu",
+                "--torch-wheel",
+                native_wheel(),
+                "--torch-sha256",
+                "a" * 64,
+                "--torch-local-wheel",
+                str(wrong),
+                "--output",
+                str(pathlib.Path(directory) / "manifest"),
+            ]
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver.subprocess, "run") as run,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 2)
+            run.assert_not_called()
+
+    def test_install_phase_installs_acquired_wheels_offline_from_local_files(self):
+        fixture = report()
+        with tempfile.TemporaryDirectory() as directory:
+            torch_dir = pathlib.Path(directory) / "torch wheels"
+            rest_dir = pathlib.Path(directory) / "dependency wheels"
+            torch_dir.mkdir()
+            rest_dir.mkdir()
+            local = {}
+            for item in fixture["install"]:
+                name = item["metadata"]["name"]
+                folder = torch_dir if name == "torch" else rest_dir
+                local[name] = folder / resolver.wheel_filename(item["download_info"]["url"])
+                local[name].write_bytes(name.encode())
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            write_lock(output, fixture)
+            installed = json.loads(json.dumps(fixture))
+            for item in installed["install"]:
+                item["download_info"]["url"] = local[item["metadata"]["name"]].as_uri()
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                self.assertIn("--no-index", command)
+                self.assertIn("--require-hashes", command)
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(installed), encoding="utf-8"
+                )
+                stage_dist_info(fixture, pathlib.Path(command[command.index("--target") + 1]))
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            argv = [
+                *install_argv(target, output),
+                "--wheel-dir",
+                str(torch_dir),
+                "--wheel-dir",
+                str(rest_dir),
+            ]
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            local_lock = output / "requirements-local.txt"
+            self.assertEqual(commands[0][commands[0].index("--requirement") + 1], str(local_lock))
+            lines = local_lock.read_text().splitlines()
+            self.assertEqual(len(lines), len(fixture["install"]))
+            self.assertTrue(all("file:" in line and "https:" not in line for line in lines))
+            self.assertIn(f"torch @ {local['torch'].as_uri()} --hash=sha256:{'a' * 64}", lines)
+            self.assertTrue((output / "installed-files.json").exists())
+
+    def test_install_phase_refuses_a_remote_install_of_an_acquired_wheel(self):
+        fixture = report()
+        with tempfile.TemporaryDirectory() as directory:
+            torch_dir = pathlib.Path(directory) / "torch wheels"
+            torch_dir.mkdir()
+            (torch_dir / resolver.wheel_filename(native_wheel())).write_bytes(b"torch")
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            write_lock(output, fixture)
+
+            def fake_run(command, **_kwargs):
+                # pip claims it installed Torch from the network URL.
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(fixture), encoding="utf-8"
+                )
+                stage_dist_info(fixture, pathlib.Path(command[command.index("--target") + 1]))
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [*install_argv(target, output), "--wheel-dir", str(torch_dir)],
+                ),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("differ from the hash lock", stderr.getvalue())
+            # Unacquired dependencies keep their locked network URL.
+            self.assertIn(
+                resolver.lock_line(
+                    json.loads((output / "resolution.json").read_text())["artifacts"][1]
+                ),
+                (output / "requirements-local.txt").read_text(),
             )
 
     def test_install_phase_refuses_a_lock_that_differs_from_its_resolution(self):
@@ -1691,68 +1931,244 @@ class ResolverTests(unittest.TestCase):
     def test_exact_official_build_and_hashes_are_recorded(self):
         requirements, resolution = resolver.requirements_from_report(report(), "2.10.0", "cpu")
         self.assertEqual(resolution["torch"], "2.10.0+cpu")
-        self.assertEqual(resolution["adapter"], "none")
+        self.assertEqual(resolution["modalities"], ["text", "image", "audio"])
+        self.assertEqual(resolution["omitted_modalities"], {})
+        self.assertEqual(resolution["extras"], [])
+        self.assertNotIn("adapter", resolution)
         self.assertEqual(resolution["artifacts"][0]["sha256"], "a" * 64)
         self.assertIn("--hash=sha256:" + "a" * 64, requirements[0])
         self.assertEqual(len(requirements), len(resolution["artifacts"]))
 
-    def test_cohere_asr_floors_preserve_torch_selection_and_omit_image_deps(self):
-        for version in ("2.4.0", "2.9.1", "2.10.0", "2.14.0"):
-            extras = resolver.adapter_requirements("cohere-asr", version, "cpu")
-            self.assertIn("transformers>=5.4.0", extras)
-            self.assertFalse([item for item in extras if "==" in item or "<" in item])
-            fixture = report(
-                version=f"{version}+cpu", url=native_wheel(version), adapter="cohere-asr"
-            )
-            lines, resolution = resolver.requirements_from_report(
-                fixture, version, "cpu", "cohere-asr"
-            )
-            self.assertEqual(resolution["torch"], f"{version}+cpu")
-            self.assertEqual(resolution["adapter"], "cohere-asr")
-            self.assertTrue(all("sha256:" in line for line in lines))
-            self.assertFalse(
-                {"torchvision", "diffusers", "peft"}
-                & {item["name"] for item in resolution["artifacts"]}
-            )
-        with self.assertRaisesRegex(ValueError, "Torch >=2.4"):
-            resolver.adapter_requirements("cohere-asr", "2.3.1", "cpu")
-
-    def test_cohere_asr_report_rejects_missing_and_too_old_dependencies(self):
-        for name in resolver.COHERE_ASR_PACKAGES:
-            fixture = report(adapter="cohere-asr")
-            fixture["install"] = [
-                item for item in fixture["install"] if item["metadata"]["name"] != name
-            ]
-            with self.subTest(missing=name), self.assertRaises(ValueError):
-                resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
-        for name, wrong in (("transformers", "4.57.6"), ("accelerate", "1.0.0")):
-            fixture = report(adapter="cohere-asr")
-            next(item for item in fixture["install"] if item["metadata"]["name"] == name)[
-                "metadata"
-            ]["version"] = wrong
-            with self.subTest(name=name, wrong=wrong), self.assertRaises(ValueError):
-                resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
-        for name, current in (
-            ("transformers", "5.4.1"),
-            ("transformers", "5.12.0"),
-            ("huggingface-hub", "2.0.0"),
-            ("tokenizers", "0.23.1"),
+    def test_every_install_requests_all_general_modalities_by_name(self):
+        requirements = resolver.modality_requirements(resolver.MODALITIES, {})
+        for name in (
+            "transformers",
+            "jinja2",
+            "tokenizers",
+            "sentencepiece",
+            "diffusers",
+            "torchvision",
+            "accelerate",
+            "peft",
+            "librosa",
+            "soundfile",
+            "soxr",
+            "protobuf",
         ):
-            fixture = report(adapter="cohere-asr")
-            next(item for item in fixture["install"] if item["metadata"]["name"] == name)[
-                "metadata"
-            ]["version"] = current
-            with self.subTest(name=name, current=current):
-                resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
+            self.assertIn(name, requirements)
+        # Names only, each once: pip resolves current releases.
+        self.assertEqual(len(requirements), len(set(requirements)))
+        self.assertFalse([item for item in requirements if any(op in item for op in "=<>~!")])
 
-    def test_adapter_artifacts_are_scoped_to_selection(self):
-        _, resolution = resolver.requirements_from_report(
-            report(adapter="flux2"), "2.10.0", "cpu", "flux2"
+    def test_family_floors_are_floors_and_yield_to_old_torch_and_verified_pins(self):
+        floors = resolver.applicable_floors("2.10.0", {})
+        self.assertEqual(floors, {"transformers": "5.4.0", "accelerate": "1.1.0"})
+        requirements = resolver.modality_requirements(resolver.MODALITIES, floors)
+        self.assertIn("transformers>=5.4.0", requirements)
+        self.assertIn("accelerate>=1.1.0", requirements)
+        self.assertFalse([item for item in requirements if "==" in item or "<" in item])
+        # Torch older than the family's own floor: no Transformers floor.
+        self.assertEqual(resolver.applicable_floors("2.3.1", {}), {})
+        # A verified combination pinned below the floor keeps its pin; the
+        # probe then reports Cohere ASR unavailable instead of failing.
+        self.assertEqual(
+            resolver.applicable_floors("2.9.1", {"transformers": "4.57.6"}),
+            {"accelerate": "1.1.0"},
         )
-        self.assertEqual(resolution["adapter"], "flux2")
-        self.assertIn("diffusers", {artifact["name"] for artifact in resolution["artifacts"]})
+        with tempfile.TemporaryDirectory() as directory:
+            constraints = pathlib.Path(directory) / "constraints.txt"
+            constraints.write_text("Transformers == 4.57.6\naccelerate==1.12.0\n# note\n")
+            self.assertEqual(
+                resolver.constraint_pins(constraints),
+                {"transformers": "4.57.6", "accelerate": "1.12.0"},
+            )
+
+    def test_former_adapters_map_to_extras(self):
+        self.assertEqual(resolver.extras_from_arguments("none", []), ())
+        self.assertEqual(resolver.extras_from_arguments("flux2", []), ())
+        self.assertEqual(resolver.extras_from_arguments("cohere-asr", []), ())
+        self.assertEqual(resolver.extras_from_arguments("nunchaku", []), ("nunchaku",))
+        self.assertEqual(resolver.extras_from_arguments("none", ["nunchaku"]), ("nunchaku",))
+
+    def test_every_general_modality_is_resolved_or_omitted_with_a_reason(self):
         with self.assertRaisesRegex(ValueError, "omitted requested packages"):
-            resolver.requirements_from_report(report(), "2.10.0", "cpu", "flux2")
+            resolver.requirements_from_report(report(modalities=("text", "audio")), "2.10.0", "cpu")
+        with self.assertRaisesRegex(ValueError, "resolved or omitted"):
+            resolver.requirements_from_report(
+                report(modalities=("text", "audio")),
+                "2.10.0",
+                "cpu",
+                modalities=("text", "audio"),
+            )
+        _, resolution = resolver.requirements_from_report(
+            report(modalities=("text", "audio")),
+            "2.10.0",
+            "cpu",
+            modalities=("text", "audio"),
+            omitted={"image": "No compatible binary wheel for torchvision"},
+        )
+        self.assertEqual(resolution["modalities"], ["text", "audio"])
+        self.assertEqual(
+            resolution["omitted_modalities"],
+            {"image": "No compatible binary wheel for torchvision"},
+        )
+
+    def test_a_modality_without_a_compatible_wheel_is_left_out_with_its_reason(self):
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            if "torchvision" in command:
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr="ERROR: No matching distribution found for torchvision",
+                )
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(report(modalities=("text", "audio"))), encoding="utf-8"
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver, "select_official_torch_wheel", return_value=selected_wheel()
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                resolver.main()
+            self.assertEqual(len(commands), 2)
+            self.assertNotIn("diffusers", commands[1])
+            self.assertIn("librosa", commands[1])
+            resolution = json.loads((output / "resolution.json").read_text())
+            self.assertEqual(resolution["modalities"], ["text", "audio"])
+            self.assertIn("torchvision", resolution["omitted_modalities"]["image"])
+            self.assertIn("Leaving out image support", stderr.getvalue())
+
+    def run_resolution(self, fake_run):
+        """Run the lock phase with a fake pip; return (exit code, resolution)."""
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            argv = ["resolve_runtime.py", "--version", "2.10.0", "--build", "cpu"]
+            with (
+                patch.object(resolver.sys, "argv", [*argv, "--output", str(output)]),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver, "select_official_torch_wheel", return_value=selected_wheel()
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()),
+            ):
+                try:
+                    resolver.main()
+                except SystemExit as exit_result:
+                    return exit_result.code, None
+            return 0, json.loads((output / "resolution.json").read_text())
+
+    def test_an_indirect_dependency_without_a_wheel_drops_only_the_modality_needing_it(self):
+        for needs_it, kept in (("librosa", ("text", "image")), ("diffusers", ("text", "audio"))):
+            commands = []
+
+            def fake_run(command, needs_it=needs_it, kept=kept, **_kwargs):
+                commands.append(command)
+                if needs_it in command:
+                    # llvmlite is not requested; a modality's package pulls it in.
+                    return SimpleNamespace(
+                        returncode=1,
+                        stdout="",
+                        stderr="ERROR: No matching distribution found for llvmlite",
+                    )
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(report(modalities=kept)), encoding="utf-8"
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with self.subTest(needs_it=needs_it):
+                code, resolution = self.run_resolution(fake_run)
+                self.assertEqual(code, 0)
+                self.assertEqual(resolution["modalities"], list(kept))
+                (dropped,) = set(resolver.MODALITIES) - set(kept)
+                self.assertIn("llvmlite", resolution["omitted_modalities"][dropped])
+                # Trying without audio first must not drop audio when image needed it.
+                self.assertEqual(len(commands), 2 if needs_it == "librosa" else 3)
+
+    def test_a_missing_dependency_no_modality_brings_in_fails_with_its_reason(self):
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            return SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="ERROR: No matching distribution found for pydantic-core",
+            )
+
+        code, resolution = self.run_resolution(fake_run)
+        self.assertEqual(code, 2)
+        self.assertIsNone(resolution)
+        # Without audio, without image, then without every modality.
+        self.assertEqual(len(commands), 4)
+
+    def test_core_and_extra_packages_never_degrade(self):
+        for missing in ("fastapi", "nunchaku"):
+
+            def fake_run(command, missing=missing, **_kwargs):
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=f"ERROR: No matching distribution found for {missing}",
+                )
+
+            with (
+                self.subTest(missing=missing),
+                tempfile.TemporaryDirectory() as directory,
+                patch.object(resolver.sys, "platform", "linux"),
+                patch.object(resolver.platform, "machine", return_value="x86_64"),
+                patch.object(resolver.sys, "version_info", VERSION_3_12),
+            ):
+                argv = [
+                    "resolve_runtime.py",
+                    "--version",
+                    "2.9.1",
+                    "--build",
+                    "cu130",
+                    "--output",
+                    str(pathlib.Path(directory) / "manifest"),
+                ]
+                if missing == "nunchaku":
+                    argv += ["--extra", "nunchaku"]
+                with (
+                    patch.object(resolver.sys, "argv", argv),
+                    patch.object(resolver, "native_target", return_value="linux"),
+                    patch.object(
+                        resolver,
+                        "select_official_torch_wheel",
+                        return_value=selected_wheel("2.9.1", "cu130"),
+                    ),
+                    patch.object(resolver, "wheel_match", return_value=None),
+                    patch.object(resolver.subprocess, "run", side_effect=fake_run) as run,
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                self.assertEqual(exit_result.exception.code, 2)
+                self.assertEqual(run.call_count, 1)
 
     def test_wrong_build_or_untrusted_origin_is_rejected(self):
         for fixture in [
@@ -1773,7 +2189,7 @@ class ResolverTests(unittest.TestCase):
             "https://files.pythonhosted.org/packages/aa/bb/"
             "torchvision-0.29.0-cp314-cp314-macosx_14_0_arm64.whl"
         )
-        fixture = report(version="2.14.0+cpu", adapter="flux2")
+        fixture = report(version="2.14.0+cpu")
         fixture["install"][0]["metadata"]["version"] = "2.14.0"
         fixture["install"][0]["download_info"]["url"] = torch_url
         vision = next(
@@ -1788,7 +2204,7 @@ class ResolverTests(unittest.TestCase):
             patch.object(resolver.sys, "version_info", SimpleNamespace(major=3, minor=14)),
             patch.object(resolver.packaging_tags, "sys_tags", return_value=[mac_tag]),
         ):
-            requirements, _ = resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+            requirements, _ = resolver.requirements_from_report(fixture, "2.14.0", "cpu")
             self.assertTrue(any(torch_url in requirement for requirement in requirements))
             self.assertTrue(any(vision_url in requirement for requirement in requirements))
             for bad_url in (
@@ -1799,22 +2215,27 @@ class ResolverTests(unittest.TestCase):
             ):
                 with self.subTest(bad_url=bad_url), self.assertRaisesRegex(ValueError, "Untrusted"):
                     fixture["install"][0]["download_info"]["url"] = bad_url
-                    resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+                    resolver.requirements_from_report(fixture, "2.14.0", "cpu")
             fixture["install"][0]["download_info"]["url"] = torch_url
         with self.assertRaises(ValueError):
-            resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+            resolver.requirements_from_report(fixture, "2.14.0", "cpu")
 
     def test_torchvision_wrong_build_is_rejected(self):
-        fixture = report(adapter="flux2")
-        fixture["install"][6]["metadata"]["version"] = "0.25.0+cu130"
+        def vision(fixture):
+            return next(
+                item for item in fixture["install"] if item["metadata"]["name"] == "torchvision"
+            )
+
+        fixture = report()
+        vision(fixture)["metadata"]["version"] = "0.25.0+cu130"
         with self.assertRaisesRegex(ValueError, "Torchvision build"):
-            resolver.requirements_from_report(fixture, "2.10.0", "cpu", "flux2")
-        fixture = report(adapter="flux2")
-        fixture["install"][6]["download_info"]["url"] = (
+            resolver.requirements_from_report(fixture, "2.10.0", "cpu")
+        fixture = report()
+        vision(fixture)["download_info"]["url"] = (
             "https://download.pytorch.org/whl/cu130/torchvision-0.25.0.whl"
         )
         with self.assertRaisesRegex(ValueError, "Untrusted"):
-            resolver.requirements_from_report(fixture, "2.10.0", "cpu", "flux2")
+            resolver.requirements_from_report(fixture, "2.10.0", "cpu")
 
     def test_untrusted_dependency_and_missing_hash_are_rejected(self):
         fixture = report()
@@ -1828,21 +2249,28 @@ class ResolverTests(unittest.TestCase):
 
     def test_nunchaku_is_limited_to_qualified_abi(self):
         with self.assertRaisesRegex(ValueError, "qualified Nunchaku"):
-            resolver.adapter_requirements("nunchaku", "2.10.0", "cu130")
+            resolver.extra_requirements(("nunchaku",), "2.10.0", "cu130")
+        self.assertEqual(resolver.extra_requirements((), "2.10.0", "cu130"), ())
         with (
             patch.object(resolver.sys, "platform", "linux"),
             patch.object(resolver.platform, "machine", return_value="x86_64"),
         ):
             with patch.object(resolver.sys, "version_info", (3, 12, 0)):
-                requirements = resolver.adapter_requirements("nunchaku", "2.9.1", "cu130")
+                requirements = resolver.extra_requirements(("nunchaku",), "2.9.1", "cu130")
         self.assertIn(resolver.NUNCHAKU_URL, requirements[-1])
         fixture = report(
             version="2.9.1+cu130",
             url="https://download-r2.pytorch.org/whl/cu130/torch.whl",
-            adapter="nunchaku",
+            extras=("nunchaku",),
         )
-        _, resolution = resolver.requirements_from_report(fixture, "2.9.1", "cu130", "nunchaku")
-        self.assertEqual(resolution["adapter"], "nunchaku")
+        _, resolution = resolver.requirements_from_report(
+            fixture, "2.9.1", "cu130", extras=("nunchaku",)
+        )
+        self.assertEqual(resolution["extras"], ["nunchaku"])
+        self.assertEqual(resolution["modalities"], ["text", "image", "audio"])
+        # The extra's wheel is trusted only when the extra was requested.
+        with self.assertRaisesRegex(ValueError, "Untrusted|Nunchaku"):
+            resolver.requirements_from_report(fixture, "2.9.1", "cu130")
 
     def test_resolution_failures_distinguish_torch_dependencies_and_inconclusive_errors(self):
         for message in (
@@ -1868,7 +2296,7 @@ class ResolverTests(unittest.TestCase):
             4,
         )
         code, message = resolver.resolution_failure(
-            "No matching distribution found for torchvision==0.25.0", "2.10.0", "cpu", "flux2"
+            "No matching distribution found for torchvision==0.25.0", "2.10.0", "cpu"
         )
         self.assertEqual(code, 2)
         self.assertIn("torchvision", message)

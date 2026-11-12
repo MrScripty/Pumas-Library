@@ -62,9 +62,26 @@ pub(super) const BUILDS: &[&str] = &[
     "rocm7.2",
     "rocm7.14",
 ];
+/// Former per-install adapters, still accepted from callers. Every install
+/// now carries the general modalities (text, image and audio), so `none`,
+/// `flux2` and `cohere-asr` select the same install; `nunchaku` selects the
+/// Nunchaku extra.
 const ADAPTERS: &[&str] = &["none", "flux2", "nunchaku", "cohere-asr"];
+/// General modalities every Torch install resolves together.
+pub(crate) const GENERAL_MODALITIES: &[&str] = &["text", "image", "audio"];
+/// Optional extras, each qualified to one exact selection.
+pub(crate) const EXTRAS: &[&str] = &["nunchaku"];
 
-/// An adapter whose own binary wheel was built for one selection.
+/// The extras a former adapter value selects.
+pub(crate) fn extras_for_adapter(adapter: &str) -> Vec<String> {
+    if adapter == "nunchaku" {
+        vec!["nunchaku".to_owned()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// An extra whose own binary wheel was built for one selection.
 struct AdapterRequirement {
     adapter: &'static str,
     tag: &'static str,
@@ -227,19 +244,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cohere_asr_public_selection_is_exact_unverified_and_one_use() {
+    async fn former_adapters_select_the_same_general_install_once() {
         let root = tempfile::tempdir().unwrap();
         let manager = VersionManager::new(root.path(), AppId::Torch)
             .await
             .unwrap();
-        assert!(manager
-            .preview_torch_runtime("v2.3.1", "cpu", "python3.12", "cohere-asr")
-            .await
-            .is_err());
-        assert!(manager.torch_install_selections.lock().await.is_empty());
-        for (tag, build) in [("v2.10.0", "cpu"), ("v2.14.0", "cu134")] {
+        // Every install carries the general modalities, so the former adapter
+        // names select the same install with no extra. An old Torch is not
+        // refused here: its probe reports what it cannot serve.
+        for (tag, build, adapter) in [
+            ("v2.3.1", "cpu", "cohere-asr"),
+            ("v2.10.0", "cpu", "none"),
+            ("v2.14.0", "cu134", "flux2"),
+            ("v2.14.0", "cu134", "cohere-asr"),
+        ] {
             let TorchPreviewOutcome::Ready { preview } = manager
-                .preview_torch_runtime(tag, build, "python3.12", "cohere-asr")
+                .preview_torch_runtime(tag, build, "python3.12", adapter)
                 .await
                 .unwrap()
             else {
@@ -247,18 +267,21 @@ mod tests {
             };
             assert_eq!(preview.qualification, "unverified");
             assert!(preview.artifacts.is_empty());
+            assert_eq!(preview.adapter, adapter);
+            assert!(preview.extras.is_empty());
             let selected = manager
                 .consume_torch_install_selection(&preview.preview_id, tag)
                 .await
                 .unwrap();
             assert_eq!(selected.tag, tag);
             assert_eq!(selected.build, build);
-            assert_eq!(selected.adapter, "cohere-asr");
+            assert!(selected.extras.is_empty());
             assert!(manager
                 .consume_torch_install_selection(&preview.preview_id, tag)
                 .await
                 .is_err());
         }
+        assert_eq!(extras_for_adapter("nunchaku"), vec!["nunchaku".to_owned()]);
         assert!(!root.path().join("launcher-data/managed-python").exists());
     }
 
@@ -450,7 +473,10 @@ pub struct TorchPreview {
     pub tag: String,
     pub build: String,
     pub python: String,
+    /// The adapter value the caller sent, echoed for older callers.
     pub adapter: String,
+    /// Optional extras this install adds to the general modalities.
+    pub extras: Vec<String>,
     pub artifacts: Vec<TorchArtifact>,
     pub qualification: String,
     pub expires_in_seconds: u64,
@@ -482,7 +508,8 @@ pub(crate) struct TorchInstallSelection {
     pub tag: String,
     pub build: String,
     pub python: String,
-    pub adapter: String,
+    /// Optional extras added to the general modalities every install carries.
+    pub extras: Vec<String>,
     /// pip constraints (`name==version` lines) from a verified combination's
     /// record, present only when the user opted into its versions.
     pub verified_constraints: Option<String>,
@@ -720,8 +747,25 @@ impl VersionManager {
         if self.app_id != AppId::Torch {
             return Err(failed("Torch manager required"));
         }
+        /// The saved install-time probe, or `Null` when it is absent.
+        async fn probe_results(version_dir: &Path) -> serde_json::Value {
+            fs::read(version_dir.join("probe-results.json"))
+                .await
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or(serde_json::Value::Null)
+        }
         let linux_x64 = cfg!(all(target_os = "linux", target_arch = "x86_64"));
-        let adapters: &[&str] = if linux_x64 { ADAPTERS } else { &["none"] };
+        let extras: Vec<String> = if linux_x64 {
+            EXTRAS.iter().copied().map(str::to_owned).collect()
+        } else {
+            Vec::new()
+        };
+        // Older callers still choose an adapter: `none` is the general
+        // install, and an extra's name selects that extra.
+        let adapters: Vec<String> = std::iter::once("none".to_owned())
+            .chain(extras.iter().cloned())
+            .collect();
         let mut installed = Vec::new();
         for tag in self.get_installed_versions().await? {
             let recipe_path = self.versions_dir().join(&tag).join("runtime.json");
@@ -745,31 +789,56 @@ impl VersionManager {
                     &tag,
                     "cu130",
                     "python3.12",
-                    "nunchaku",
+                    &["nunchaku".to_owned()],
                     &artifacts,
+                );
+                let extras = vec!["nunchaku".to_owned()];
+                let capabilities = super::torch_inspection::runtime_capabilities(
+                    &probe_results(&self.versions_dir().join(&tag)).await,
+                    &extras,
                 );
                 TorchInstalledRuntime {
                     tag,
                     build: Some("cu130".into()),
                     python: Some("python3.12".into()),
                     adapter: Some("bundled".into()),
+                    extras: Some(extras),
+                    capabilities,
                     qualified,
                 }
             } else {
                 let (build, python, adapter) =
                     (recorded("build"), recorded("python"), recorded("adapter"));
-                let qualified = match (&build, &python, &adapter) {
-                    (Some(build), Some(python), Some(adapter)) => {
+                // Installs since general modalities record their extras;
+                // earlier ones record the adapter that selected them.
+                let extras: Option<Vec<String>> = if recipe["extras"].is_array() {
+                    serde_json::from_value(recipe["extras"].clone()).ok()
+                } else {
+                    adapter.as_deref().map(extras_for_adapter)
+                };
+                let qualified = match (&build, &python, &extras) {
+                    (Some(build), Some(python), Some(extras)) => {
                         let artifacts = installed_artifacts(&self.versions_dir().join(&tag)).await;
-                        super::torch_verified::is_verified(&tag, build, python, adapter, &artifacts)
+                        super::torch_verified::is_verified(&tag, build, python, extras, &artifacts)
                     }
                     _ => false,
                 };
+                let adapter = adapter.or_else(|| {
+                    extras
+                        .as_ref()
+                        .map(|extras| extras.first().cloned().unwrap_or_else(|| "none".to_owned()))
+                });
+                let capabilities = super::torch_inspection::runtime_capabilities(
+                    &probe_results(&self.versions_dir().join(&tag)).await,
+                    extras.as_deref().unwrap_or_default(),
+                );
                 TorchInstalledRuntime {
                     tag,
                     build,
                     python,
                     adapter,
+                    extras,
+                    capabilities,
                     qualified,
                 }
             });
@@ -786,12 +855,21 @@ impl VersionManager {
                 id: "auto".into(),
                 label: "Select automatically".into(),
             }],
-            adapters: adapters.iter().copied().map(str::to_owned).collect(),
+            modalities: GENERAL_MODALITIES
+                .iter()
+                .copied()
+                .map(str::to_owned)
+                .collect(),
+            extras,
             default_adapter: "none".into(),
             verified: super::torch_verified::verified_torch_runtimes(),
             adapter_requirements: ADAPTER_REQUIREMENTS
                 .iter()
-                .filter(|requirement| adapters.contains(&requirement.adapter))
+                .filter(|requirement| {
+                    adapters
+                        .iter()
+                        .any(|offered| offered == requirement.adapter)
+                })
                 .map(
                     |requirement| super::torch_inspection::TorchAdapterRequirement {
                         adapter: requirement.adapter.into(),
@@ -802,6 +880,7 @@ impl VersionManager {
                 )
                 .collect(),
             installed,
+            adapters,
         })
     }
 
@@ -850,34 +929,29 @@ impl VersionManager {
         {
             return Err(failed("Invalid Torch installation selection"));
         }
-        if adapter == "cohere-asr" {
-            super::cohere_asr_profile::validate_selection(tag.trim_start_matches('v'))?;
-            if !cfg!(target_os = "linux") {
-                return Err(failed(
-                    "ASR dependency profile is unavailable on this platform",
-                ));
-            }
-        }
+        let extras = extras_for_adapter(adapter);
         // Refuse before any Python is provisioned, not after every attempt.
-        if let Some(requirement) = adapter_requirement(adapter) {
-            if !cfg!(all(target_os = "linux", target_arch = "x86_64"))
-                || tag != requirement.tag
-                || build != requirement.build
-                || python != requirement.python
-            {
-                return Ok(TorchPreviewOutcome::Rejected {
-                    reason: TorchPreviewRejectionReason::Unsupported,
-                    message: requirement.refusal,
-                });
+        for extra in &extras {
+            if let Some(requirement) = adapter_requirement(extra) {
+                if !cfg!(all(target_os = "linux", target_arch = "x86_64"))
+                    || tag != requirement.tag
+                    || build != requirement.build
+                    || python != requirement.python
+                {
+                    return Ok(TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Unsupported,
+                        message: requirement.refusal,
+                    });
+                }
             }
         }
         let verified_constraints = if verified_versions {
-            match super::torch_verified::verified_constraints(tag, build, python, adapter) {
+            match super::torch_verified::verified_constraints(tag, build, python, &extras) {
                 Some(constraints) => Some(constraints),
                 None => {
                     return Ok(TorchPreviewOutcome::Rejected {
                         reason: TorchPreviewRejectionReason::Unsupported,
-                        message: "No verified combination matches this release, build, Python and adapter, so its recorded versions cannot be applied",
+                        message: "No verified combination matches this release, build, Python and extras, so its recorded versions cannot be applied",
                     })
                 }
             }
@@ -890,7 +964,7 @@ impl VersionManager {
             tag: tag.to_owned(),
             build: build.to_owned(),
             python: python.to_owned(),
-            adapter: adapter.to_owned(),
+            extras: extras.clone(),
             created: Instant::now(),
         };
         {
@@ -917,6 +991,7 @@ impl VersionManager {
                 build: build.to_owned(),
                 python: python.to_owned(),
                 adapter: adapter.to_owned(),
+                extras,
                 artifacts: Vec::new(),
                 qualification: "unverified".to_owned(),
                 expires_in_seconds: PREVIEW_TTL.as_secs(),

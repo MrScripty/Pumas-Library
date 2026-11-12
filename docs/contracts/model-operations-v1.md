@@ -337,6 +337,7 @@ A result whose generation reached that bound reports `finish_reason: "length"`.
 Availability states why transcription cannot run: `unsupported_adapter` for a
 provider other than Torch, `model_task_mismatch` for a Torch model that is not
 an audio model, and `runtime_unavailable` while its runtime or slot is not
-ready. A Torch runtime installed with the `cohere-asr` adapter resolves
-current packages (Transformers 5.4 or newer) and loads the model from local
-files only, without repository code.
+ready. Every Torch runtime resolves the audio packages with the other general
+modalities (current releases, Transformers 5.4 or newer where its Torch allows)
+and loads the model from local files only, without repository code. Its
+install probe reports Cohere ASR unavailable, with the reason, when it cannot.

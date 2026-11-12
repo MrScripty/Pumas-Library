@@ -34,6 +34,20 @@ pub(super) fn managed_pip_cache_dir(launcher_root: &Path) -> Result<PathBuf> {
     Ok(cache)
 }
 
+/// Return the managed root that holds Torch wheel acquisition workspaces.
+///
+/// Each workspace keeps verified and partial wheel bytes across failed install
+/// attempts so a retry resumes them; success or cancellation removes it.
+pub(super) fn managed_torch_wheel_dir(launcher_root: &Path) -> Result<PathBuf> {
+    let root = fs::canonicalize(launcher_root)
+        .map_err(|err| PumasError::io_with_path(err, launcher_root))?;
+    let mut wheels = root.clone();
+    for component in ["launcher-data", "cache", "torch-wheels"] {
+        wheels = checked_child_directory(&wheels, component, &root)?;
+    }
+    Ok(wheels)
+}
+
 /// Give one resolver process its own temporary directory without changing our environment.
 pub(super) fn configure_resolver_command(command: &mut Command, workspace: &Path) -> Result<()> {
     let workspace =

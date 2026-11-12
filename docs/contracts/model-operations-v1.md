@@ -147,8 +147,18 @@ Jinja): what it computes comes from the model's recorded sentence-transformers
 declarations (causal `LogitScore` scoring under the declared template,
 sequence-classifier logits otherwise, declared pooling and normalization for
 embedders), and an architecture the installed Transformers does not know is
-refused at load with the runtime's reason. Torch rerank scores apply the
-model's declared activation. A causal-LM reranker GGUF without one can
+refused at load with the runtime's reason. Torch applies the Dense and
+LayerNorm modules an embedder declares after pooling, from the weights in the
+model's package; a declared module it does not implement is refused at load
+with the reason. ONNX Runtime embeddings of such a model read the pooled
+`sentence_embedding` output the graph computes them into; a graph without one
+is refused. Torch and ONNX Runtime rerank scores are the model's logit under
+its declared activation (`Sigmoid` or `Identity`; raw logits when none is
+declared; another activation is refused at load). llama.cpp returns its
+ranking head's output whatever the declared activation: the raw logit of a
+classifier head, and for a derived head the value described below. Scores
+order documents the same way on every runtime but compare in value only
+within one runtime. A causal-LM reranker GGUF without a ranking head can
 be given a head by the `gguf_to_ranking_gguf` conversion
 ([ADR 0006](../adr/0006-derived-ranking-heads.md)); its scores are
 `σ(ℓ_true − ℓ_false)` (or `σ(ℓ_true)` for a one-token contract), which orders

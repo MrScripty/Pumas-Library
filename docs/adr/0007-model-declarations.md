@@ -39,6 +39,10 @@ files may lack `modules.json`.
   - pooling, normalization, the `LogitScore` tokens and their strings;
   - the chat template, its options and its special-token strings;
   - prompts, activation and module types;
+  - each module's directory and role (`module_details`), with the layer of a
+    Dense module (sizes, bias, activation) and the dimension of a LayerNorm.
+    Their weights stay in the model's package; a runtime that cannot apply a
+    declared module refuses with the reason instead of skipping it;
   - where the record was read: the package, or a repository at an immutable
     commit.
 
@@ -50,10 +54,15 @@ files may lack `modules.json`.
   3. its single recorded base model.
 
   A caller may name the repository instead. The first repository that
-  publishes `modules.json` wins. Its files are fetched by the Hugging Face
-  client at one resolved commit, into scratch space outside the library, and
-  are bounded by Hugging Face's size facts and LFS digests. Only the record is
-  kept.
+  publishes `modules.json` wins; one whose files fail to fetch or validate
+  does not end the search, and when none declares them the failures are
+  returned with their reasons. The source repository is read at the commit the
+  model's files were downloaded at (`upstream_revision`); a base model, which
+  records none, at its current `main`. The commit read is kept in the record.
+  Files are fetched by the Hugging Face client into scratch space outside the
+  library, bounded by Hugging Face's size facts and LFS digests, and a
+  transfer that delivers no data for a minute is abandoned. Only the record is
+  kept, written by changing only the model's `sentence_transformers` field.
 - **Resolution happens once, off the serving path.**
   - A reactor follows the library's update feed and resolves each model that
     becomes complete without a record, whether a download, an import or a
@@ -61,6 +70,10 @@ files may lack `modules.json`.
     retried on the model's next change, and never fails the operation. (A
     download's record exists from the moment it starts, so completion is the
     change that clears `download_incomplete`, not the model being added.)
+    Only embedders, rerankers and decision models are resolved. Reading the
+    feed never waits on a fetch; if the feed lags anyway, the library is
+    rescanned for complete models without a record. The reactor stops at
+    shutdown, cancelling a fetch in progress.
   - `resolve_model_declarations` resolves on request, and replaces the record.
   - Ranking-head derivation resolves at admission when the record is missing.
 

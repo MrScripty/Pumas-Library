@@ -34,8 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Cross-encoder rerankers published as text classifiers (for example
   bge-reranker-v2-m3) are recorded as rerankers: a GGUF ranking head without
   a decision head, or a `*ForSequenceClassification` config with one label,
-  decides the category over a `text-classification` tag, and such a tag no
-  longer blocks `rerank` for a recorded reranker.
+  decides the category over a `text-classification` tag when reranker
+  evidence corroborates it (see Fixed), and such a tag no longer blocks
+  `rerank` for a recorded reranker.
 - `start_model_conversion` direction `gguf_to_ranking_gguf` derives a llama.cpp
   ranking head into a copy of a causal-LM reranker GGUF that shipped without
   one (for example zerank-2 and some Qwen3-Reranker quantizations), from the
@@ -78,6 +79,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   announced separately.
 
 ### Fixed
+
+- Torch embeddings now apply the Dense and LayerNorm modules a model declares
+  after pooling (EmbeddingGemma: Transformer, Pooling, Dense, Dense,
+  Normalize) from the weights in its package. Before, they were skipped and
+  the vectors were silently wrong. Declarations record each module's
+  directory, role and layer (`module_details`); a module a runtime does not
+  implement is refused at load with the reason. Records written earlier
+  carry no layer, so such a model is refused until its declarations are
+  resolved again.
+- ONNX Runtime reads a graph's pooled `sentence_embedding` output when the
+  model declares stages after pooling, instead of re-pooling token states and
+  dropping those stages, and refuses graphs that do not export one.
+- ONNX Runtime rerank applies the model's declared activation, as Torch does.
+- Torch text requests the sidecar refuses (an empty input or document list,
+  a blank query, too many items) return 400 with the reason instead of 502.
+- One-label classifier heads (a `*ForSequenceClassification` config or a GGUF
+  `cls.output.weight`) are recorded as rerankers only with reranker evidence
+  beside them (a reranker tag or name, a CrossEncoder package, or recorded
+  CrossEncoder/`LogitScore` declarations). Alone they are low-confidence
+  rerankers that an explicit task tag overrides, so reward and regression
+  heads keep their category.
+- Declarations are read from the source repository at the commit its files
+  were downloaded at, not its current `main`; a lineage repository that fails
+  to read no longer ends the search; and recording them changes only the
+  `sentence_transformers` field, so edits made during the fetch are kept.
+- The declarations reactor no longer stalls the update feed behind a fetch,
+  rescans the library when the feed lags, abandons transfers that stop
+  delivering data, and stops at shutdown. It resolves only embedders,
+  rerankers and decision models.
+- Acquisition workspace identities persist the reboot-stable volume instead
+  of the raw device number; identities persisted earlier are translated when
+  read.
 
 - One malformed library record no longer makes the whole library unavailable.
   `get_models` and catalog search leave the record out and list it in

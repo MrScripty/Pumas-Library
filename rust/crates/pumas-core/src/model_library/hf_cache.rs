@@ -958,6 +958,7 @@ mod tests {
                 quant: "Q4_K_M".to_string(),
                 size_bytes: Some(4_000_000_000),
                 file_group: None,
+                companion_size_bytes: None,
             }],
             url: format!("https://huggingface.co/{}", repo_id),
             release_date: Some("2024-01-15T10:00:00Z".to_string()),

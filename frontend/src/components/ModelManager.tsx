@@ -29,6 +29,7 @@ import { ModelImportDialog } from './ModelImportDialog';
 import { ModelConversionDialog, formatConversionDirection } from './ModelConversionDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
 import { MigrationReportsPanel } from './MigrationReportsPanel';
+import { LibraryCompanionBackfillPanel } from './LibraryCompanionBackfillPanel';
 import { HuggingFaceAuthDialog } from './HuggingFaceAuthDialog';
 import { NetworkStatusBanner } from './NetworkStatusBanner';
 import {
@@ -384,6 +385,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               {/* Migration Reports */}
               <div className="mt-4">
                 <MigrationReportsPanel />
+              </div>
+              <div className="mt-4">
+                <LibraryCompanionBackfillPanel />
               </div>
             </>
           )}

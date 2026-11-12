@@ -1,4 +1,4 @@
-import { ActivitySquare, Database, FileText, PencilLine, Play, Settings } from 'lucide-react';
+import { ActivitySquare, Database, FileText, PencilLine, Play, ScrollText, Settings } from 'lucide-react';
 import type { MetadataSource } from './ModelMetadataFieldConfig';
 
 type ModelMetadataModalTabsProps = {
@@ -41,6 +41,13 @@ export function ModelMetadataModalTabs({
       >
         <Database className="w-4 h-4" />
         Stored
+      </button>
+      <button
+        onClick={() => onActiveSourceChange('documents')}
+        className={tabClassName(activeSource === 'documents')}
+      >
+        <ScrollText className="w-4 h-4" />
+        Card &amp; License
       </button>
       <button
         onClick={() => onActiveSourceChange('inference')}

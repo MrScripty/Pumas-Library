@@ -5,6 +5,7 @@
 
 mod builder;
 pub(crate) mod catalog;
+mod companion_files;
 pub use catalog::{
     CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
 };

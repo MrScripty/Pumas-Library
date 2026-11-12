@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ff9f5dc054325a09f95216f10dfb363747aa848a23f8ef4b2140224b46dccfce. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 c8351051f726739de4a9cf5f5db576767efd05bc3e77ed55731bc92a5a4b3275. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -42,7 +42,7 @@ export type DownloadLocalCandidate = { "displayName": string; "modelId": string;
 export type DownloadLocationReport = { "attemptId": string | null; "candidates": ReadonlyArray<DownloadLocalCandidate>; "downloadId": string; "message": string; "originalDestination": string | null; "requiresFormatUpgrade": boolean; "resolutionRequest": (DownloadResolutionRequest) | (null); "status": DownloadLocationStatus };
 export type DownloadLocationStatus = "not_applicable" | "existing_local_candidate" | "missing_files" | "ambiguous_candidates" | "busy" | "stale_observation" | "unsupported_history" | "invalid_metadata" | "unavailable_capability" | "publication_uncertain" | "resolved";
 export type DownloadMutationOutcome = { "error"?: string; "success": boolean };
-export type DownloadOption = { "fileGroup"?: FileGroup; "quant": string; "sizeBytes": number | null };
+export type DownloadOption = { "companionSizeBytes"?: number | null; "fileGroup"?: FileGroup; "quant": string; "sizeBytes": number | null };
 export type DownloadProgressOutcome = { "downloadId": string; "downloadedBytes": number | null; "error": string | null; "etaSeconds": number | null; "libraryModelId": string | null; "modelName": string | null; "modelType": string | null; "nextRetryDelaySeconds": number | null; "progress": number | null; "repoId": string | null; "retryAttempt": number | null; "retryLimit": number | null; "retrying": boolean | null; "selectedArtifactId": string | null; "speed": number | null; "status": DownloadStatus; "totalBytes": number | null };
 export type DownloadResolutionRequest = { "acceptStorageUpgrade": boolean; "acceptance": DownloadLocalAcceptance; "attemptId": string; "candidateModelId": string; "downloadId": string; "expectedObservation": string; "operationId": string };
 export type DownloadStartedFailure = { "error": string; "success": false };

@@ -278,6 +278,24 @@ the 2026-11-02 audit
   `audio_transcription` sidecar capability). The `cohere-asr` Torch adapter
   resolves current packages with a Transformers 5.4 floor, and `cohere_asr`
   configs are classified as audio models.
+- Hugging Face downloads keep the model card, license and notice files
+  (`LICENSE*`, `NOTICE*`, `USE_POLICY*`, `COPYING*`), the repository's code
+  and its other metadata files with the selected weights, scoped to the root
+  and the folders that hold the selected weights; other weight variants are
+  never pulled. Metadata records the stored card and license
+  (`model_card_artifact`, `license_artifact`, with SHA-256 and source URL) and
+  the code (`custom_code_sources`, `requires_custom_code`). Code is stored for
+  inspection only and never executed; Torch refuses an `auto_map` model whose
+  architecture Transformers does not implement and names the code it would
+  need. Model IDs and directories do not change. Download options report
+  `companionSizeBytes`.
+- Companion backfill (`backfill_model_companion_files`,
+  `backfill_library_companion_files`, dry run by default) fetches the card,
+  license, code and metadata files existing models are missing, at their
+  recorded commit, through hash-checked, resumable acquisition. Weights and
+  identity are untouched; local imports and vanished revisions are skipped
+  with a reason. `get_model_documents` returns the stored card, licenses and
+  code, shown in the model window's **Card & License** tab.
 
 ### Changed
 

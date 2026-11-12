@@ -17,6 +17,8 @@
 mod acquisition_source;
 mod auth;
 mod bundles;
+mod companion_backfill;
+mod companions;
 mod download;
 mod lifecycle;
 mod metadata;
@@ -26,7 +28,12 @@ mod st_package;
 mod types;
 
 pub use auth::HfAuthStatus;
+pub(crate) use companion_backfill::{
+    place_companions, CompanionBackfillTarget, CompanionFetchPlan, CompanionPlanOutcome,
+    LocalWeight,
+};
 pub(crate) use lifecycle::TaskContext as DownloadInvocationContext;
+pub(crate) use types::HF_HUB_BASE;
 pub use types::{
     AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,
     DownloadCompletionInfo,

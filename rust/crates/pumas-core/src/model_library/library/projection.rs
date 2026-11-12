@@ -295,8 +295,6 @@ const NON_MEANINGFUL_METADATA_PROJECTION_FIELDS: &[&str] = &[
     "compatible_apps",
     "conversion_source",
     "last_lookup_attempt",
-    "license_artifact",
-    "model_card_artifact",
     "reviewed_at",
     "reviewed_by",
     "subtype",
@@ -767,5 +765,8 @@ mod tests {
         assert!(metadata.contains_key("model_card"));
         assert!(metadata.contains_key("notes"));
         assert!(metadata.contains_key("preview_image"));
+        // Stored card and license references are projected for display.
+        assert!(metadata.contains_key("license_artifact"));
+        assert!(metadata.contains_key("model_card_artifact"));
     }
 }

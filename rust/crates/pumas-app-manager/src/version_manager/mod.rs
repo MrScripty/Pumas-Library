@@ -42,7 +42,6 @@
 //! }
 //! ```
 
-mod cohere_asr_profile;
 mod constraints;
 mod dependencies;
 mod installer;
@@ -72,9 +71,10 @@ pub use torch_alternatives::{
     TorchReleaseOptionsStatus, TorchReleaseRecommendation,
 };
 pub use torch_inspection::{
-    TorchAdapterRequirement, TorchCapabilityProbe, TorchInstalledProbeReport,
-    TorchInstalledRuntime, TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus,
-    TorchPythonChoice, TorchRuntimeOptions,
+    TorchAdapterRequirement, TorchCapabilityProbe, TorchCapabilityStatus,
+    TorchInstalledProbeReport, TorchInstalledRuntime, TorchProbeAdapterStatus,
+    TorchProbeCoreStatus, TorchProbeStatus, TorchPythonChoice, TorchRuntimeCapability,
+    TorchRuntimeOptions,
 };
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
@@ -1147,7 +1147,7 @@ impl VersionManager {
                         tag: tag.to_owned(),
                         build: "auto".to_owned(),
                         python: "auto".to_owned(),
-                        adapter: "none".to_owned(),
+                        extras: Vec::new(),
                         verified_constraints: None,
                         created: std::time::Instant::now(),
                     },
@@ -1160,7 +1160,7 @@ impl VersionManager {
                     tag: tag.to_owned(),
                     build: "auto".to_owned(),
                     python: "auto".to_owned(),
-                    adapter: "none".to_owned(),
+                    extras: Vec::new(),
                     verified_constraints: None,
                     created: std::time::Instant::now(),
                 },
@@ -5911,7 +5911,7 @@ mod tests {
                 tag: "v2.14.0".into(),
                 build: "auto".into(),
                 python: "auto".into(),
-                adapter: "none".into(),
+                extras: Vec::new(),
                 verified_constraints: None,
                 created: std::time::Instant::now()
                     - torch_preview::PREVIEW_TTL

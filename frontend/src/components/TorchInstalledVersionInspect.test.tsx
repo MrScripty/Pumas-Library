@@ -13,12 +13,13 @@ describe('installed Torch version review', () => {
     const switchVersion = vi.fn();
     vi.stubGlobal('electronAPI', {
       get_torch_runtime_options: vi.fn().mockResolvedValue({
-        builds: ['cpu', 'cu130'], pythons: [], adapters: ['none', 'flux2'],
-        defaultAdapter: 'flux2', defaultBuild: 'auto',
+        builds: ['cpu', 'cu130'], pythons: [], adapters: ['none', 'nunchaku'],
+        defaultAdapter: 'none', defaultBuild: 'auto',
+        modalities: ['text', 'image', 'audio'], extras: ['nunchaku'],
         verified: [], adapterRequirements: [],
         installed: [
-          { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },
-          { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'flux2', qualification: 'unverified' },
+          { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled', extras: ['nunchaku'], qualification: 'qualified', capabilities: [{ name: 'image', status: 'available', reason: null }] },
+          { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'flux2', extras: [], qualification: 'unverified', capabilities: [{ name: 'image', status: 'available', reason: null }, { name: 'text', status: 'unknown', reason: 'Probed before every Torch install carried text, image and audio packages' }] },
         ],
       }),
       get_torch_runtime_probe: probe,
@@ -35,8 +36,8 @@ describe('installed Torch version review', () => {
       onRemoveVersion={vi.fn().mockResolvedValue(true)}
     />);
 
-    await waitFor(() => expect(screen.getByText('Installed cpu · python3.12 · flux2 · unverified')).toBeInTheDocument());
-    expect(screen.getByText('Installed cu130 · python3.12 · bundled · qualified')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Installed cpu · python3.12 · general · unverified · serves image')).toBeInTheDocument());
+    expect(screen.getByText('Installed cu130 · python3.12 · nunchaku · qualified · serves image')).toBeInTheDocument();
     const row = screen.getByRole('heading', { name: '2.10.0' }).closest('div.w-full');
     if (!(row instanceof HTMLElement)) throw new TypeError('Expected installed version row');
     fireEvent.click(within(row).getByRole('button', { name: 'Inspect saved checks' }));

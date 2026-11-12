@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/adapter';
+import { torchInstalledSummary } from '../types/torch-install';
 import type { TorchInstalledConfig, TorchRuntimeProbeReport } from '../types/torch-install';
 import { TorchStartupTrial } from './TorchStartupTrial';
 import type { createTorchTrialLifecycleStore } from './TorchTrialLifecycleStore';
@@ -48,8 +49,18 @@ export function TorchRuntimeProbePanel({ tag, trialStore }: TorchRuntimeProbePan
         <button type="button" onClick={() => setRefresh((value) => value + 1)} disabled={loading} className="underline disabled:opacity-50">Refresh results</button>
       </div>
       {installedConfig && <p className="mt-2">
-        Installed: {installedConfig.build ?? 'unknown build'} · {installedConfig.python ?? 'unknown Python'} · {installedConfig.adapter ?? 'unknown adapter'} · {installedConfig.qualification}
+        Installed: {torchInstalledSummary(installedConfig)}
       </p>}
+      {installedConfig && installedConfig.capabilities.some((capability) => capability.status !== 'available') && (
+        <ul className="mt-1 space-y-1" aria-label="Unavailable capabilities">
+          {installedConfig.capabilities.filter((capability) => capability.status !== 'available').map((capability) => (
+            <li key={capability.name}>
+              <span className="capitalize">{labelForCapability(capability.name)}</span>: <strong>{capability.status}</strong>
+              {capability.reason && <span> · {capability.reason}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
       {loading && <p role="status">Loading saved probe results…</p>}
       {error && <p role="status">Probe results unavailable: {error}</p>}
       {report && (
@@ -57,8 +68,9 @@ export function TorchRuntimeProbePanel({ tag, trialStore }: TorchRuntimeProbePan
           {report.recorded_at && <p className="mt-2">Recorded {new Date(report.recorded_at).toLocaleString()}</p>}
           {report.stale && <p role="alert" className="mt-2">Saved checks are stale. {report.staleReasons.join('; ')}</p>}
           <p className="mt-2">
-            Core: <strong>{report.core_status}</strong> · Image adapter: <strong>{report.adapter_status}</strong>
-            {report.status === 'partial' && ' · Partial support; inspect the adapter checks below.'}
+            Core: <strong>{report.core_status}</strong>
+            {report.adapter_status !== 'not selected' && <> · Optional extra: <strong>{report.adapter_status}</strong></>}
+            {report.status === 'partial' && ' · Partial support; some capabilities below are unavailable.'}
           </p>
           <ul className="mt-2 space-y-1">
             {Object.entries(report.capabilities).map(([key, capability]) => (

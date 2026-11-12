@@ -19,6 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a 540 MB Torch wheel during a DNS outage.
 - A Torch install that cannot use shared acquisition keeps pip's downloads
   and writes the reason in its installation log.
+- Every Torch install now carries all general modalities: the text (with
+  Jinja), image and audio packages resolve together at current releases.
+  Image generation, Cohere ASR and text models no longer depend on which
+  adapter was picked at install time. Nunchaku is the only optional extra,
+  because its wheel is qualified to one Torch and Python pair. A modality
+  whose packages have no compatible wheel is left out with its reason instead
+  of failing the install; the Cohere ASR Transformers floor is a floor, not a
+  pin, and yields to an older Torch or a chosen tested combination.
+- Installed Torch runtimes report capabilities from what their install probe
+  could import, each available, unavailable (with the reason) or unknown for
+  runtimes probed before this change. The install dialog shows the general
+  modalities and extras the backend reports, and "verified combinations" are
+  shown as tested-as-working evidence.
+
+### Deprecated
+
+- The `adapter` parameter of `preview_torch_runtime` is still accepted and
+  mapped (`none`, `flux2` and `cohere-asr` select the general install,
+  `nunchaku` the Nunchaku extra). Send `extras` instead; a removal will be
+  announced separately.
 
 ## [0.8.0] - 2026-11-08
 

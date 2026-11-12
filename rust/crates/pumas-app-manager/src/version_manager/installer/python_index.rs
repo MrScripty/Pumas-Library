@@ -966,7 +966,7 @@ fn header(response: &reqwest::Response, name: reqwest::header::HeaderName) -> Op
 }
 
 /// Whether an index answered that a resource does not exist.
-fn is_not_found(status: reqwest::StatusCode) -> bool {
+pub(super) fn is_not_found(status: reqwest::StatusCode) -> bool {
     matches!(
         status,
         reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE
@@ -1139,6 +1139,18 @@ impl PackageIndex {
             },
         );
         Ok(files)
+    }
+
+    /// The status a file URL answers a `HEAD` request with, or `None` when it
+    /// gives no answer (a network failure).
+    pub(super) async fn head_status(&self, url: &str) -> Option<reqwest::StatusCode> {
+        let url = reqwest::Url::parse(url).ok()?;
+        self.client
+            .head(url)
+            .send()
+            .await
+            .ok()
+            .map(|response| response.status())
     }
 
     /// The core metadata served beside `file` (PEP 658), checked against the

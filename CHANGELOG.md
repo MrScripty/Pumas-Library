@@ -109,6 +109,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `nunchaku` the Nunchaku extra). Send `extras` instead; a removal will be
   announced separately.
 
+### Fixed
+
+- A retried ONNX Runtime CUDA install no longer stays stuck when a CUDA library
+  wheel it selected earlier has been removed from PyPI (its project, listing
+  or file answers not found). The retry resolves the libraries again,
+  withdraws the earlier unfinished download, reuses the finished downloads the
+  new selection still names after verifying them, and records why in the
+  install log. A server error or network failure keeps the earlier selection,
+  and a retry checks only the wheels it still has to download. A retry whose
+  kept selection cannot be read or no longer applies replaces the earlier
+  download the same way instead of failing on it.
+
 ## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,

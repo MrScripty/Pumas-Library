@@ -37,11 +37,15 @@ use std::path::Path;
 #[cfg_attr(not(feature = "s3"), allow(dead_code))]
 mod s3;
 pub(crate) use s3::*;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+mod runtime_providers;
 #[cfg_attr(not(feature = "s3"), allow(dead_code))]
 mod s3_discovery;
 mod s3_persisted;
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
 mod torch_runtime;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+pub(crate) use runtime_providers::*;
 pub(crate) use s3_discovery::*;
 pub(crate) use s3_persisted::*;
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -350,6 +354,8 @@ pub(crate) enum RpcCommand {
         preview_id: Option<String>,
     },
     #[cfg(feature = "inference-plugins")]
+    GetRuntimeProviders,
+    #[cfg(feature = "inference-plugins")]
     GetTorchRuntimeOptions,
     #[cfg(feature = "inference-plugins")]
     GetTorchReleaseOptions {
@@ -595,6 +601,8 @@ impl RpcCommand {
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion { .. } => "install_version",
             #[cfg(feature = "inference-plugins")]
+            Self::GetRuntimeProviders => "get_runtime_providers",
+            #[cfg(feature = "inference-plugins")]
             Self::GetTorchRuntimeOptions => "get_torch_runtime_options",
             #[cfg(feature = "inference-plugins")]
             Self::GetTorchReleaseOptions { .. } => "get_torch_release_options",
@@ -756,6 +764,8 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
     #[cfg(feature = "inference-plugins")]
+    RuntimeProviders(RuntimeProvidersOutcome),
+    #[cfg(feature = "inference-plugins")]
     TorchRuntimeOptions(TorchRuntimeOptionsOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchReleaseOptions(TorchReleaseOptionsOutcome),
@@ -883,6 +893,8 @@ impl RpcOutcome {
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::RuntimeProviders(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::TorchRuntimeOptions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -2691,6 +2703,10 @@ pub(crate) enum AvailableVersionsOutcome {
 pub(crate) struct AvailableVersionsSuccess {
     success: bool,
     versions: Vec<pumas_library::models::VersionReleaseInfo>,
+    /// Some listed build is still `checking` whether it installs. List the
+    /// versions again for the result; each listing waits for running checks
+    /// for a while before it answers.
+    availability_pending: bool,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -2724,9 +2740,14 @@ impl AvailableVersionsOutcome {
         }) {
             return Err(invalid_domain_outcome("available versions"));
         }
+        let availability_pending = versions.iter().any(|version| {
+            version.install_availability
+                == Some(pumas_library::models::InstallAvailability::Checking)
+        });
         Ok(Self::Available(AvailableVersionsSuccess {
             success: true,
             versions,
+            availability_pending,
         }))
     }
     pub(crate) fn rate_limited(retry_after_secs: Option<u64>) -> Result<Self, PumasError> {
@@ -2762,6 +2783,8 @@ fn available_versions_fixture() -> Vec<pumas_library::models::VersionReleaseInfo
             archive_size: Some(0),
             dependencies_size: Some(42),
             installing: Some(false),
+            unavailable_reason: None,
+            install_availability: None,
         },
         VersionReleaseInfo {
             tag_name: "v2".into(),
@@ -2775,6 +2798,10 @@ fn available_versions_fixture() -> Vec<pumas_library::models::VersionReleaseInfo
             archive_size: None,
             dependencies_size: None,
             installing: None,
+            unavailable_reason: Some(
+                "No CUDA 12 metadata. Builds that install instead: v1.29.0+cuda12 installs.".into(),
+            ),
+            install_availability: Some(pumas_library::models::InstallAvailability::Unavailable),
         },
     ]
 }
@@ -2785,14 +2812,15 @@ mod available_versions_tests {
     #[test]
     fn available_versions_preserve_core_fields_nulls_and_rate_limit_shape() {
         let versions = available_versions_fixture();
-        let expected = serde_json::json!({"success":true,"versions":versions});
+        let expected =
+            serde_json::json!({"success":true,"versions":versions,"availability_pending":false});
         assert_eq!(
             serde_json::to_value(AvailableVersionsOutcome::available(versions).unwrap()).unwrap(),
             expected
         );
         assert_eq!(
             serde_json::to_value(AvailableVersionsOutcome::available(vec![]).unwrap()).unwrap(),
-            serde_json::json!({"success":true,"versions":[]})
+            serde_json::json!({"success":true,"versions":[],"availability_pending":false})
         );
         for retry in [None, Some(0), Some(MAX_JS_SAFE_INTEGER)] {
             assert_eq!(
@@ -2802,6 +2830,30 @@ mod available_versions_tests {
             );
         }
     }
+    #[test]
+    fn a_build_still_being_checked_makes_the_listing_pending() {
+        use pumas_library::models::InstallAvailability;
+        let mut versions = available_versions_fixture();
+        versions[0].install_availability = Some(InstallAvailability::Checking);
+        let value =
+            serde_json::to_value(AvailableVersionsOutcome::available(versions).unwrap()).unwrap();
+        assert_eq!(value["availability_pending"], true);
+        assert_eq!(value["versions"][0]["installAvailability"], "checking");
+        assert_eq!(value["versions"][1]["installAvailability"], "unavailable");
+        for settled in [
+            InstallAvailability::Available,
+            InstallAvailability::Unavailable,
+            InstallAvailability::Unknown,
+        ] {
+            let mut versions = available_versions_fixture();
+            versions[0].install_availability = Some(settled);
+            let value =
+                serde_json::to_value(AvailableVersionsOutcome::available(versions).unwrap())
+                    .unwrap();
+            assert_eq!(value["availability_pending"], false, "{settled:?}");
+        }
+    }
+
     #[test]
     fn available_versions_reject_unsafe_sizes_and_retry_without_normalization() {
         for field in 0..4 {
@@ -4285,6 +4337,49 @@ mod torch_release_options_contract_tests {
         assert!(preview(serde_json::json!({"verified_versions": "yes"})).is_err());
     }
 
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn preview_extras_select_the_install_and_adapter_stays_accepted() {
+        let adapter_of = |extra: serde_json::Value| {
+            let mut params =
+                serde_json::json!({"tag": "v2.9.1", "build": "cu130", "python": "python3.12"});
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            parse_command("preview_torch_runtime", Some(&params)).map(|command| match command {
+                RpcCommand::PreviewTorchRuntime { adapter, .. } => adapter,
+                _ => unreachable!(),
+            })
+        };
+        assert_eq!(adapter_of(serde_json::json!({})).unwrap(), "none");
+        assert_eq!(
+            adapter_of(serde_json::json!({"adapter": "flux2"})).unwrap(),
+            "flux2"
+        );
+        assert_eq!(
+            adapter_of(serde_json::json!({"extras": []})).unwrap(),
+            "none"
+        );
+        assert_eq!(
+            adapter_of(serde_json::json!({"extras": ["nunchaku"]})).unwrap(),
+            "nunchaku"
+        );
+        assert_eq!(
+            adapter_of(serde_json::json!({"adapter": "nunchaku", "extras": ["nunchaku"]})).unwrap(),
+            "nunchaku"
+        );
+        for refused in [
+            serde_json::json!({"extras": ["flux2"]}),
+            serde_json::json!({"extras": ["nunchaku", "nunchaku"]}),
+            serde_json::json!({"adapter": "nunchaku", "extras": []}),
+            // A misspelled adapter is refused, not mapped to the general install.
+            serde_json::json!({"adapter": "flux3", "extras": []}),
+        ] {
+            assert!(adapter_of(refused).is_err());
+        }
+    }
+
     #[test]
     fn typed_release_options_use_the_expected_wire_shape() {
         let outcome = TorchReleaseOptionsOutcome {
@@ -4395,12 +4490,55 @@ pub(crate) struct PreviewTorchRuntimeParams {
     tag: String,
     build: String,
     python: String,
-    #[serde(default = "default_torch_adapter")]
-    adapter: String,
+    /// Accepted for older callers. Every install now carries the general
+    /// modalities, so `none`, `flux2` and `cohere-asr` select the same
+    /// install; `nunchaku` selects that extra. Prefer `extras`.
+    #[serde(default)]
+    adapter: Option<String>,
+    /// Optional extras to add to the general modalities. When present it
+    /// decides the install; an `adapter` naming a different extra is refused.
+    #[serde(default)]
+    extras: Option<Vec<String>>,
     /// Constrain resolution to the package versions a verified combination
     /// recorded. The selection must then match that combination exactly.
     #[serde(default)]
     verified_versions: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", test))]
+impl PreviewTorchRuntimeParams {
+    /// The one adapter value the manager selects by: `none` for the general
+    /// install, or the name of its single extra.
+    fn selection_adapter(&self) -> Result<String, PublicError> {
+        let Some(extras) = &self.extras else {
+            return Ok(self.adapter.clone().unwrap_or_else(|| "none".to_owned()));
+        };
+        let from_extras = match extras.as_slice() {
+            [] => "none",
+            [extra] if extra == "nunchaku" => "nunchaku",
+            _ => {
+                return Err(PublicError::invalid_params_because(
+                    "extras may name at most one supported extra: nunchaku",
+                ))
+            }
+        };
+        let adapter_extra = match self.adapter.as_deref() {
+            None => from_extras,
+            Some("nunchaku") => "nunchaku",
+            Some("none" | "flux2" | "cohere-asr") => "none",
+            Some(_) => {
+                return Err(PublicError::invalid_params_because(
+                    "adapter must be none, flux2, cohere-asr or nunchaku; prefer extras",
+                ))
+            }
+        };
+        if adapter_extra != from_extras {
+            return Err(PublicError::invalid_params_because(
+                "adapter and extras select different installs; send extras only",
+            ));
+        }
+        Ok(from_extras.to_owned())
+    }
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -4451,7 +4589,10 @@ pub(crate) struct TorchRuntimePreview {
     tag: String,
     build: String,
     python: String,
+    /// The adapter value the selection was made with, for older callers.
     adapter: String,
+    /// Optional extras the install adds to the general modalities.
+    extras: Vec<String>,
     artifacts: Vec<TorchRuntimePreviewArtifact>,
     qualification: TorchRuntimePreviewQualification,
     expires_in_seconds: u64,
@@ -4498,6 +4639,7 @@ fn torch_runtime_preview_fixture() -> TorchRuntimePreview {
         build: "cu130".into(),
         python: "python3.12".into(),
         adapter: "bundled".into(),
+        extras: vec!["nunchaku".into()],
         artifacts: vec![TorchRuntimePreviewArtifact {
             name: "torch".into(),
             version: "2.9.1+cu130".into(),
@@ -4524,6 +4666,7 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreview> for TorchRuntimeP
             build: preview.build,
             python: preview.python,
             adapter: preview.adapter,
+            extras: preview.extras,
             artifacts: preview
                 .artifacts
                 .into_iter()
@@ -4665,6 +4808,7 @@ mod torch_preview_contract_tests {
             build: "auto".into(),
             python: "auto".into(),
             adapter: "none".into(),
+            extras: Vec::new(),
             artifacts: Vec::new(),
             qualification: "unverified".into(),
             expires_in_seconds: 1800,
@@ -4785,6 +4929,7 @@ mod torch_preview_contract_tests {
                 build: "cpu".into(),
                 python: "python3.12".into(),
                 adapter: "none".into(),
+                extras: Vec::new(),
                 artifacts: Vec::new(),
                 qualification: source.into(),
                 expires_in_seconds: 1800,
@@ -4803,6 +4948,7 @@ mod torch_preview_contract_tests {
             build: "cpu".into(),
             python: "python3.12".into(),
             adapter: "none".into(),
+            extras: Vec::new(),
             artifacts: Vec::new(),
             qualification: "unexpected qualification".into(),
             expires_in_seconds: 1800,
@@ -4831,11 +4977,6 @@ mod torch_preview_contract_tests {
             "validation_failed"
         );
     }
-}
-
-#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
-fn default_torch_adapter() -> String {
-    "none".into()
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -7024,20 +7165,22 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         #[cfg(feature = "inference-plugins")]
+        "get_runtime_providers" => empty().map(|()| RpcCommand::GetRuntimeProviders),
+        #[cfg(feature = "inference-plugins")]
         "get_torch_runtime_options" => empty().map(|()| RpcCommand::GetTorchRuntimeOptions),
         #[cfg(feature = "inference-plugins")]
         "get_torch_release_options" => parse_params::<GetTorchReleaseOptionsParams>(params)
             .map(|params| RpcCommand::GetTorchReleaseOptions { tag: params.tag }),
         #[cfg(feature = "inference-plugins")]
         "preview_torch_runtime" => {
-            parse_params::<PreviewTorchRuntimeParams>(params).map(|params| {
-                RpcCommand::PreviewTorchRuntime {
+            parse_params::<PreviewTorchRuntimeParams>(params).and_then(|params| {
+                Ok(RpcCommand::PreviewTorchRuntime {
+                    adapter: params.selection_adapter()?,
                     tag: params.tag,
                     build: params.build,
                     python: params.python,
-                    adapter: params.adapter,
                     verified_versions: params.verified_versions,
-                }
+                })
             })
         }
         #[cfg(feature = "inference-plugins")]

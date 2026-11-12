@@ -78,7 +78,7 @@ impl LoopbackHost {
         Ok(Self(address))
     }
 
-    const fn socket_addr(self, port: u16) -> SocketAddr {
+    pub(crate) const fn socket_addr(self, port: u16) -> SocketAddr {
         SocketAddr::new(self.0, port)
     }
 }
@@ -353,9 +353,21 @@ pub(crate) async fn start_server_with_startup(
         .map_err(|message| anyhow::anyhow!("invalid gateway base URL: {message}"))?;
     #[cfg(feature = "inference-plugins")]
     let ollama_client_factory = build_ollama_client_factory()?;
+    // ONNX sessions live in per-profile ONNX hosts: this executable run with
+    // `--onnx-host`. Register it so ONNX Runtime profiles can launch.
+    #[cfg(feature = "inference-plugins")]
+    match std::env::current_exe() {
+        Ok(executable) => {
+            pumas_library::runtime_profiles::register_onnx_host_executable(executable)?
+        }
+        Err(error) => {
+            tracing::warn!(%error, "ONNX Runtime profiles cannot launch: no executable path")
+        }
+    }
     #[cfg(feature = "inference-plugins")]
     let onnx_session_manager = OnnxSessionManager::new(
-        OnnxEmbeddingBackendKind::real(),
+        OnnxEmbeddingBackendKind::remote()
+            .map_err(|err| anyhow::anyhow!("failed to build ONNX host client: {err}"))?,
         ONNX_MAX_CONCURRENT_OPERATIONS,
     )
     .map_err(|err| anyhow::anyhow!("failed to build ONNX session manager: {err}"))?;

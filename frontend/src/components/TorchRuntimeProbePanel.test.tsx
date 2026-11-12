@@ -14,6 +14,7 @@ const getProfiles = vi.fn<() => Promise<unknown>>().mockResolvedValue({ success:
 const baseOptions: TorchRuntimeOptions = {
   builds: ['cpu'], pythons: [], adapters: ['none'],
   defaultAdapter: 'none', defaultBuild: 'auto',
+  modalities: ['text', 'image', 'audio'], extras: [],
   verified: [], adapterRequirements: [],
   installed: [],
 };
@@ -119,8 +120,16 @@ describe('TorchRuntimeProbePanel', () => {
     expect(unconditionalStop).not.toHaveBeenCalled();
   });
 
-  it('distinguishes a passing core from an unavailable selected adapter and untested startup', async () => {
-    getOptions.mockResolvedValue({ ...baseOptions, installed: [{ tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'flux2', qualification: 'unverified' }] });
+  it('distinguishes a passing core from unavailable capabilities and untested startup', async () => {
+    getOptions.mockResolvedValue({ ...baseOptions, installed: [{
+      tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'none', extras: [], qualification: 'unverified',
+      capabilities: [
+        { name: 'text', status: 'available', reason: null },
+        { name: 'image', status: 'available', reason: null },
+        { name: 'audio', status: 'unavailable', reason: 'No compatible binary wheel for soxr' },
+        { name: 'cohere_asr', status: 'unknown', reason: 'Probed before every Torch install carried text, image and audio packages' },
+      ],
+    }] });
     getProbe.mockResolvedValue({
       status: 'partial', core_status: 'passed', adapter_status: 'unavailable',
       recorded_at: '2026-09-23T12:00:00Z', stale: true, staleReasons: ['sidecar changed'],
@@ -132,9 +141,13 @@ describe('TorchRuntimeProbePanel', () => {
     });
     render(<TorchRuntimeProbePanel tag="v2.10.0" />);
 
-    expect(await screen.findByText('Partial support; inspect the adapter checks below.', { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText('Partial support; some capabilities below are unavailable.', { exact: false })).toBeInTheDocument();
     expect(screen.getByText('Pipeline symbol missing')).toBeInTheDocument();
-    expect(await screen.findByText('Installed: cpu · python3.12 · flux2 · unverified')).toBeInTheDocument();
+    expect(await screen.findByText('Installed: cpu · python3.12 · general · unverified · serves text, image')).toBeInTheDocument();
+    const unavailable = screen.getByRole('list', { name: 'Unavailable capabilities' });
+    expect(unavailable).toHaveTextContent('audio: unavailable · No compatible binary wheel for soxr');
+    expect(unavailable).toHaveTextContent('cohere asr: unknown');
+    expect(screen.getByText(/Optional extra:/)).toHaveTextContent('Optional extra: unavailable');
     expect(screen.getByRole('alert')).toHaveTextContent('Saved checks are stale. sidecar changed');
     expect(screen.getByText(/Socket startup was not tested during installation/)).toBeInTheDocument();
     expect(getProbe).toHaveBeenCalledWith('v2.10.0');

@@ -64,7 +64,7 @@ class AdapterImportProbeTests(TestCase):
                     side_effect=ImportError("torch missing"),
                 ),
             ):
-                result = probe_runtime.probe(root)
+                result = probe_runtime.probe(root, root)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["capabilities"]["torch_import"]["status"], "failed")
         self.assertEqual(result["capabilities"]["sidecar_app"]["status"], "passed")
@@ -86,9 +86,12 @@ class AdapterImportProbeTests(TestCase):
         self.assertEqual(len(result["context"]["interpreter_sha256"]), 64)
         self.assertEqual(len(result["context"]["distributions_sha256"]), 64)
         self.assertIn("serve.py", result["context"]["runtime_files_sha256"])
-        self.assertEqual(result["capabilities"]["flux2_klein"]["status"], "not selected")
+        # Model families are probed on every install; an extra only on request.
+        self.assertEqual(result["capabilities"]["flux2_klein"]["status"], "unavailable")
+        self.assertEqual(result["capabilities"]["nunchaku_z_image"]["status"], "not selected")
+        self.assertEqual(result["capabilities"]["text_modality"]["status"], "unavailable")
 
-    def test_selected_adapter_failure_is_partial_with_passing_core(self):
+    def test_missing_modality_packages_are_partial_with_passing_core(self):
         class Tensor:
             def __matmul__(self, _other):
                 return self
@@ -116,7 +119,7 @@ class AdapterImportProbeTests(TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "resolution.json").write_text(
-                json.dumps({"torch": "2.10.0+cpu", "adapter": "flux2", "artifacts": []})
+                json.dumps({"torch": "2.10.0+cpu", "extras": [], "artifacts": []})
             )
             (root / "serve.py").write_text("# fixture\n")
             with (
@@ -131,11 +134,16 @@ class AdapterImportProbeTests(TestCase):
                     ),
                 ),
             ):
-                result = probe_runtime.probe(root)
+                result = probe_runtime.probe(root, root)
         self.assertEqual(result["core_status"], "passed")
-        self.assertEqual(result["adapter_status"], "unavailable")
+        # No extra was requested; missing modality packages are reported.
+        self.assertEqual(result["adapter_status"], "not selected")
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["capabilities"]["flux2_klein"]["status"], "unavailable")
+        for modality in ("text", "image", "audio"):
+            capability = result["capabilities"][f"{modality}_modality"]
+            self.assertEqual(capability["status"], "unavailable")
+            self.assertIn("missing", capability["error"])
         canonical_hardware = {
             "cuda": None,
             "hip": None,
@@ -194,7 +202,7 @@ class AdapterImportProbeTests(TestCase):
         missing = {k: v for k, v in symbols.items() if k != "CohereAsrForConditionalGeneration"}
         self.assertEqual(probe(available=missing)[0]["status"], "unavailable")
 
-    def test_cohere_asr_selection_is_independent_of_image_device_and_image_imports(self):
+    def test_every_install_probes_modalities_and_families_without_a_selection(self):
         class Tensor:
             def __matmul__(self, _other):
                 return self
@@ -215,9 +223,16 @@ class AdapterImportProbeTests(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "serve.py").write_text("# fixture")
-            for selected in ("cohere-asr", "nunchaku", "none"):
+            for extras in ([], ["nunchaku"]):
                 (root / "resolution.json").write_text(
-                    json.dumps({"torch": torch.__version__, "adapter": selected, "artifacts": []})
+                    json.dumps(
+                        {
+                            "torch": torch.__version__,
+                            "extras": extras,
+                            "omitted_modalities": {"image": "No compatible wheel for torchvision"},
+                            "artifacts": [],
+                        }
+                    )
                 )
                 with (
                     patch.dict("sys.modules", {"serve": serve}),
@@ -234,51 +249,70 @@ class AdapterImportProbeTests(TestCase):
                         probe_runtime,
                         "adapter_import_probe",
                         return_value={"status": "inconclusive"},
-                    ),
+                    ) as imports,
                     patch.object(
                         probe_runtime,
                         "cohere_asr_import_probe",
                         return_value={"status": "inconclusive"},
                     ) as asr,
                 ):
-                    result = probe_runtime.probe(root)
-                self.assertEqual(asr.call_count, int(selected == "cohere-asr"))
+                    result = probe_runtime.probe(root, root)
+                capabilities = result["capabilities"]
+                # Cohere ASR and FLUX.2 are probed on every install.
+                self.assertEqual(asr.call_count, 1)
+                self.assertEqual(capabilities["cohere_asr"]["status"], "inconclusive")
+                self.assertEqual(capabilities["flux2_klein"]["status"], "inconclusive")
                 self.assertEqual(result["core_status"], "passed")
-                self.assertEqual(
-                    result["capabilities"]["audio_transcription"]["status"], "not tested"
-                )
-                if selected == "cohere-asr":
-                    self.assertEqual(result["adapter_status"], "inconclusive")
-                    self.assertEqual(
-                        result["capabilities"]["flux2_klein"]["status"], "not selected"
-                    )
+                self.assertEqual(capabilities["audio_transcription"]["status"], "not tested")
+                self.assertEqual(capabilities["text_modality"]["status"], "inconclusive")
+                # A modality the resolver left out reports its reason.
+                self.assertEqual(capabilities["image_modality"]["status"], "unavailable")
+                self.assertIn("torchvision", capabilities["image_modality"]["reason"])
+                self.assertEqual(result["status"], "partial")
+                probed = [call.args[0] for call in imports.call_args_list]
+                if extras:
+                    self.assertIn(probe_runtime.ADAPTER_IMPORTS["nunchaku"][0], probed)
+                    # The extra needs its device, unavailable here.
+                    self.assertEqual(result["adapter_status"], "unavailable")
+                else:
+                    self.assertNotIn(probe_runtime.ADAPTER_IMPORTS["nunchaku"][0], probed)
+                    self.assertEqual(capabilities["nunchaku_z_image"]["status"], "not selected")
+                    self.assertEqual(result["adapter_status"], "not selected")
 
-    def test_selected_cohere_asr_missing_imports_refuse_profile_publication(self):
-        for selected, status, fails in (
-            ("cohere-asr", "unavailable", True),
-            ("cohere-asr", "inconclusive", False),
-            ("flux2", "unavailable", False),
+    def test_only_a_requested_extra_that_does_not_import_refuses_publication(self):
+        for extras, nunchaku, asr, fails in (
+            (["nunchaku"], "unavailable", "inconclusive", True),
+            (["nunchaku"], "inconclusive", "unavailable", False),
+            ([], "not selected", "unavailable", False),
         ):
             with (
                 tempfile.TemporaryDirectory() as directory,
-                patch.object(probe_runtime, "__file__", str(Path(directory) / "probe_runtime.py")),
+                patch.object(probe_runtime, "__file__", str(Path(directory) / "sidecar.py")),
                 patch.object(
                     probe_runtime,
                     "probe",
                     return_value={
                         "core_status": "passed",
-                        "adapter_status": status,
-                        "environment": {"adapter": selected},
+                        "adapter_status": "inconclusive",
+                        "environment": {"extras": extras},
+                        "capabilities": {
+                            "nunchaku_z_image": {"status": nunchaku},
+                            "cohere_asr": {"status": asr},
+                        },
                     },
                 ),
                 patch("builtins.print"),
             ):
+                runtime = Path(directory) / "runtime"
+                runtime.mkdir()
                 if fails:
                     with self.assertRaises(SystemExit):
-                        probe_runtime.main()
+                        probe_runtime.main(["--runtime", str(runtime)])
                 else:
-                    probe_runtime.main()
-                self.assertTrue((Path(directory) / "probe-results.json").is_file())
+                    probe_runtime.main(["--runtime", str(runtime)])
+                # Results belong to the runtime; the shared sidecar stays unwritten.
+                self.assertTrue((runtime / "probe-results.json").is_file())
+                self.assertEqual(sorted(Path(directory).iterdir()), [runtime])
 
     def test_device_failure_is_scoped(self):
         fake_torch = SimpleNamespace(

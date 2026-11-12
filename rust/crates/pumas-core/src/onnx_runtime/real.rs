@@ -1,25 +1,106 @@
 use std::path::PathBuf;
 
 use ort::{
-    ep::CPU,
+    ep::{CoreML, CPU, CUDA},
     inputs,
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{
+        builder::{GraphOptimizationLevel, SessionBuilder},
+        Session,
+    },
     value::TensorRef,
 };
 use tracing::info;
+
+use crate::onnx_runtime_distribution::OnnxRuntimeVariant;
 
 use super::{
     output::extract_hidden_states, tensors::TokenTensors, OnnxEmbedding,
     OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest,
     OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider, OnnxLoadOptions,
-    OnnxLoadRequest, OnnxModelConfig, OnnxModelId, OnnxRuntimeError, OnnxSessionState,
-    OnnxSessionStatus, OnnxTokenizer,
+    OnnxLoadRequest, OnnxModelConfig, OnnxModelId, OnnxRuntimeError, OnnxRuntimeLibrary,
+    OnnxSessionState, OnnxSessionStatus, OnnxTokenizer,
 };
 
-const ORT_NATIVE_LIBRARY_STRATEGY: &str = "explicit-runtime-library-cpu";
+const ORT_NATIVE_LIBRARY_STRATEGY: &str = "installed-runtime-library";
 const ONNX_RUNTIME_GRAPH_OPTIMIZATION: GraphOptimizationLevel = GraphOptimizationLevel::Level3;
 const ONNX_RUNTIME_INTRA_THREADS: usize = 1;
 const ONNX_RUNTIME_INTER_THREADS: usize = 1;
+
+/// Where the CUDA libraries of the library being loaded come from: the
+/// installed version's own, unless a developer's `ORT_DYLIB_PATH` library
+/// replaces it.
+fn cuda_libraries(
+    runtime_library: Option<&OnnxRuntimeLibrary>,
+) -> super::cuda_driver::CudaLibraries {
+    use super::cuda_driver::CudaLibraries;
+    let version_dir = runtime_library.and_then(|library| library.path().parent()?.parent());
+    match version_dir {
+        _ if std::env::var_os("ORT_DYLIB_PATH").is_some_and(|path| !path.is_empty()) => {
+            CudaLibraries::External
+        }
+        None => CudaLibraries::External,
+        Some(version_dir) => {
+            if crate::onnx_runtime_distribution::installed_cuda_library_dir(version_dir).is_some() {
+                CudaLibraries::Installed
+            } else {
+                CudaLibraries::NotInstalled
+            }
+        }
+    }
+}
+
+/// Register exactly the requested execution provider. A GPU provider that
+/// cannot initialize is an error with the reason, never a silent CPU
+/// fallback. For CUDA the reason names the missing piece: the NVIDIA driver
+/// (missing or too old), or the build's CUDA runtime and cuDNN libraries.
+fn register_execution_provider(
+    builder: SessionBuilder,
+    provider: OnnxExecutionProvider,
+    runtime_library: Option<&OnnxRuntimeLibrary>,
+) -> Result<SessionBuilder, OnnxRuntimeError> {
+    let dispatch = match provider {
+        OnnxExecutionProvider::Cpu => CPU::default().build(),
+        OnnxExecutionProvider::Cuda => CUDA::default().build(),
+        OnnxExecutionProvider::CoreMl => CoreML::default().build(),
+    }
+    .error_on_failure();
+    builder
+        .with_execution_providers([dispatch])
+        .map_err(|error| {
+            let hint = match provider {
+                OnnxExecutionProvider::Cpu => String::new(),
+                OnnxExecutionProvider::Cuda => super::cuda_driver::cuda_failure_hint(
+                    super::cuda_driver::probe_driver(),
+                    runtime_library
+                        .and_then(|library| OnnxRuntimeVariant::from_tag(library.version_tag()))
+                        .and_then(OnnxRuntimeVariant::cuda_major),
+                    cuda_libraries(runtime_library),
+                ),
+                OnnxExecutionProvider::CoreMl => "; CoreML needs macOS on Apple hardware".into(),
+            };
+            OnnxRuntimeError {
+                code: super::OnnxRuntimeErrorCode::Backend,
+                field: Some("execution_provider".into()),
+                message: format!(
+                    "ONNX Runtime {} execution provider could not initialize: {error}{hint}",
+                    provider.as_str()
+                ),
+            }
+        })
+}
+
+/// Load `runtime_library` and initialize `provider` without a model, so an
+/// ONNX host can report at startup why it cannot run instead of failing on
+/// the first model load.
+pub fn probe_execution_provider(
+    runtime_library: &OnnxRuntimeLibrary,
+    provider: OnnxExecutionProvider,
+) -> Result<(), OnnxRuntimeError> {
+    super::native_library::ensure_runtime_library(Some(runtime_library))?;
+    let builder = Session::builder()
+        .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
+    register_execution_provider(builder, provider, Some(runtime_library)).map(|_| ())
+}
 
 #[derive(Debug)]
 pub struct OnnxRuntimeSession {
@@ -35,11 +116,22 @@ pub struct OnnxRuntimeSession {
 }
 
 impl OnnxRuntimeSession {
+    /// Load without a selected installed version. Only the developer
+    /// override `ORT_DYLIB_PATH` can serve.
     pub fn load(request: OnnxLoadRequest) -> Result<Self, OnnxRuntimeError> {
+        Self::load_with_runtime_library(request, None)
+    }
+
+    /// Load with the library of the host-selected installed ONNX Runtime
+    /// version. The selection is host authority, never request-supplied.
+    pub fn load_with_runtime_library(
+        request: OnnxLoadRequest,
+        runtime_library: Option<&OnnxRuntimeLibrary>,
+    ) -> Result<Self, OnnxRuntimeError> {
         let tokenizer = OnnxTokenizer::from_model_path(&request.model_path)?;
         let model_config = OnnxModelConfig::from_model_path(&request.model_path)?;
         let embedding_dimensions = resolve_embedding_dimensions(&request.options, &model_config)?;
-        super::native_library::ensure_runtime_library()?;
+        super::native_library::ensure_runtime_library(runtime_library)?;
         info!(
             provider = "onnx_runtime",
             model_id = %request.model_id.as_str(),
@@ -50,16 +142,14 @@ impl OnnxRuntimeSession {
             inter_threads = ONNX_RUNTIME_INTER_THREADS,
             "initializing ONNX Runtime embedding session"
         );
-        let mut builder = Session::builder()
+        let builder = Session::builder()
             .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
-        builder = match request.options.execution_provider {
-            OnnxExecutionProvider::Cpu => builder
-                .with_execution_providers([CPU::default().build()])
-                .map_err(|_| {
-                    OnnxRuntimeError::backend("ONNX Runtime CPU execution provider setup failed")
-                })?,
-        };
-        builder = apply_session_options(builder, &request.options)?;
+        let builder = register_execution_provider(
+            builder,
+            request.options.execution_provider,
+            runtime_library,
+        )?;
+        let mut builder = apply_session_options(builder, &request.options)?;
 
         let session = builder
             .commit_from_file(request.model_path.path())

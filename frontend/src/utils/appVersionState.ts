@@ -43,11 +43,22 @@ export const UNSUPPORTED_VERSION_STATE: AppVersionState = {
   setDefaultVersion: noopVoid,
 };
 
-const VERSION_SUPPORTED_APP_IDS = new Set(['ollama', 'llama-cpp', 'torch']);
+/**
+ * Shown while the backend's runtime provider list is still loading, so panels
+ * read as loading rather than as an app without version management.
+ */
+export const LOADING_VERSION_STATE: AppVersionState = {
+  ...UNSUPPORTED_VERSION_STATE,
+  isLoading: true,
+};
 
-export function isVersionSupportedAppId(appId: string | null): boolean {
+/** Whether `appId` is one the backend version-manages (see `useRuntimeProviders`). */
+export function isVersionSupportedAppId(
+  appId: string | null,
+  versionManagedAppIds: readonly string[]
+): boolean {
   if (!appId) return false;
-  return VERSION_SUPPORTED_APP_IDS.has(appId);
+  return versionManagedAppIds.includes(appId);
 }
 
 export function supportsVersionShortcuts(appId: string | null): boolean {
@@ -57,9 +68,10 @@ export function supportsVersionShortcuts(appId: string | null): boolean {
 
 export function getAppVersionState(
   appId: string | null,
+  isSupported: boolean,
   versions: UseVersionsResult
 ): AppVersionState {
-  if (isVersionSupportedAppId(appId)) {
+  if (appId && isSupported) {
     return {
       ...versions,
       appId,

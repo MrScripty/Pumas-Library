@@ -92,6 +92,7 @@ import {
   decodeRuntimeLaunchParams,
   decodeRuntimeStopOutcome,
   decodeRuntimeProfilesSnapshotResponse,
+  decodeRuntimeProvidersOutcome,
   decodeServingStatusResponse,
   decodeHfModelSearchOutcome,
   decodeSetDefaultVersionOutcome,
@@ -373,7 +374,7 @@ const electronAPI = {
     return validatedApiCall('get_torch_release_options', decodeTorchReleaseOptionsOutcome, params);
   },
   preview_torch_runtime: async (request: {
-    tag: string; build: string; python: string; adapter: string; verified_versions?: boolean;
+    tag: string; build: string; python: string; adapter?: string; extras?: string[]; verified_versions?: boolean;
   }) => {
     const params = requireDecoded(
       decodePreviewTorchRuntimeParams(withoutUndefined(request)), 'preview_torch_runtime request');
@@ -476,6 +477,8 @@ const electronAPI = {
     'stop_ollama', decodeRuntimeStopOutcome,
     requireDecoded(decodeRuntimeLaunchParams({}), 'stop_ollama request')
   ),
+  get_runtime_providers: () =>
+    validatedApiCall('get_runtime_providers', decodeRuntimeProvidersOutcome),
   get_runtime_profiles_snapshot: () =>
     validatedApiCall('get_runtime_profiles_snapshot', decodeRuntimeProfilesSnapshotResponse),
   list_runtime_profile_updates_since: (cursor?: string | null, limit?: number) =>

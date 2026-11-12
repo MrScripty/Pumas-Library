@@ -31,9 +31,6 @@ class MetadataTests(unittest.TestCase):
         for name in (
             "LICENSE",
             "scripts/release/artifact-plan.json",
-            "scripts/release/onnx-runtime-pins.json",
-            "scripts/release/licenses/onnxruntime-LICENSE",
-            "scripts/release/licenses/onnxruntime-ThirdPartyNotices.txt",
         ):
             path = repository / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,15 +85,24 @@ class MetadataTests(unittest.TestCase):
                 document = json.loads(path.read_text())
                 artifact = output / document["name"]
                 self.assertFalse(document["packages"][0]["filesAnalyzed"])
+                # No artifact bundles an inference runtime; Pumas installs them.
+                self.assertFalse(
+                    [
+                        package["name"]
+                        for package in document["packages"]
+                        if package["SPDXID"] == "SPDXRef-ORT" or "onnxruntime" in package["name"]
+                    ],
+                    document["name"],
+                )
                 self.assertEqual(
                     document["packages"][0]["checksums"][0]["checksumValue"],
                     hashlib.sha256(artifact.read_bytes()).hexdigest(),
                 )
             provenance = json.loads(next(output.glob("*.provenance.jsonl")).read_text())
             self.assertEqual({entry["name"] for entry in provenance["subject"]}, names)
-            self.assertTrue(
-                provenance["predicate"]["buildDefinition"]["internalParameters"]["unsigned"]
-            )
+            internal = provenance["predicate"]["buildDefinition"]["internalParameters"]
+            self.assertTrue(internal["unsigned"])
+            self.assertNotIn("runtime_pins_sha256", internal)
             checksums = dict(
                 line.split("  ", 1)[::-1]
                 for line in (output / "checksums-sha256.txt").read_text().splitlines()
@@ -108,11 +114,12 @@ class MetadataTests(unittest.TestCase):
             for name, sha in checksums.items():
                 self.assertEqual(sha, hashlib.sha256((output / name).read_bytes()).hexdigest())
             combined = (output / "THIRD-PARTY-NOTICES-0.8.0-rc.1.txt").read_bytes()
-            native = repository / "scripts/release/licenses"
-            for name in ("onnxruntime-LICENSE", "onnxruntime-ThirdPartyNotices.txt"):
-                lf = (native / name).read_bytes().replace(b"\r\n", b"\n")
-                self.assertIn(lf, combined)
-                self.assertIn(lf.replace(b"\n", b"\r\n"), combined)
+            self.assertEqual(
+                combined,
+                b"test-only collected attribution fixture"
+                + b"\n\n"
+                + b"test-only collected attribution fixture-s3",
+            )
             with self.assertRaisesRegex(ValueError, "fresh artifact-plan"):
                 metadata.write_metadata(output, "test-build", {}, repository)
 
@@ -146,28 +153,6 @@ class MetadataTests(unittest.TestCase):
             repository, output, _ = self.fixture(Path(temporary))
             (repository / "package.json").write_text('{"version":"0.8.0-rc.1","changed":true}')
             with self.assertRaisesRegex(ValueError, "attribution inputs changed"):
-                metadata.write_metadata(output, "test", {}, repository)
-            self.assertFalse(list(output.glob("*.spdx.json")))
-
-    def test_native_license_cannot_substitute_for_third_party_terms(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            repository, output, _ = self.fixture(Path(temporary))
-            base = repository / "scripts/release/licenses"
-            shutil.copyfile(
-                base / "onnxruntime-LICENSE", base / "onnxruntime-ThirdPartyNotices.txt"
-            )
-            with self.assertRaisesRegex(ValueError, "native notice differs"):
-                metadata.write_metadata(output, "test", {}, repository)
-            self.assertFalse(list(output.glob("*.spdx.json")))
-
-    def test_unrepresented_platform_notice_cannot_be_silently_dropped(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            repository, output, _ = self.fixture(Path(temporary))
-            path = repository / "scripts/release/onnx-runtime-pins.json"
-            pins = json.loads(path.read_text())
-            pins["targets"]["windows-x86_64"]["notices"]["ONNX-NOTICES.txt"]["sha256"] = "f" * 64
-            path.write_text(json.dumps(pins))
-            with self.assertRaisesRegex(ValueError, "native notice differs"):
                 metadata.write_metadata(output, "test", {}, repository)
             self.assertFalse(list(output.glob("*.spdx.json")))
 

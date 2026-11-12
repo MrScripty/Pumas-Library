@@ -382,30 +382,8 @@ async fn start_torch_runtime(
         .map(Err);
     };
     let torch_lifecycle_lease = manager.torch_lifecycle_lease().await?;
-    let Some(tag) = manager.get_active_version().await? else {
-        return non_critical_failure_response(
-            state,
-            fail(
-                ModelServeErrorCode::MissingRuntime,
-                "Install and explicitly select a Torch runtime first",
-            ),
-        )
-        .await
-        .map(Err);
-    };
-    if let Err(error) = manager.verify_torch_identity(&tag).await {
-        tracing::warn!(%error, %tag, "Selected Torch runtime identity check failed");
-        return non_critical_failure_response(
-            state,
-            fail(
-                ModelServeErrorCode::MissingRuntime,
-                "Selected Torch runtime failed its installed identity check",
-            ),
-        )
-        .await
-        .map(Err);
-    }
-    let version_dir = manager.version_path(&tag)?;
+    // A running sidecar keeps the version it started from; only a sidecar
+    // that must start resolves the profile's version.
     let existing = state
         .api
         .observe_owned_runtime_profile(&request.config.profile_id)?;
@@ -414,6 +392,42 @@ async fn start_torch_runtime(
     {
         Some(owned) => owned,
         None => {
+            let (tag, version_dir) = match super::resolve_profile_runtime_version(
+                state,
+                &manager,
+                &request.config.profile_id,
+                None,
+            )
+            .await?
+            {
+                Ok(resolved) => resolved,
+                Err(refusal) => {
+                    let message = match refusal {
+                        super::ProfileRuntimeVersionRefusal::NoActiveVersion => {
+                            "Install and explicitly select a Torch runtime first".to_string()
+                        }
+                        super::ProfileRuntimeVersionRefusal::NotInstalled(reason) => reason,
+                    };
+                    return non_critical_failure_response(
+                        state,
+                        serving_error(ModelServeErrorCode::MissingRuntime, message, request),
+                    )
+                    .await
+                    .map(Err);
+                }
+            };
+            if let Err(error) = manager.verify_torch_identity(&tag).await {
+                tracing::warn!(%error, %tag, "Selected Torch runtime identity check failed");
+                return non_critical_failure_response(
+                    state,
+                    fail(
+                        ModelServeErrorCode::MissingRuntime,
+                        "Selected Torch runtime failed its installed identity check",
+                    ),
+                )
+                .await
+                .map(Err);
+            }
             let receipt = state
                 .api
                 .launch_runtime_profile_for_model_with_receipt(

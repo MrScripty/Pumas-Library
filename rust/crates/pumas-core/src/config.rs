@@ -214,10 +214,16 @@ impl AppId {
 
     /// Return whether this app is managed by the GitHub-backed version manager.
     ///
-    /// ONNX Runtime is provided by the Rust backend in-process and is configured
-    /// through runtime profiles, not a separately installed app version.
+    /// Every supported runtime is an external, downloaded runtime. ONNX Runtime
+    /// executes in-process, but its native library is a downloaded version.
     pub fn has_version_manager(&self) -> bool {
-        !matches!(self, AppId::OnnxRuntime)
+        true
+    }
+
+    /// Return whether installed versions are publisher-verified native release
+    /// archives acquired through the shared acquisition service.
+    pub fn uses_native_archive_installer(&self) -> bool {
+        matches!(self, AppId::LlamaCpp | AppId::OnnxRuntime)
     }
 
     /// Return the GitHub `owner/repo` path for this app's upstream repository.
@@ -226,7 +232,7 @@ impl AppId {
             AppId::Ollama => "ollama/ollama",
             AppId::LlamaCpp => "ggml-org/llama.cpp",
             AppId::Torch => "pytorch/pytorch",
-            AppId::OnnxRuntime => "",
+            AppId::OnnxRuntime => "microsoft/onnxruntime",
         }
     }
 
@@ -236,7 +242,7 @@ impl AppId {
             AppId::Ollama => "ollama-versions",
             AppId::LlamaCpp => "llama-cpp-versions",
             AppId::Torch => "torch-versions",
-            AppId::OnnxRuntime => "onnx-runtime",
+            AppId::OnnxRuntime => "onnx-runtime-versions",
         }
     }
 
@@ -298,9 +304,17 @@ mod tests {
     }
 
     #[test]
-    fn onnx_runtime_is_in_process_without_version_manager() {
-        assert!(!AppId::OnnxRuntime.has_version_manager());
-        assert_eq!(AppId::OnnxRuntime.github_repo(), "");
+    fn onnx_runtime_is_a_downloaded_in_process_runtime() {
+        assert!(AppId::OnnxRuntime.has_version_manager());
+        assert!(AppId::OnnxRuntime.uses_native_archive_installer());
+        assert!(AppId::LlamaCpp.uses_native_archive_installer());
+        assert!(!AppId::Ollama.uses_native_archive_installer());
+        assert!(!AppId::Torch.uses_native_archive_installer());
+        assert_eq!(AppId::OnnxRuntime.github_repo(), "microsoft/onnxruntime");
+        assert_eq!(
+            AppId::OnnxRuntime.versions_dir_name(),
+            "onnx-runtime-versions"
+        );
         assert_eq!(AppId::OnnxRuntime.default_port(), 0);
         assert_eq!(AppId::OnnxRuntime.default_base_url(), "");
     }

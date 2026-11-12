@@ -1,48 +1,66 @@
+import type { InstalledRuntimeVersionsState } from '../../../hooks/useInstalledRuntimeVersions';
+import { runtimeProviderManagementModes } from '../../../hooks/useRuntimeProviders';
 import type {
   RuntimeDeviceMode,
   RuntimeManagementMode,
+  RuntimeProviderInfo,
   RuntimeProviderMode,
 } from '../../../types/api-runtime-profiles';
 import {
   deviceModeLabel,
   modeLabel,
-  providerDeviceModes,
   providerLabel,
-  providerManagementModes,
-  providerModes,
   type RuntimeProfileDraft,
   type RuntimeProfileDraftUpdater,
 } from './RuntimeProfileSettingsShared';
 
 type RuntimeProfileSettingsFieldsProps = {
   draft: RuntimeProfileDraft;
+  installedVersions: InstalledRuntimeVersionsState;
   isExistingProfile: boolean;
   isManagedProfile: boolean;
   onUpdateDraft: RuntimeProfileDraftUpdater;
+  providerInfo: RuntimeProviderInfo;
 };
 
-function getDeviceModes(draft: RuntimeProfileDraft): RuntimeDeviceMode[] {
-  const providerModesForDevice = providerDeviceModes[draft.provider];
-  return providerModesForDevice.includes(draft.device_mode)
-    ? providerModesForDevice
-    : [...providerModesForDevice, draft.device_mode];
+// The backend's offered modes, plus the draft's own value when a saved
+// profile predates the offer, so the select never misreports it.
+function withCurrent<Mode extends string>(offered: readonly Mode[], current: Mode): Mode[] {
+  return offered.includes(current) ? [...offered] : [...offered, current];
 }
 
-function getManagementModes(draft: RuntimeProfileDraft): RuntimeManagementMode[] {
-  const providerModesForManagement = providerManagementModes[draft.provider];
-  return providerModesForManagement.includes(draft.management_mode)
-    ? providerModesForManagement
-    : [...providerModesForManagement, draft.management_mode];
+function getDeviceModes(
+  draft: RuntimeProfileDraft,
+  providerInfo: RuntimeProviderInfo
+): RuntimeDeviceMode[] {
+  return withCurrent(providerInfo.device_modes, draft.device_mode);
+}
+
+function getManagementModes(
+  draft: RuntimeProfileDraft,
+  providerInfo: RuntimeProviderInfo
+): RuntimeManagementMode[] {
+  return withCurrent(runtimeProviderManagementModes(providerInfo), draft.management_mode);
+}
+
+function getProviderModes(
+  draft: RuntimeProfileDraft,
+  providerInfo: RuntimeProviderInfo
+): RuntimeProviderMode[] {
+  return withCurrent(providerInfo.provider_modes, draft.provider_mode);
 }
 
 export function RuntimeProfileSettingsFields({
   draft,
+  installedVersions,
   isExistingProfile,
   isManagedProfile,
   onUpdateDraft,
+  providerInfo,
 }: RuntimeProfileSettingsFieldsProps) {
-  const deviceModes = getDeviceModes(draft);
-  const managementModes = getManagementModes(draft);
+  const deviceModes = getDeviceModes(draft, providerInfo);
+  const managementModes = getManagementModes(draft, providerInfo);
+  const providerModes = getProviderModes(draft, providerInfo);
   const showsDeviceId =
     draft.device_mode === 'gpu' || draft.device_mode === 'specific_device';
   const showsGpuLayers =
@@ -90,7 +108,7 @@ export function RuntimeProfileSettingsFields({
           }
           className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
         >
-          {providerModes[draft.provider].map((mode) => (
+          {providerModes.map((mode) => (
             <option key={mode} value={mode}>
               {modeLabel(mode)}
             </option>
@@ -129,6 +147,13 @@ export function RuntimeProfileSettingsFields({
           ))}
         </select>
       </label>
+      {isManagedProfile && (
+        <RuntimeVersionField
+          draft={draft}
+          installedVersions={installedVersions}
+          onUpdateDraft={onUpdateDraft}
+        />
+      )}
       <EndpointFields draft={draft} isManagedProfile={isManagedProfile} onUpdateDraft={onUpdateDraft} />
       {showsDeviceId && <DeviceIdField draft={draft} onUpdateDraft={onUpdateDraft} />}
       {showsGpuLayers && <GpuLayersField draft={draft} onUpdateDraft={onUpdateDraft} />}
@@ -189,6 +214,55 @@ function EndpointFields({
         )}
       </label>
     </>
+  );
+}
+
+function RuntimeVersionField({
+  draft,
+  installedVersions,
+  onUpdateDraft,
+}: DraftFieldProps & { installedVersions: InstalledRuntimeVersionsState }) {
+  const { versions, isLoading, error } = installedVersions;
+  const pinnedVersion = draft.runtime_version;
+  // Keep a saved pin visible even when that version is no longer installed;
+  // the backend refuses launching or saving it and says why.
+  const pinIsMissing = pinnedVersion !== '' && !isLoading && !versions.includes(pinnedVersion);
+  const options = pinIsMissing ? [...versions, pinnedVersion] : versions;
+
+  let hint = 'New launches use this version. A running instance keeps the version it started with.';
+  if (error) {
+    hint = `Installed versions unavailable: ${error}`;
+  } else if (pinIsMissing) {
+    hint = `${pinnedVersion} is not installed. Install it or choose another version.`;
+  } else if (!isLoading && versions.length === 0) {
+    hint = `No ${providerLabel(draft.provider)} versions are installed.`;
+  }
+
+  return (
+    <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
+      <span>Runtime version</span>
+      <select
+        value={pinnedVersion}
+        onChange={(event) => onUpdateDraft('runtime_version', event.target.value)}
+        className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
+      >
+        <option value="">Follow active version</option>
+        {options.map((version) => (
+          <option key={version} value={version}>
+            {version === pinnedVersion && pinIsMissing ? `${version} (not installed)` : version}
+          </option>
+        ))}
+      </select>
+      <span
+        className={`block ${
+          error || pinIsMissing
+            ? 'text-[hsl(var(--accent-warning))]'
+            : 'text-[hsl(var(--launcher-text-muted)/0.75)]'
+        }`}
+      >
+        {hint}
+      </span>
+    </label>
   );
 }
 

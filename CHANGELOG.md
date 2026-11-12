@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Runtime profiles can pin an installed runtime version
+  (`runtime_version`), so llama.cpp, Torch and other managed runtimes can run
+  instances of different versions at the same time. A profile without a pin
+  follows the runtime's active version, as before. Saving a pin that is not
+  installed, or launching a profile whose pinned version was removed, is
+  refused with the reason. Running instances report the version they started
+  from in `RuntimeProfileStatus.runtime_version`.
+- `get_runtime_providers` reports each runtime provider's app id, whether it
+  is version-managed in this build, and its supported provider, device and
+  management modes. The desktop app derives its version panels and runtime
+  profile editor choices from it instead of hard-coded lists, so ONNX Runtime
+  profiles now offer GPU.
+- Installing an ONNX Runtime CUDA build (`+cuda12`, `+cuda13`) also installs
+  the NVIDIA CUDA runtime, cuBLAS, cuFFT, cuRAND, NVRTC, nvJitLink and cuDNN
+  libraries it loads, into `cuda/lib` of that version, and the version's ONNX
+  host starts with its library search path pointing there. Which packages and
+  version ranges a build needs comes from the `cuda` and `cudnn` extras of the
+  matching `onnxruntime-gpu` release, read from PyPI or Microsoft's
+  `onnxruntime-cuda-12`/`onnxruntime-cuda-13` feed; Pumas then takes the
+  newest compatible NVIDIA wheels on PyPI, with no pinned versions. The wheels
+  download with the release archive through the shared acquisition path
+  (resumable, each verified against its published SHA-256), and a retried
+  install keeps the set it started with. Only shared libraries and licenses
+  are kept; `cuda/libraries.json` records their source and digests, and
+  removing the version removes them. A build without usable metadata (CUDA 12
+  builds from 1.30, CUDA 13 builds before 1.28, as published today) is refused
+  with the reason, and the reason names the builds that install instead. The
+  version listing gives each CUDA build an `installAvailability` (`checking`,
+  `available`, `unavailable` with `unavailableReason`, or `unknown` when the
+  indexes could not be read, which leaves install to decide) and reports
+  `availability_pending` while any check runs; the desktop app shows
+  "Checking…" or the reason in place of Install and lists again until nothing
+  is pending. These lookups are kept until the package indexes change or the
+  list is refreshed. The NVIDIA driver remains
+  the operating system's. CPU builds are unchanged. See
+  [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md#amendment-2026-11-12-cuda-libraries).
+
+### Changed
+
+- Changing a runtime's active or default version no longer requires stopping
+  its running profiles; they keep the version they started from, and the
+  change applies to new launches. Removing a version is refused only while an
+  instance runs that version, and the refusal names the profiles to stop.
+- ONNX Runtime is a downloaded, version-managed runtime like llama.cpp and
+  Torch, and no Pumas package bundles it: desktop packages and headless
+  inference archives alike. The ONNX Runtime panel lists official
+  `microsoft/onnxruntime` releases that support the C API Pumas uses (1.24 or
+  newer) as CPU, CUDA 12 and CUDA 13 builds for the host, installs them through
+  the shared, resumable and verified download path, and tracks installed,
+  active and default versions.
+- Each ONNX Runtime profile runs its own ONNX host process (`pumas-rpc
+  --onnx-host`) that loads the version the profile launches, so profiles on
+  different versions serve at the same time and switching a profile's version
+  restarts only that host, never Pumas. A profile's device mode selects the
+  build's execution provider (CPU, CUDA, or CoreML on macOS); a provider that
+  cannot initialize, or a missing runtime, refuses the launch with the reason.
+  For CUDA the reason says whether the NVIDIA driver is missing, too old for
+  the build, or present while the CUDA runtime or cuDNN libraries installed
+  with the version did not load (reinstall the version); the driver stays the
+  operating system's, and Pumas only points at NVIDIA's download. Hosts run with ONNX Runtime telemetry disabled
+  (`ORT_DISABLE_TELEMETRY=1` and telemetry events off), so ONNX Runtime
+  creates no device id or telemetry database in the user cache.
+  Serving launches the profile's host when needed. `ORT_DYLIB_PATH` remains a
+  developer override. See
+  [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md).
+- Headless inference archives contain only `pumas-rpc`, its license and
+  notices, the protocol schema and build record; their manifest is schema 2
+  without the `runtime` record, and schema-1 manifests are refused with the
+  reason. Release SBOMs list no bundled runtime.
+- Torch runtime wheels now download through Pumas's shared acquisition
+  owner, the one llama.cpp archives use, instead of through pip. A dropped
+  connection resumes from the bytes already received, and a failed install
+  keeps those bytes so the next install continues them. Each wheel is checked
+  against the SHA-256 its index publishes before pip installs it offline from
+  the local file. The resolver still chooses every version. Previously, pip
+  discarded a partial wheel when its retries ran out, as it did with 415 MB of
+  a 540 MB Torch wheel during a DNS outage.
+- A Torch install that cannot use shared acquisition keeps pip's downloads
+  and writes the reason in its installation log.
+- Every Torch install now carries all general modalities: the text (with
+  Jinja), image and audio packages resolve together at current releases.
+  Image generation, Cohere ASR and text models no longer depend on which
+  adapter was picked at install time. Nunchaku is the only optional extra,
+  because its wheel is qualified to one Torch and Python pair. A modality
+  whose packages have no compatible wheel is left out with its reason instead
+  of failing the install; the Cohere ASR Transformers floor is a floor, not a
+  pin, and yields to an older Torch or a chosen tested combination.
+- Installed Torch runtimes report capabilities from what their install probe
+  could import, each available, unavailable (with the reason) or unknown for
+  runtimes probed before this change. The install dialog shows the general
+  modalities and extras the backend reports, and "verified combinations" are
+  shown as tested-as-working evidence.
+
+### Deprecated
+
+- The `adapter` parameter of `preview_torch_runtime` is still accepted and
+  mapped (`none`, `flux2` and `cohere-asr` select the general install,
+  `nunchaku` the Nunchaku extra). Send `extras` instead; a removal will be
+  announced separately.
+
 ## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
@@ -123,6 +225,15 @@ the 2026-11-02 audit
   3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
   from the preset keep working. Torch install options replace
   `bundledPresetAvailable` and `preset` with `verified`.
+- Torch runtimes run the sidecar shipped with the running Pumas instead of a
+  copy written into the runtime at install time, so upgrading Pumas updates
+  the sidecar for every installed runtime without a reinstall. Pumas writes it
+  once to `launcher-data/torch-sidecar/<version>-<digest>/` and every runtime
+  version launches from there; a runtime holds only its Python environment,
+  packages and records. Before each launch Pumas checks the runtime's
+  interpreter and startup packages against the sidecar's floors (never pins)
+  and refuses an incompatible runtime with every reason. Sidecar copies in
+  runtimes installed earlier are no longer run and are left in place.
 - Desktop update streams (model library, downloads, runtime profiles, serving
   status and status telemetry) are validated against the backend's declaration.
   A rejected desktop payload says which field and rule failed.
@@ -230,6 +341,15 @@ the 2026-11-02 audit
 
 ### Security
 
+- Third-party telemetry is disabled in every runtime and conversion process
+  Pumas starts (`HF_HUB_DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`, which cover
+  huggingface_hub, Transformers, Diffusers and sentence-transformers, and
+  `ORT_DISABLE_TELEMETRY=1` for ONNX Runtime), even when the user's
+  environment enables it.
+- Runtime and conversion processes run with `HF_HUB_OFFLINE=1`, so Hugging
+  Face libraries read only the files Pumas downloaded into the library and
+  never fetch missing ones into their own cache. The Sherry conversion script
+  now also loads with `local_files_only=True` and without remote code.
 - The desktop keeps every renderer on the bundled app: child windows,
   off-app navigation, webviews and browser permissions are denied, links open
   in the system browser, and every IPC handler checks its sender. Packaged

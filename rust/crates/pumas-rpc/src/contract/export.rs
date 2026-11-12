@@ -549,6 +549,13 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     {
         fixtures[key] = value.clone();
     }
+    for (key, value) in super::runtime_provider_fixtures()?
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        fixtures[key] = value.clone();
+    }
     for key in ["version_status_empty", "version_status_no_manager"] {
         fixtures[key] =
             serde_json::to_value(VersionStatusOutcome::new(RuntimeVersionStatus::default())?)?;
@@ -902,6 +909,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         TorchTrialHealthStatus,
         TorchTrialCleanup,
         TorchRuntimeOptionsOutcome,
+        RuntimeProvidersOutcome,
         TorchPythonChoice,
         TorchVerifiedRuntime,
         TorchVerifiedPackage,
@@ -988,6 +996,7 @@ fn pull_snapshot_fixtures() -> anyhow::Result<Value> {
                 pid: Some(4242),
                 log_path: Some("/fixture/logs/ollama.log".into()),
                 last_error: Some("fixture error".into()),
+                runtime_version: None,
             }],
             profiles: vec![profile.clone(), llama],
             ..RuntimeProfilesSnapshot::empty()
@@ -1548,7 +1557,9 @@ fn refine_named(name: &str, schema: &mut Value) {
                 "totalSize",
                 "archiveSize",
                 "dependenciesSize",
-                "installing"
+                "installing",
+                "unavailableReason",
+                "installAvailability"
             ]),
         );
     }
@@ -1900,7 +1911,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "ModelCategoryOutcome"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"
-            | "ModelIndexRefreshOutcome" => Some(true),
+            | "ModelIndexRefreshOutcome"
+            | "RuntimeProvidersOutcome" => Some(true),
             "InstallVersionFailed"
             | "DownloadStartedFailure"
             | "DownloadStatusMissingOutcome"

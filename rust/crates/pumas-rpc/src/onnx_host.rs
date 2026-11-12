@@ -184,7 +184,7 @@ fn error_response(error: OnnxRuntimeError) -> Response {
 fn admitted<'a, B>(
     state: &'a HostState<B>,
     headers: &HeaderMap,
-) -> Result<&'a OnnxSessionManager<B>, Response> {
+) -> Result<&'a OnnxSessionManager<B>, Box<Response>> {
     let presented = headers
         .get(host_protocol::TOKEN_HEADER)
         .and_then(|value| value.to_str().ok());
@@ -196,9 +196,10 @@ fn admitted<'a, B>(
                 "ONNX host requests must carry this host's token",
             )),
         )
-            .into_response());
+            .into_response()
+            .into());
     }
-    state.manager.as_ref().ok_or_else(|| {
+    state.manager.as_ref().ok_or_else(|| -> Box<Response> {
         error_response(OnnxRuntimeError::backend(
             state
                 .health
@@ -206,6 +207,7 @@ fn admitted<'a, B>(
                 .clone()
                 .unwrap_or_else(|| "ONNX host is not ready".to_string()),
         ))
+        .into()
     })
 }
 
@@ -216,7 +218,7 @@ async fn load<B: OnnxEmbeddingBackend>(
 ) -> Response {
     let manager = match admitted(&state, &headers) {
         Ok(manager) => manager,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     // Validate the path against its root here too: the host reads the file.
     let options = OnnxLoadOptions {
@@ -241,7 +243,7 @@ async fn unload<B: OnnxEmbeddingBackend>(
 ) -> Response {
     let manager = match admitted(&state, &headers) {
         Ok(manager) => manager,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let model_id = match OnnxModelId::parse(&body.model_id) {
         Ok(model_id) => model_id,
@@ -260,7 +262,7 @@ async fn embed<B: OnnxEmbeddingBackend>(
 ) -> Response {
     let manager = match admitted(&state, &headers) {
         Ok(manager) => manager,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     // Re-apply the request limits; the body was decoded without them.
     let request =

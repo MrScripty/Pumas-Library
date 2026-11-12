@@ -67,25 +67,97 @@ pub fn resolve_model_type_with_rules(
             review_reasons,
         });
     }
-    // A GGUF ranking head without a decision head is what llama.cpp serves
-    // through its rerank endpoint; that file fact outranks task tags too.
-    if gguf_declares_ranking_head(model_dir) {
-        return Ok(head_resolution(
-            ModelType::Reranker,
-            "model-type-gguf-ranking-head",
-            &medium_hints,
-        ));
-    }
+    // A one-logit head (a GGUF `cls.output.weight` llama.cpp ranks with, or a
+    // one-label sequence classifier) is shared by rerankers, reward models
+    // and regression heads. With reranker evidence beside it, it outranks
+    // task tags; alone it is a low-confidence reranker that an explicit task
+    // tag naming another category overrides.
     let name_hint = model_dir.file_name().and_then(|name| name.to_str());
+    let ranking_head = gguf_declares_ranking_head(model_dir);
     let signals = load_config_signals(model_dir, huggingface_evidence);
-    if signals.single_logit_classifier {
-        return Ok(head_resolution(
-            ModelType::Reranker,
-            "model-type-single-logit-classifier",
-            &medium_hints,
-        ));
+    if ranking_head || signals.single_logit_classifier {
+        let source = if ranking_head {
+            "model-type-gguf-ranking-head"
+        } else {
+            "model-type-single-logit-classifier"
+        };
+        if reranker_corroborated(model_dir, name_hint, &medium_hints, huggingface_evidence) {
+            return Ok(head_resolution(ModelType::Reranker, source, &medium_hints));
+        }
+        if medium_hints.is_empty() {
+            return Ok(ModelTypeResolution {
+                model_type: ModelType::Reranker,
+                source: source.to_string(),
+                confidence: 0.6,
+                review_reasons: vec![
+                    "model-type-low-confidence".to_string(),
+                    "model-type-reranker-uncorroborated".to_string(),
+                ],
+            });
+        }
     }
     resolve_model_type_from_inputs(index, signals, medium_hints, name_hint)
+}
+
+/// Evidence beside a one-logit head that the model ranks documents: a
+/// reranker task tag or source tag, a reranker name (folder, repository or
+/// GGUF file), a sentence-transformers CrossEncoder package, or recorded
+/// CrossEncoder/LogitScore declarations.
+fn reranker_corroborated(
+    model_dir: &Path,
+    name_hint: Option<&str>,
+    medium_hints: &[ModelType],
+    huggingface_evidence: Option<&HuggingFaceEvidence>,
+) -> bool {
+    if medium_hints.contains(&ModelType::Reranker) || name_looks_like_reranker(name_hint) {
+        return true;
+    }
+    if let Some(evidence) = huggingface_evidence {
+        if name_looks_like_reranker(evidence.repo_id.as_deref())
+            || evidence.tags.iter().flatten().any(|tag| {
+                let tag = tag.trim().to_ascii_lowercase();
+                matches!(
+                    tag.as_str(),
+                    "reranker" | "rerank" | "reranking" | "text-ranking" | "cross-encoder"
+                )
+            })
+        {
+            return true;
+        }
+    }
+    let read = |name: &str| {
+        std::fs::read_to_string(model_dir.join(name))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+    };
+    let cross_encoder = |value: Option<&serde_json::Value>| {
+        value.and_then(serde_json::Value::as_str) == Some("CrossEncoder")
+    };
+    if read("config_sentence_transformers.json")
+        .is_some_and(|config| cross_encoder(config.get("model_type")))
+    {
+        return true;
+    }
+    if read("metadata.json")
+        .as_ref()
+        .and_then(|metadata| metadata.get("sentence_transformers"))
+        .is_some_and(|declared| {
+            cross_encoder(declared.get("model_kind"))
+                || declared
+                    .get("logit_score")
+                    .is_some_and(|score| !score.is_null())
+        })
+    {
+        return true;
+    }
+    std::fs::read_dir(model_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .any(|entry| {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            name.ends_with(".gguf") && name_looks_like_reranker(Some(&name))
+        })
 }
 
 /// A resolution from the model's head. A task tag naming another category is
@@ -1084,12 +1156,127 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Decision);
     }
 
+    fn classifier_dir(parent: &TempDir, name: &str) -> std::path::PathBuf {
+        let dir = parent.path().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        write_config(
+            &dir,
+            serde_json::json!({
+                "architectures": ["XLMRobertaForSequenceClassification"],
+                "model_type": "xlm-roberta",
+                "id2label": {"0": "LABEL_0"}
+            }),
+        );
+        dir
+    }
+
+    #[test]
+    fn a_one_label_classifier_needs_reranker_evidence_to_outrank_its_task_tag() {
+        let (_tmp, index) = create_test_index();
+        let parent = TempDir::new().unwrap();
+        // A reward or regression head tagged as classification is not a reranker.
+        let reward = classifier_dir(&parent, "acme-reward-model");
+        let resolved =
+            resolve_model_type_with_rules(&index, &reward, Some("text-classification"), None, None)
+                .unwrap();
+        assert_ne!(resolved.model_type, ModelType::Reranker);
+
+        // Without any tag it is a reranker, at low confidence and for review.
+        let untagged = classifier_dir(&parent, "acme-scorer");
+        let resolved = resolve_model_type_with_rules(&index, &untagged, None, None, None).unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert!(resolved.confidence < 0.65);
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-reranker-uncorroborated".to_string()));
+
+        // bge-reranker-v2-m3: classification tag, sentence-transformers tags,
+        // and a reranker name.
+        let bge = classifier_dir(&parent, "bge-reranker-v2-m3");
+        let evidence = HuggingFaceEvidence {
+            repo_id: Some("BAAI/bge-reranker-v2-m3".into()),
+            pipeline_tag: Some("text-classification".into()),
+            tags: Some(vec![
+                "sentence-transformers".into(),
+                "xlm-roberta".into(),
+                "text-classification".into(),
+                "text-embeddings-inference".into(),
+            ]),
+            ..Default::default()
+        };
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            &bge,
+            Some("text-classification"),
+            None,
+            Some(&evidence),
+        )
+        .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-single-logit-classifier");
+
+        // A CrossEncoder package or recorded declarations corroborate it too.
+        let package = classifier_dir(&parent, "acme-package");
+        std::fs::write(
+            package.join("config_sentence_transformers.json"),
+            r#"{"model_type":"CrossEncoder"}"#,
+        )
+        .unwrap();
+        let declared = classifier_dir(&parent, "acme-declared");
+        std::fs::write(
+            declared.join("metadata.json"),
+            r#"{"sentence_transformers":{"model_kind":"CrossEncoder"}}"#,
+        )
+        .unwrap();
+        for dir in [package, declared] {
+            let resolved = resolve_model_type_with_rules(
+                &index,
+                &dir,
+                Some("text-classification"),
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(resolved.model_type, ModelType::Reranker, "{dir:?}");
+        }
+    }
+
+    #[test]
+    fn a_gguf_ranking_head_alone_does_not_outrank_a_classification_tag() {
+        let (_tmp, index) = create_test_index();
+        let parent = TempDir::new().unwrap();
+        let dir = parent.path().join("acme-sentiment");
+        std::fs::create_dir_all(&dir).unwrap();
+        write_gguf(
+            &dir.join("acme-sentiment-Q8_0.gguf"),
+            &[("general.architecture", "bert")],
+            &["token_embd.weight", "cls.output.weight"],
+        );
+        let resolved =
+            resolve_model_type_with_rules(&index, &dir, Some("text-classification"), None, None)
+                .unwrap();
+        assert_ne!(resolved.model_type, ModelType::Reranker);
+        // A recorded LogitScore declaration (a derived ranking head) corroborates.
+        std::fs::write(
+            dir.join("metadata.json"),
+            r#"{"sentence_transformers":{"model_kind":"SentenceTransformer","logit_score":{"true_token_id":1}}}"#,
+        )
+        .unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, &dir, Some("text-classification"), None, None)
+                .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+    }
+
     #[test]
     fn a_single_logit_sequence_classifier_is_a_reranker() {
         let (_tmp, index) = create_test_index();
-        let model_dir = TempDir::new().unwrap();
+        let parent = TempDir::new().unwrap();
+        let model_dir = parent.path().join("bge-reranker-v2-m3");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let model_dir = &model_dir;
         write_config(
-            model_dir.path(),
+            model_dir,
             serde_json::json!({
                 "architectures": ["XLMRobertaForSequenceClassification"],
                 "model_type": "xlm-roberta",
@@ -1098,7 +1285,7 @@ mod tests {
         );
         let resolved = resolve_model_type_with_rules(
             &index,
-            model_dir.path(),
+            model_dir,
             Some("text-classification"),
             None,
             None,

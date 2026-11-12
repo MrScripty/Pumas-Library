@@ -2131,8 +2131,9 @@ impl VersionInstaller {
         }
     }
 
-    /// Select the ONNX Runtime CPU archive for this platform. A release that
-    /// does not export the C API Pumas requests is refused with its reason.
+    /// Select the archive of the build variant an ONNX Runtime tag names
+    /// (`+cpu`, `+cuda12`, `+cuda13`) for this platform. A release that does
+    /// not export the C API Pumas requests is refused with its reason.
     fn select_onnx_runtime_asset<'a>(
         tag: &str,
         assets: &'a [GitHubAsset],
@@ -2145,13 +2146,21 @@ impl VersionInstaller {
             distribution::release_version(tag).ok_or_else(|| PumasError::InstallationFailed {
                 message: format!("ONNX Runtime release {tag} does not have a semantic version"),
             })?;
-        let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
-        distribution::select_platform_archive(assets, &version, os, arch).ok_or_else(|| {
+        let variant = distribution::OnnxRuntimeVariant::from_tag(tag).ok_or_else(|| {
             PumasError::InstallationFailed {
                 message: format!(
-                    "ONNX Runtime {version} publishes no CPU archive for {os}-{arch}; \
+                    "ONNX Runtime tag {tag} does not name a build variant (+cpu, +cuda12, +cuda13)"
+                ),
+            }
+        })?;
+        let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+        distribution::select_variant_archive(assets, &version, variant, os, arch).ok_or_else(|| {
+            PumasError::InstallationFailed {
+                message: format!(
+                    "ONNX Runtime {version} publishes no {} archive for {os}-{arch}; \
                      expected one of {:?}",
-                    distribution::platform_archive_names(&version, os, arch)
+                    variant.label(),
+                    distribution::variant_archive_names(&version, variant, os, arch)
                 ),
             }
         })

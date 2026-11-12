@@ -925,8 +925,9 @@ impl GitHubClient {
             && (name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz"))
     }
 
-    /// ONNX Runtime releases that export the C API Pumas requests and publish
-    /// a CPU archive for this platform, as installable `+cpu` variants.
+    /// ONNX Runtime releases that export the C API Pumas requests, as one
+    /// installable `+cpu`, `+cuda12` or `+cuda13` entry per build this
+    /// platform has an archive for.
     ///
     /// Compatibility is derived from each release's version, so new upstream
     /// releases appear without a Pumas change.
@@ -938,22 +939,32 @@ impl GitHubClient {
         use crate::onnx_runtime_distribution as distribution;
         releases
             .into_iter()
-            .filter_map(|release| {
-                let version = distribution::release_version(&release.tag_name)?;
-                if !distribution::is_compatible_version(&version) {
-                    return None;
-                }
-                let asset =
-                    distribution::select_platform_archive(&release.assets, &version, os, arch)?
+            .flat_map(|release| {
+                let Some(version) = distribution::release_version(&release.tag_name)
+                    .filter(distribution::is_compatible_version)
+                else {
+                    return Vec::new();
+                };
+                distribution::OnnxRuntimeVariant::ALL
+                    .into_iter()
+                    .filter_map(|variant| {
+                        let asset = distribution::select_variant_archive(
+                            &release.assets,
+                            &version,
+                            variant,
+                            os,
+                            arch,
+                        )?
                         .clone();
-                let mut variant = release.clone();
-                variant.tag_name = format!("{}+{}", release.tag_name, distribution::CPU_VARIANT);
-                variant.name =
-                    format!("{} ({})", release.tag_name, distribution::CPU_VARIANT_LABEL);
-                variant.archive_size = Some(asset.size);
-                variant.total_size = Some(asset.size);
-                variant.assets = vec![asset];
-                Some(variant)
+                        let mut listed = release.clone();
+                        listed.tag_name = format!("{}+{}", release.tag_name, variant.id());
+                        listed.name = format!("{} ({})", release.tag_name, variant.label());
+                        listed.archive_size = Some(asset.size);
+                        listed.total_size = Some(asset.size);
+                        listed.assets = vec![asset];
+                        Some(listed)
+                    })
+                    .collect()
             })
             .collect()
     }
@@ -1885,7 +1896,7 @@ mod tests {
     }
 
     #[test]
-    fn onnx_runtime_listing_keeps_compatible_releases_with_a_platform_archive() {
+    fn onnx_runtime_listing_offers_each_compatible_build_with_a_platform_archive() {
         let release = |tag: &str, assets: Vec<GitHubAsset>| {
             let mut release = github_release(assets);
             release.tag_name = tag.into();
@@ -1912,12 +1923,20 @@ mod tests {
 
         let listed = GitHubClient::onnx_runtime_installable_releases(releases, "linux", "x86_64");
 
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].tag_name, "v1.25.0+cpu");
+        let tags: Vec<_> = listed
+            .iter()
+            .map(|release| release.tag_name.as_str())
+            .collect();
+        assert_eq!(tags, vec!["v1.25.0+cpu", "v1.25.0+cuda12"]);
         assert_eq!(listed[0].name, "v1.25.0 (CPU)");
         assert_eq!(listed[0].archive_size, Some(7));
         assert_eq!(listed[0].assets.len(), 1);
         assert_eq!(listed[0].assets[0].name, "onnxruntime-linux-x64-1.25.0.tgz");
+        assert_eq!(listed[1].name, "v1.25.0 (CUDA 12)");
+        assert_eq!(
+            listed[1].assets[0].name,
+            "onnxruntime-linux-x64-gpu-1.25.0.tgz"
+        );
     }
 
     #[test]

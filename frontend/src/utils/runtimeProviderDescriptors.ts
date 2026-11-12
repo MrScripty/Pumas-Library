@@ -1,17 +1,18 @@
 import type {
   RuntimeDeviceMode,
-  RuntimeManagementMode,
   RuntimeProviderId,
   RuntimeProviderMode,
 } from '../types/api-runtime-profiles';
 import type { ModelCategory, ModelInfo } from '../types/apps';
 
+/**
+ * Presentation facts for a runtime provider. The runtime app id, provider
+ * modes, device modes and management modes come from the backend registry
+ * (`useRuntimeProviders`), not from here.
+ */
 export interface RuntimeProviderDescriptor {
   id: RuntimeProviderId;
   label: string;
-  profileModes: RuntimeProviderMode[];
-  managementModes: RuntimeManagementMode[];
-  deviceModes: RuntimeDeviceMode[];
   compatibleExecutableFormats: string[];
   dedicatedPlacementModes: RuntimeProviderMode[];
   supportsGpuLayers: boolean;
@@ -26,9 +27,6 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
   ollama: {
     id: 'ollama',
     label: 'Ollama',
-    profileModes: ['ollama_serve'],
-    managementModes: ['managed', 'external'],
-    deviceModes: ['auto', 'cpu', 'gpu', 'hybrid'],
     compatibleExecutableFormats: ['gguf'],
     dedicatedPlacementModes: [],
     supportsGpuLayers: false,
@@ -41,9 +39,6 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
   llama_cpp: {
     id: 'llama_cpp',
     label: 'llama.cpp',
-    profileModes: ['llama_cpp_router', 'llama_cpp_dedicated'],
-    managementModes: ['managed', 'external'],
-    deviceModes: ['auto', 'cpu', 'gpu', 'specific_device'],
     compatibleExecutableFormats: ['gguf'],
     dedicatedPlacementModes: ['llama_cpp_dedicated'],
     supportsGpuLayers: true,
@@ -56,9 +51,6 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
   torch: {
     id: 'torch',
     label: 'Torch',
-    profileModes: ['torch_serve'],
-    managementModes: ['managed'],
-    deviceModes: ['gpu', 'hybrid'],
     compatibleExecutableFormats: ['safetensors'],
     dedicatedPlacementModes: [],
     supportsGpuLayers: false,
@@ -71,9 +63,6 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
   onnx_runtime: {
     id: 'onnx_runtime',
     label: 'ONNX Runtime',
-    profileModes: ['onnx_serve'],
-    managementModes: ['managed'],
-    deviceModes: ['auto', 'cpu'],
     compatibleExecutableFormats: ['onnx'],
     dedicatedPlacementModes: [],
     supportsGpuLayers: false,

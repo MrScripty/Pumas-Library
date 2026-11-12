@@ -48,6 +48,8 @@ mod installer;
 mod launcher;
 mod managed_depot_lease;
 mod managed_python;
+#[cfg(all(test, unix))]
+mod onnx_runtime_tests;
 mod operation_receipt;
 mod progress;
 pub mod size_calculator;
@@ -125,7 +127,8 @@ async fn clear_matching_completed_progress(
         return;
     };
     if CompletedProgressIdentity::capture(&current).as_ref() != Some(&expected)
-        || (app_id == AppId::LlamaCpp && installer::has_native_cleanup_pending(&current))
+        || (app_id.uses_native_archive_installer()
+            && installer::has_native_cleanup_pending(&current))
     {
         return;
     }
@@ -200,13 +203,13 @@ pub(crate) fn validate_version_tag(tag: &str) -> Result<()> {
     Ok(())
 }
 
-/// Why the Torch process recorded at `pid_file` may still use the runtime,
+/// Why the process recorded at `pid_file` may still use a runtime version,
 /// or `None` when nothing recorded there is running.
 ///
 /// A verified identity record is checked against the live process. A bare PID
 /// file (no identity record) proves nothing, so it blocks only while some
 /// process holds that PID; it is never signalled here.
-fn torch_process_blocker(pid_file: &Path) -> Option<String> {
+fn runtime_process_blocker(pid_file: &Path) -> Option<String> {
     use pumas_library::platform::process_identity::{
         read_record, verify, IdentityCheck, PidRecord,
     };
@@ -231,13 +234,70 @@ fn torch_process_blocker(pid_file: &Path) -> Option<String> {
     }
 }
 
+/// Describe every live process that runs from one installed version: PID
+/// files inside the version directory, and runtime profile instances
+/// (`<profiles_dir>/<profile>/runtime.pid`) whose recorded version is `tag`.
+/// An instance that recorded no version may run any version, so it counts.
+fn version_process_blockers(
+    version_dir: &Path,
+    profiles_dir: &Path,
+    tag: &str,
+) -> Result<Vec<String>> {
+    use pumas_library::platform::process_identity::read_runtime_version;
+    let mut blockers = Vec::new();
+    let read_dir = |dir: &Path| match std::fs::read_dir(dir) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(PumasError::io_with_path(error, dir)),
+    };
+    if let Some(entries) = read_dir(version_dir)? {
+        for entry in entries {
+            let path = entry
+                .map_err(|error| PumasError::io_with_path(error, version_dir))?
+                .path();
+            if path.extension().is_some_and(|extension| extension == "pid") {
+                if let Some(reason) = runtime_process_blocker(&path) {
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    blockers.push(format!("the process recorded in {name} ({reason})"));
+                }
+            }
+        }
+    }
+    if let Some(entries) = read_dir(profiles_dir)? {
+        for entry in entries {
+            let profile_dir = entry
+                .map_err(|error| PumasError::io_with_path(error, profiles_dir))?
+                .path();
+            let pid_file = profile_dir.join("runtime.pid");
+            let recorded = read_runtime_version(&pid_file)
+                .map_err(|error| PumasError::io_with_path(error, &pid_file))?;
+            if recorded.as_deref().is_some_and(|version| version != tag) {
+                continue;
+            }
+            if let Some(reason) = runtime_process_blocker(&pid_file) {
+                let profile = profile_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let unrecorded = if recorded.is_none() {
+                    "; its version was not recorded"
+                } else {
+                    ""
+                };
+                blockers.push(format!("runtime profile {profile} ({reason}{unrecorded})"));
+            }
+        }
+    }
+    Ok(blockers)
+}
+
 fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
-    // Preserve the established native-runtime marker; Torch must not overwrite
-    // llama.cpp selection when a user activates an image runtime.
-    root.join(if app_id == AppId::Torch {
-        ".active-version-torch"
-    } else {
-        ".active-version"
+    // Preserve the established native-runtime marker; Torch and ONNX Runtime
+    // must not overwrite llama.cpp selection when a user activates them.
+    root.join(match app_id {
+        AppId::Torch => ".active-version-torch",
+        AppId::OnnxRuntime => ".active-version-onnx-runtime",
+        AppId::Ollama | AppId::LlamaCpp => ".active-version",
     })
 }
 
@@ -307,6 +367,14 @@ pub struct VersionManager {
 }
 
 impl VersionManager {
+    /// Hold this runtime's selection/removal lease while resolving a version
+    /// and starting a process from it, so a version cannot be removed between
+    /// the check and the moment the new process records its PID. Drop it after
+    /// startup admission or a failed attempt.
+    pub async fn lifecycle_lease(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.lifecycle_lock.clone().lock_owned().await
+    }
+
     /// Hold Torch's selection/removal lease while checking and starting a
     /// runtime. Drop it after startup admission or a failed attempt.
     pub async fn torch_lifecycle_lease(&self) -> Result<tokio::sync::OwnedMutexGuard<()>> {
@@ -339,8 +407,9 @@ impl VersionManager {
 
     /// Create a new version manager.
     ///
-    /// llama.cpp installation requires [`Self::new_with_acquisition`] with the
-    /// application's existing shared acquisition owner.
+    /// llama.cpp and ONNX Runtime installation require
+    /// [`Self::new_with_acquisition`] with the application's existing shared
+    /// acquisition owner.
     ///
     /// # Arguments
     ///
@@ -355,15 +424,6 @@ impl VersionManager {
         app_id: AppId,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
-        if !app_id.has_version_manager() {
-            return Err(PumasError::Config {
-                message: format!(
-                    "{} is provided in-process and does not use the version manager",
-                    app_id
-                ),
-            });
-        }
-
         let launcher_root = pumas_library::platform::paths::absolute_launcher_root(&launcher_root)?;
 
         if !path_exists(&launcher_root).await? {
@@ -502,12 +562,13 @@ impl VersionManager {
         Ok(manager)
     }
 
-    /// Construct the llama.cpp or Torch manager with the application's
-    /// existing shared acquisition owner. A second service/store is never
-    /// created here. llama.cpp archives and Torch wheels then download through
-    /// that owner, so they resume after a network failure and are verified by
-    /// SHA-256. A Torch manager built with [`Self::new`] keeps pip's own
-    /// downloads and records why in each installation log.
+    /// Construct a native-archive manager (llama.cpp or ONNX Runtime) or the
+    /// Torch manager with the application's existing shared acquisition owner.
+    /// A second service/store is never created here. Native archives and Torch
+    /// wheels then download through that owner, so they resume after a network
+    /// failure and are verified by SHA-256. A Torch manager built with
+    /// [`Self::new`] keeps pip's own downloads and records why in each
+    /// installation log.
     pub async fn new_with_acquisition(
         launcher_root: impl Into<PathBuf>,
         app_id: AppId,
@@ -522,24 +583,28 @@ impl VersionManager {
         acquisition: Arc<AcquisitionService>,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
-        if !matches!(app_id, AppId::LlamaCpp | AppId::Torch) {
-            return Err(PumasError::Config {
-                message: format!(
-                    "Shared artifact acquisition serves llama.cpp and Torch installs, not {app_id:?}"
-                ),
-            });
-        }
+        let runtime = if app_id == AppId::Torch {
+            None
+        } else {
+            Some(
+                installer::NativeRuntime::for_app(app_id).map_err(|_| PumasError::Config {
+                    message: format!(
+                        "Shared artifact acquisition serves llama.cpp, ONNX Runtime and Torch installs, not {app_id:?}"
+                    ),
+                })?,
+            )
+        };
         let mut manager =
             Self::new_with_github_client(launcher_root, app_id, configured_client).await?;
-        if app_id == AppId::Torch {
+        let Some(runtime) = runtime else {
             // Torch wheel workspaces recover lazily: the next install releases
             // a use left by an interrupted one, and settled sets are removed.
             manager.acquisition_consumer = Some(Arc::new(
                 acquisition.open_consumer(installer::TORCH_WHEEL_CONSUMER)?,
             ));
             return Ok(manager);
-        }
-        let consumer = Arc::new(acquisition.open_consumer("runtime.llama.cpp")?);
+        };
+        let consumer = Arc::new(acquisition.open_consumer(runtime.consumer_owner())?);
         manager.acquisition_consumer = Some(consumer.clone());
         let store = acquisition.store().clone();
         let records = consumer
@@ -557,7 +622,7 @@ impl VersionManager {
         .with_acquisition_consumer(manager.acquisition_consumer.clone())
         .with_github_client(manager.github_client.clone());
         if let Err(error) = installer
-            .reconcile_retained_llama_cpp(records.into_values().collect())
+            .reconcile_retained_native_archives(records.into_values().collect())
             .await
         {
             let settlement = manager.shutdown_installations().await;
@@ -628,6 +693,11 @@ impl VersionManager {
     // ========================================
     // Path helpers
     // ========================================
+
+    /// The runtime this manager installs and selects versions of.
+    pub fn app_id(&self) -> AppId {
+        self.app_id
+    }
 
     /// Get the versions directory for this app.
     pub fn versions_dir(&self) -> PathBuf {
@@ -763,14 +833,10 @@ impl VersionManager {
         if let Some(proceeded) = &self.selection_proceeded {
             proceeded.store(true, Ordering::SeqCst);
         }
+        // Selecting a version affects new launches only. Running instances
+        // keep the version directory they started from, so nothing has to stop.
         if self.app_id == AppId::Torch {
             self.verify_torch_identity(tag).await?;
-            let current = self.state.read().await.get_active_version();
-            if current.as_deref() != Some(tag) {
-                if let Some(current) = current {
-                    self.ensure_torch_stopped(&current).await?;
-                }
-            }
         }
         let mut state = self.state.write().await;
         if let Some(lock) = &torch_versions_lock {
@@ -967,7 +1033,7 @@ impl VersionManager {
             return Ok(false);
         }
 
-        if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp)
+        if (self.app_id == AppId::Torch || self.app_id.uses_native_archive_installer())
             && !self.torch_control.request_cancel()
         {
             return Ok(false);
@@ -1089,10 +1155,13 @@ impl VersionManager {
         tag: &str,
         preview_id: Option<&str>,
     ) -> Result<mpsc::Receiver<ProgressUpdate>> {
-        if self.app_id == AppId::LlamaCpp && self.acquisition_consumer.is_none() {
+        if self.app_id.uses_native_archive_installer() && self.acquisition_consumer.is_none() {
+            let runtime = installer::NativeRuntime::for_app(self.app_id)?;
             return Err(PumasError::Config {
-                message: "llama.cpp installation requires the shared artifact acquisition service"
-                    .into(),
+                message: format!(
+                    "{} installation requires the shared artifact acquisition service",
+                    runtime.display_name()
+                ),
             });
         }
         if self.app_id == AppId::Torch && torch_alternatives::stable_release_version(tag).is_none()
@@ -1197,7 +1266,7 @@ impl VersionManager {
                 });
             }
             self.cancel_flag.store(false, Ordering::SeqCst);
-            if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp) {
+            if self.app_id == AppId::Torch || self.app_id.uses_native_archive_installer() {
                 self.torch_control.start();
             }
             *installing = Some(tag.to_string());
@@ -1305,7 +1374,7 @@ impl VersionManager {
             }
             .await;
 
-            if matches!(app_id, AppId::Torch | AppId::LlamaCpp) {
+            if app_id == AppId::Torch || app_id.uses_native_archive_installer() {
                 torch_control.finish();
             }
 
@@ -1414,7 +1483,15 @@ impl VersionManager {
         &self,
         tag: &str,
     ) -> Result<pumas_library::network::GitHubRelease> {
-        if self.app_id == AppId::LlamaCpp {
+        if self.app_id == AppId::OnnxRuntime {
+            // The listing omits incompatible releases; say why one is refused.
+            if let Some(reason) =
+                pumas_library::onnx_runtime_distribution::incompatibility_reason(tag)
+            {
+                return Err(PumasError::InstallationFailed { message: reason });
+            }
+        }
+        if self.app_id.uses_native_archive_installer() {
             return self
                 .get_available_releases(false)
                 .await?
@@ -1455,39 +1532,28 @@ impl VersionManager {
         })
     }
 
-    async fn ensure_torch_stopped(&self, tag: &str) -> Result<()> {
-        if self.app_id != AppId::Torch {
-            return Ok(());
-        }
-        let mut pid_paths = vec![self.version_path(tag)?.join("torch.pid")];
-        let profiles = self
+    /// Refuse while any process still runs from `tag`'s version directory:
+    /// a runtime profile instance that recorded `tag` as its version (or
+    /// recorded none), or a process launched directly from the directory.
+    /// Instances of other versions of the same runtime do not block.
+    async fn ensure_version_not_running(&self, tag: &str) -> Result<()> {
+        let version_dir = self.version_path(tag)?;
+        let profiles_dir = self
             .launcher_root
-            .join("launcher-data/runtime-profiles/torch");
-        match fs::read_dir(&profiles).await {
-            Ok(mut entries) => {
-                while let Some(entry) = entries
-                    .next_entry()
-                    .await
-                    .map_err(|error| PumasError::io_with_path(error, &profiles))?
-                {
-                    pid_paths.push(entry.path().join("runtime.pid"));
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(PumasError::io_with_path(error, profiles)),
-        }
-        // Profiles share the selected environment. Require them to stop before
-        // changing runtime selection or deleting files used by a profile.
-        let blocker = tokio::task::spawn_blocking(move || {
-            pid_paths
-                .iter()
-                .find_map(|path| torch_process_blocker(path))
+            .join("launcher-data")
+            .join("runtime-profiles")
+            .join(self.app_id.as_str());
+        let tag_for_scan = tag.to_owned();
+        let blockers = tokio::task::spawn_blocking(move || {
+            version_process_blockers(&version_dir, &profiles_dir, &tag_for_scan)
         })
         .await
-        .map_err(|error| PumasError::Other(format!("Torch process check failed: {error}")))?;
-        if let Some(reason) = blocker {
+        .map_err(|error| PumasError::Other(format!("Runtime process check failed: {error}")))??;
+        if !blockers.is_empty() {
             return Err(PumasError::Other(format!(
-                "Stop Torch before switching or removing its runtime ({reason})"
+                "{} version {tag} is still running; stop {} before removing it",
+                self.app_id,
+                blockers.join(", ")
             )));
         }
         Ok(())
@@ -1497,7 +1563,7 @@ impl VersionManager {
     pub async fn remove_version(&self, tag: &str) -> Result<bool> {
         let _install_guard = self.install_lock.lock().await;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let native_versions_lock = if self.app_id == AppId::LlamaCpp {
+        let native_versions_lock = if self.app_id.uses_native_archive_installer() {
             Some(installer::NativeVersionsLock::acquire(self.versions_dir()).await?)
         } else {
             None
@@ -1513,7 +1579,7 @@ impl VersionManager {
                 .refresh_with_native_lock(lock)
                 .await?;
         }
-        self.ensure_torch_stopped(tag).await?;
+        self.ensure_version_not_running(tag).await?;
         // Check if installed
         {
             let state = self.state.read().await;
@@ -1730,7 +1796,10 @@ mod tests {
             Err(error) => error.to_string(),
             Ok(_) => panic!("Ollama has no shared acquisition consumer"),
         };
-        assert!(refused.contains("serves llama.cpp and Torch"), "{refused}");
+        assert!(
+            refused.contains("serves llama.cpp, ONNX Runtime and Torch"),
+            "{refused}"
+        );
         acquisition.shutdown().await.unwrap();
     }
 
@@ -3153,7 +3222,7 @@ mod tests {
             .with_acquisition_consumer(Some(consumer.clone()));
         let error = tokio::time::timeout(
             Duration::from_secs(5),
-            direct.reconcile_retained_llama_cpp(records.into_values().collect()),
+            direct.reconcile_retained_native_archives(records.into_values().collect()),
         )
         .await
         .expect("injected recovery worker must refuse without waiting for a source")
@@ -3263,7 +3332,8 @@ mod tests {
             .with_acquisition_consumer(Some(missing_custody_consumer.clone()));
         let missing_custody = tokio::time::timeout(
             Duration::from_secs(5),
-            missing_custody_installer.reconcile_retained_llama_cpp(records.into_values().collect()),
+            missing_custody_installer
+                .reconcile_retained_native_archives(records.into_values().collect()),
         )
         .await
         .expect("missing-custody recovery must stop promptly")
@@ -3514,7 +3584,8 @@ mod tests {
             Ok(Ok(records)) => Some(
                 tokio::time::timeout(
                     Duration::from_secs(5),
-                    direct_installer.reconcile_retained_llama_cpp(records.into_values().collect()),
+                    direct_installer
+                        .reconcile_retained_native_archives(records.into_values().collect()),
                 )
                 .await,
             ),
@@ -6922,39 +6993,44 @@ mod tests {
         let error = manager
             .remove_version("torch-runtime-running")
             .await
-            .unwrap_err();
-        assert!(error.to_string().contains("Stop Torch"));
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("version torch-runtime-running is still running"),
+            "{error}"
+        );
+        assert!(error.contains("torch.pid"), "{error}");
         assert!(runtime.join("torch.pid").exists());
     }
 
     #[test]
-    fn torch_process_blocker_trusts_identity_records_over_bare_pids() {
+    fn runtime_process_blocker_trusts_identity_records_over_bare_pids() {
         use pumas_library::platform::process_identity::{capture, write_record};
         let root = TempDir::new().unwrap();
         let pid_file = root.path().join("torch.pid");
-        assert_eq!(super::torch_process_blocker(&pid_file), None);
+        assert_eq!(super::runtime_process_blocker(&pid_file), None);
 
         // A verified live record blocks.
         let live = capture(std::process::id()).unwrap();
         write_record(&pid_file, &live).unwrap();
-        assert!(super::torch_process_blocker(&pid_file)
+        assert!(super::runtime_process_blocker(&pid_file)
             .is_some_and(|reason| reason.contains("is running")));
 
         // A record whose PID now belongs to another process does not.
         let mut reused = live.clone();
         reused.start_time = reused.start_time.wrapping_add(1);
         write_record(&pid_file, &reused).unwrap();
-        assert_eq!(super::torch_process_blocker(&pid_file), None);
+        assert_eq!(super::runtime_process_blocker(&pid_file), None);
 
         // A bare PID file proves nothing; it blocks only while the PID is live.
         std::fs::remove_file(pumas_library::platform::process_identity::identity_path(
             &pid_file,
         ))
         .unwrap();
-        assert!(super::torch_process_blocker(&pid_file)
+        assert!(super::runtime_process_blocker(&pid_file)
             .is_some_and(|reason| reason.contains("may be running")));
         std::fs::write(&pid_file, "not-a-pid").unwrap();
-        assert!(super::torch_process_blocker(&pid_file)
+        assert!(super::runtime_process_blocker(&pid_file)
             .is_some_and(|reason| reason.contains("invalid PID")));
     }
 
@@ -6969,12 +7045,76 @@ mod tests {
             .join("launcher-data/runtime-profiles/torch/image-profile");
         std::fs::create_dir_all(&profile).unwrap();
         std::fs::write(profile.join("runtime.pid"), std::process::id().to_string()).unwrap();
+        // An instance that recorded no version may run any version.
         let error = manager
             .remove_version("torch-runtime-profile")
             .await
-            .unwrap_err();
-        assert!(error.to_string().contains("Stop Torch"));
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime profile image-profile"), "{error}");
+        assert!(error.contains("its version was not recorded"), "{error}");
         assert!(profile.join("runtime.pid").exists());
+    }
+
+    #[tokio::test]
+    async fn removal_waits_for_a_launch_holding_the_lifecycle_lease() {
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        // A launch holds the lease from version resolution until its process
+        // records a PID; removal must not run in between.
+        let lease = manager.lifecycle_lease().await;
+        let removal = tokio::spawn({
+            let manager = manager.clone();
+            async move { manager.remove_version("b1000+cpu").await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!removal.is_finished(), "removal ran during a launch");
+        drop(lease);
+        let error = tokio::time::timeout(Duration::from_secs(5), removal)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(error, PumasError::VersionNotFound { .. }),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_instances_of_the_removed_version_block_removal() {
+        use pumas_library::platform::process_identity::write_runtime_version;
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        let profiles = root.path().join("launcher-data/runtime-profiles/llama-cpp");
+        for (profile, version) in [("router-new", "b2000+cpu"), ("router-old", "b1000+cpu")] {
+            let dir = profiles.join(profile);
+            std::fs::create_dir_all(&dir).unwrap();
+            let pid_file = dir.join("runtime.pid");
+            std::fs::write(&pid_file, std::process::id().to_string()).unwrap();
+            write_runtime_version(&pid_file, version).unwrap();
+        }
+
+        // A live instance of another version does not block; the refusal is
+        // only that this version is not installed.
+        let error = manager.remove_version("b3000+cpu").await.unwrap_err();
+        assert!(
+            matches!(error, PumasError::VersionNotFound { .. }),
+            "{error}"
+        );
+
+        // The instance running the version blocks and is named.
+        let error = manager
+            .remove_version("b1000+cpu")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime profile router-old"), "{error}");
+        assert!(!error.contains("router-new"), "{error}");
     }
 
     #[tokio::test]
@@ -6999,18 +7139,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn onnx_runtime_is_rejected_by_version_manager() {
+    async fn onnx_runtime_install_requires_the_shared_acquisition_service() {
         let temp_dir = TempDir::new().unwrap();
+        let manager = VersionManager::new(temp_dir.path(), AppId::OnnxRuntime)
+            .await
+            .unwrap();
+        assert!(manager.versions_dir().ends_with("onnx-runtime-versions"));
 
-        let error = match VersionManager::new(temp_dir.path(), AppId::OnnxRuntime).await {
-            Ok(_) => panic!("ONNX Runtime should not create a version manager"),
-            Err(error) => error,
-        };
+        let error = manager.install_version("v1.24.2+cpu").await.unwrap_err();
 
         assert!(
             error
                 .to_string()
-                .contains("does not use the version manager"),
+                .contains("ONNX Runtime installation requires the shared artifact acquisition"),
             "{error}"
         );
     }

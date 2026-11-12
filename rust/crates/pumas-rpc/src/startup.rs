@@ -12,7 +12,7 @@ use std::{path::PathBuf, sync::Arc};
 #[cfg(feature = "inference-plugins")]
 use {
     pumas_app_manager::{SizeCalculator, VersionManager},
-    pumas_library::{AppId, PluginLoader},
+    pumas_library::PluginLoader,
     std::collections::HashMap,
     tracing::warn,
 };
@@ -120,11 +120,12 @@ pub(crate) async fn start(
     for app in crate::VERSION_MANAGED_APPS {
         // Native archives and Torch wheels download through the one shared
         // acquisition owner, so they resume after network loss.
-        let initialized = if matches!(*app, AppId::LlamaCpp | AppId::Torch) {
-            VersionManager::new_with_acquisition(&root, *app, api.acquisition().clone()).await
-        } else {
-            VersionManager::new(&root, *app).await
-        };
+        let initialized =
+            if app.uses_native_archive_installer() || *app == pumas_app_manager::AppId::Torch {
+                VersionManager::new_with_acquisition(&root, *app, api.acquisition().clone()).await
+            } else {
+                VersionManager::new(&root, *app).await
+            };
         match initialized {
             Ok(manager) => {
                 managers.insert(app.as_str().to_owned(), manager);

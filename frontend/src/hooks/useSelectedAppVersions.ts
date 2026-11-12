@@ -1,43 +1,54 @@
 import { useMemo } from 'react';
-import { getAppVersionState, type AppVersionState } from '../utils/appVersionState';
+import {
+  getAppVersionState,
+  isVersionSupportedAppId,
+  LOADING_VERSION_STATE,
+  type AppVersionState,
+} from '../utils/appVersionState';
+import {
+  useInstalledVersionsByAppId,
+  type InstalledVersionsByAppId,
+} from './useInstalledVersionsByAppId';
+import { useRuntimeProviders, versionManagedAppIds } from './useRuntimeProviders';
 import { useVersions, type UseVersionsResult } from './useVersions';
 
-interface UseSelectedAppVersionsResult {
+export interface UseSelectedAppVersionsResult {
   appVersions: AppVersionState;
   installationProgress: UseVersionsResult['installationProgress'];
-  llamaCppInstalledVersions: string[];
-  ollamaInstalledVersions: string[];
-  torchInstalledVersions: string[];
+  /** Installed versions of every app the backend version-manages. */
+  installedVersionsByAppId: InstalledVersionsByAppId;
 }
 
+/**
+ * Full version state for the selected app when the backend version-manages
+ * it, plus installed-version lists for every version-managed app.
+ */
 export function useSelectedAppVersions(selectedAppId: string | null): UseSelectedAppVersionsResult {
-  const ollamaVersions = useVersions({
-    appId: 'ollama',
-    trackAvailableVersions: selectedAppId === 'ollama',
-  });
-  const llamaCppVersions = useVersions({
-    appId: 'llama-cpp',
-    trackAvailableVersions: selectedAppId === 'llama-cpp',
-  });
-  const torchVersions = useVersions({
-    appId: 'torch',
-    trackAvailableVersions: selectedAppId === 'torch',
-  });
+  const { providers, error: providersError } = useRuntimeProviders();
+  const managedAppIds = useMemo(() => versionManagedAppIds(providers), [providers]);
+  const isSupported = isVersionSupportedAppId(selectedAppId, managedAppIds);
 
-  const activeVersions = useMemo(() => {
-    if (selectedAppId === 'ollama') return ollamaVersions;
-    if (selectedAppId === 'llama-cpp') return llamaCppVersions;
-    if (selectedAppId === 'torch') return torchVersions;
-    return ollamaVersions;
-  }, [selectedAppId, llamaCppVersions, ollamaVersions, torchVersions]);
+  const selectedVersions = useVersions({
+    appId: isSupported && selectedAppId ? selectedAppId : undefined,
+    enabled: isSupported,
+    trackAvailableVersions: isSupported,
+  });
+  const installedVersionsByAppId = useInstalledVersionsByAppId(
+    managedAppIds,
+    selectedAppId,
+    isSupported ? selectedVersions.installedVersions : null
+  );
 
-  const appVersions = getAppVersionState(selectedAppId, activeVersions);
+  // Until the backend has said which apps it version-manages, read as loading
+  // rather than unsupported; a failed lookup falls back to unsupported.
+  const appVersions =
+    providers === null && providersError === null && selectedAppId !== null
+      ? LOADING_VERSION_STATE
+      : getAppVersionState(selectedAppId, isSupported, selectedVersions);
 
   return {
     appVersions,
     installationProgress: appVersions.installationProgress,
-    llamaCppInstalledVersions: llamaCppVersions.installedVersions,
-    ollamaInstalledVersions: ollamaVersions.installedVersions,
-    torchInstalledVersions: torchVersions.installedVersions,
+    installedVersionsByAppId,
   };
 }

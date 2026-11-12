@@ -168,6 +168,52 @@ impl BinaryLaunchConfig {
         }
     }
 
+    /// Create a launch config for the ONNX host of an ONNX Runtime profile:
+    /// `host_executable --onnx-host`, loading the installed version at
+    /// `version_dir`. The listener and device-mode arguments come from the
+    /// profile's launch spec.
+    #[cfg(feature = "onnx-runtime")]
+    pub fn onnx_host(
+        tag: impl Into<String>,
+        version_dir: impl AsRef<Path>,
+        host_executable: impl AsRef<Path>,
+    ) -> Self {
+        use crate::onnx_runtime::host_protocol;
+        let tag = tag.into();
+        let version_dir = version_dir.as_ref().to_path_buf();
+        let mut env_vars = HashMap::from([
+            (
+                host_protocol::RUNTIME_DIR_ENV.to_string(),
+                version_dir.to_string_lossy().into_owned(),
+            ),
+            (host_protocol::RUNTIME_VERSION_ENV.to_string(), tag.clone()),
+            (
+                host_protocol::ORT_DISABLE_TELEMETRY_ENV.to_string(),
+                "1".to_string(),
+            ),
+        ]);
+        // The owned child environment drops inherited variables, so a
+        // developer's explicit library override is forwarded on purpose.
+        if let Some(library) = std::env::var_os(host_protocol::ORT_DYLIB_PATH_ENV) {
+            env_vars.insert(
+                host_protocol::ORT_DYLIB_PATH_ENV.to_string(),
+                library.to_string_lossy().into_owned(),
+            );
+        }
+        Self {
+            tag,
+            pid_file: version_dir.join("onnx-host.pid"),
+            version_dir,
+            binary_path: host_executable.as_ref().to_path_buf(),
+            command: Some(host_protocol::HOST_FLAG.to_string()),
+            extra_args: vec![],
+            env_vars,
+            log_file: None,
+            ready_timeout: Duration::from_secs(60),
+            health_check_url: None,
+        }
+    }
+
     /// Set extra arguments.
     pub fn with_extra_args(mut self, args: Vec<String>) -> Self {
         self.extra_args = args;

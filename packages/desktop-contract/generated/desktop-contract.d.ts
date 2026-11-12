@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 38a5329e338c9d514bd9080c5bd4a4d4595136be136a5efd122dc26c8dba12c8. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 088106de380f6bad7c45351963f0eafea546dc2487cba430eaf6ffc4dc0d6db7. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -147,15 +147,17 @@ export type RuntimeLaunchOutcome = { "error"?: string; "log_path"?: string; "rea
 export type RuntimeLaunchParams = Readonly<Record<string, never>>;
 export type RuntimeLifecycleState = "unknown" | "stopped" | "starting" | "running" | "stopping" | "failed" | "external";
 export type RuntimeManagementMode = "managed" | "external";
-export type RuntimeProfileConfig = { "device": (RuntimeDeviceSettings); "enabled": boolean; "endpoint_url"?: string | null; "management_mode": RuntimeManagementMode; "name": string; "port"?: number | null; "profile_id": string; "provider": RuntimeProviderId; "provider_mode": RuntimeProviderMode; "scheduler": (RuntimeSchedulerSettings) };
+export type RuntimeProfileConfig = { "device": (RuntimeDeviceSettings); "enabled": boolean; "endpoint_url"?: string | null; "management_mode": RuntimeManagementMode; "name": string; "port"?: number | null; "profile_id": string; "provider": RuntimeProviderId; "provider_mode": RuntimeProviderMode; "runtime_version"?: string | null; "scheduler": (RuntimeSchedulerSettings) };
 export type RuntimeProfileEvent = { "cursor": string; "event_kind": RuntimeProfileEventKind; "model_id"?: string | null; "producer_revision"?: string | null; "profile_id"?: string | null; "provider"?: (RuntimeProviderId) | (null) };
 export type RuntimeProfileEventKind = "profile_created" | "profile_updated" | "profile_deleted" | "route_updated" | "route_deleted" | "status_changed" | "snapshot_required";
 export type RuntimeProfilesSnapshot = { "cursor": string; "default_profile_id"?: string | null; "profiles": ReadonlyArray<RuntimeProfileConfig>; "routes": ReadonlyArray<ModelRuntimeRoute>; "schema_version": number; "statuses": ReadonlyArray<RuntimeProfileStatus> };
 export type RuntimeProfilesSnapshotResponse = { "error"?: string | null; "snapshot": RuntimeProfilesSnapshot; "success": boolean };
-export type RuntimeProfileStatus = { "endpoint_url"?: string | null; "last_error"?: string | null; "log_path"?: string | null; "pid"?: number | null; "profile_id": string; "state": RuntimeLifecycleState };
+export type RuntimeProfileStatus = { "endpoint_url"?: string | null; "last_error"?: string | null; "log_path"?: string | null; "pid"?: number | null; "profile_id": string; "runtime_version"?: string | null; "state": RuntimeLifecycleState };
 export type RuntimeProfileUpdateFeed = { "cursor": string; "events": ReadonlyArray<RuntimeProfileEvent>; "snapshot_required": boolean; "stale_cursor": boolean };
+export type RuntimeProviderDescriptor = { "app_id": string; "device_modes": ReadonlyArray<RuntimeDeviceMode>; "provider": RuntimeProviderId; "provider_modes": ReadonlyArray<RuntimeProviderMode>; "supports_external_profiles": boolean; "supports_managed_profiles": boolean; "version_managed": boolean };
 export type RuntimeProviderId = "torch" | "ollama" | "llama_cpp" | "onnx_runtime";
 export type RuntimeProviderMode = "torch_serve" | "ollama_serve" | "llama_cpp_router" | "llama_cpp_dedicated" | "onnx_serve";
+export type RuntimeProvidersOutcome = { "providers": ReadonlyArray<RuntimeProviderDescriptor>; "success": true };
 export type RuntimeRunningOutcome = boolean;
 export type RuntimeSchedulerSettings = { "auto_load": boolean; "keep_alive_seconds"?: number | null; "max_concurrent_models"?: number | null };
 export type RuntimeStopOutcome = { "skipped"?: ReadonlyArray<RuntimeStopSkipped>; "success": boolean };
@@ -342,6 +344,7 @@ export declare function decodeRuntimeLaunchOutcome(input: unknown): DecodeOutcom
 export declare function decodeRuntimeLaunchParams(input: unknown): DecodeOutcome<RuntimeLaunchParams>;
 export declare function decodeRuntimeProfileUpdateFeed(input: unknown): DecodeOutcome<RuntimeProfileUpdateFeed>;
 export declare function decodeRuntimeProfilesSnapshotResponse(input: unknown): DecodeOutcome<RuntimeProfilesSnapshotResponse>;
+export declare function decodeRuntimeProvidersOutcome(input: unknown): DecodeOutcome<RuntimeProvidersOutcome>;
 export declare function decodeRuntimeRunningOutcome(input: unknown): DecodeOutcome<RuntimeRunningOutcome>;
 export declare function decodeRuntimeStopOutcome(input: unknown): DecodeOutcome<RuntimeStopOutcome>;
 export declare function decodeS3AuthenticatedBundleImportParams(input: unknown): DecodeOutcome<S3AuthenticatedBundleImportParams>;

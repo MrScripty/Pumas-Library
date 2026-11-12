@@ -155,8 +155,10 @@ Version rules:
   Installed versions stay inspectable offline.
 - Installing a version does not activate it. Selecting, setting the default,
   starting and stopping are separate explicit operations.
-- One Torch version serves at a time. Unload its models and stop the Torch
-  process before changing its runtime.
+- A runtime profile may pin an installed Torch version; otherwise it uses the
+  active one. Profiles pinned to different versions run side by side, each in
+  its own sidecar process. A running instance keeps its version until it is
+  restarted, and a version cannot be removed while an instance uses it.
 - Nunchaku is installed from its project's `1.2.0+torch2.9` wheel, which is
   built only for Torch 2.9.1, CUDA 13.0, CPython 3.12 and Linux x86_64, so the
   `nunchaku` adapter installs only there. Runtimes installed by the former

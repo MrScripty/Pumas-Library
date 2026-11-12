@@ -44,9 +44,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rank pooling cannot use such a head are refused with the reason
   ([ADR 0006](docs/adr/0006-derived-ranking-heads.md)). The base conversion
   environment now also needs `jinja2`; re-run conversion setup.
+- Runtime profiles can pin an installed runtime version
+  (`runtime_version`), so llama.cpp, Torch and other managed runtimes can run
+  instances of different versions at the same time. A profile without a pin
+  follows the runtime's active version, as before. Saving a pin that is not
+  installed, or launching a profile whose pinned version was removed, is
+  refused with the reason. Running instances report the version they started
+  from in `RuntimeProfileStatus.runtime_version`.
+- `get_runtime_providers` reports each runtime provider's app id, whether it
+  is version-managed in this build, and its supported provider, device and
+  management modes. The desktop app derives its version panels and runtime
+  profile editor choices from it instead of hard-coded lists, so ONNX Runtime
+  profiles now offer GPU.
 
 ### Changed
 
+- Changing a runtime's active or default version no longer requires stopping
+  its running profiles; they keep the version they started from, and the
+  change applies to new launches. Removing a version is refused only while an
+  instance runs that version, and the refusal names the profiles to stop.
+- ONNX Runtime is a downloaded, version-managed runtime like llama.cpp and
+  Torch, and no Pumas package bundles it: desktop packages and headless
+  inference archives alike. The ONNX Runtime panel lists official
+  `microsoft/onnxruntime` releases that support the C API Pumas uses (1.24 or
+  newer) as CPU, CUDA 12 and CUDA 13 builds for the host, installs them through
+  the shared, resumable and verified download path, and tracks installed,
+  active and default versions.
+- Each ONNX Runtime profile runs its own ONNX host process (`pumas-rpc
+  --onnx-host`) that loads the version the profile launches, so profiles on
+  different versions serve at the same time and switching a profile's version
+  restarts only that host, never Pumas. A profile's device mode selects the
+  build's execution provider (CPU, CUDA, or CoreML on macOS); a provider that
+  cannot initialize, or a missing runtime, refuses the launch with the reason.
+  For CUDA the reason says whether the NVIDIA driver is missing, too old for
+  the build, or present with the CUDA runtime or cuDNN libraries missing; the
+  driver stays the operating system's, and Pumas only points at NVIDIA's
+  download. Hosts run with ONNX Runtime telemetry disabled
+  (`ORT_DISABLE_TELEMETRY=1` and telemetry events off), so ONNX Runtime
+  creates no device id or telemetry database in the user cache.
+  Serving launches the profile's host when needed. `ORT_DYLIB_PATH` remains a
+  developer override. See
+  [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md).
+- Headless inference archives contain only `pumas-rpc`, its license and
+  notices, the protocol schema and build record; their manifest is schema 2
+  without the `runtime` record, and schema-1 manifests are refused with the
+  reason. Release SBOMs list no bundled runtime.
 - Torch runtime wheels now download through Pumas's shared acquisition
   owner, the one llama.cpp archives use, instead of through pip. A dropped
   connection resumes from the bytes already received, and a failed install

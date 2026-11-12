@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Produce a native tag candidate using checked runtime pins and source contracts.
+"""Produce a native tag candidate from checked source contracts.
 
-No release is published. Startup is bounded identity evidence, not model inference.
+The archive bundles no inference runtime; Pumas installs runtimes through its
+version manager. No release is published. Startup is bounded identity evidence,
+not model inference.
 """
 
 import argparse
 import copy
 import hashlib
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -15,7 +16,6 @@ import tomllib
 
 import headless_inference as package
 import headless_inference_build as build
-import onnx_runtime_stage as runtime_stage
 
 
 def contract_for(repository, target_id, schema, build_id):
@@ -68,7 +68,6 @@ def contract_for(repository, target_id, schema, build_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", choices=package.TARGETS, required=True)
-    parser.add_argument("--runtime-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--build-id", required=True)
     args = parser.parse_args()
@@ -99,42 +98,14 @@ def main():
         capture_output=True,
     ).stdout
     contract = contract_for(repository, args.target, schema, args.build_id)
-    runtime_dir = args.runtime_dir.resolve()
-    runtime = json.loads((runtime_dir / "runtime-record.json").read_text())
-    pins = json.loads(runtime_stage.PINS.read_text())["targets"][args.target]
-    package.require(
-        runtime["source_archive_sha256"] == pins["archive_sha256"],
-        "runtime archive differs from checked authority",
-    )
-    package.require(
-        runtime["files"]
-        == {
-            name: {key: item[key] for key in ("sha256", "bytes")}
-            for name, item in pins["files"].items()
-        },
-        "runtime files differ from checked authority",
-    )
-    notices = []
-    for name, item in pins["notices"].items():
-        path = runtime_dir / name
-        package.require(
-            not path.is_symlink()
-            and path.stat().st_size == item["bytes"]
-            and package.sha256(path) == item["sha256"],
-            "native notice differs from checked authority",
-        )
-        notices.append(path.read_bytes())
     evidence = build.produce(
         repository,
         args.target,
         contract,
-        runtime,
-        {name: runtime_dir / name for name in runtime["files"]},
         schema,
         repository / "LICENSE",
         repository / build.attribution_directory(repository) / "THIRD-PARTY-NOTICES.txt",
         args.output_dir,
-        runtime_notices=notices,
     )
     (args.output_dir / "compatibility.json").write_bytes(package.canonical(contract))
     extracted = args.output_dir / "extracted"

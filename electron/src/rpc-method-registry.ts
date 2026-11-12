@@ -23,6 +23,7 @@ export const RPC_METHOD_REGISTRY = {
     'get_network_status',
     'get_library_status',
     'get_app_status',
+    'get_runtime_providers',
     'get_runtime_profiles_snapshot',
     'list_runtime_profile_updates_since',
     'upsert_runtime_profile',
@@ -224,6 +225,7 @@ export const RPC_METHOD_PARAM_VALIDATION = {
   list_model_downloads: 'empty-record',
   get_hf_auth_status: 'empty-record',
   get_plugins: 'empty-record',
+  get_runtime_providers: 'empty-record',
   get_runtime_profiles_snapshot: 'empty-record',
   get_serving_status: 'empty-record',
   // Rust decodes these with `empty()` and refuses any parameter.

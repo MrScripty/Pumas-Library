@@ -1,8 +1,10 @@
 //! Rust ONNX Runtime provider/session contracts.
 //!
-//! This module intentionally starts with a fake backend so serving and gateway
-//! slices can validate the public contract before real ONNX Runtime packages are
-//! added.
+//! ONNX Runtime executes in an ONNX host process per runtime profile (see
+//! [`host_protocol`]). The host runs [`RealOnnxEmbeddingBackend`] against the
+//! library of the installed version its profile pins; Pumas reaches it through
+//! [`RemoteOnnxEmbeddingBackend`]. The fake backend validates serving and
+//! gateway contracts without a native runtime.
 
 use std::{
     fmt,
@@ -12,7 +14,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 mod config;
+mod cuda_driver;
 mod fake;
+pub mod host_protocol;
 mod manager;
 mod native_library;
 mod output;
@@ -20,6 +24,7 @@ mod package;
 mod postprocess;
 mod real;
 mod real_backend;
+mod remote;
 mod tensors;
 mod tokenizer;
 
@@ -31,8 +36,9 @@ pub use postprocess::{
     OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
     OnnxOutputTensorSelection,
 };
-pub use real::OnnxRuntimeSession;
+pub use real::{probe_execution_provider, OnnxRuntimeSession};
 pub use real_backend::{OnnxEmbeddingBackendKind, RealOnnxEmbeddingBackend};
+pub use remote::{OnnxHostEndpoint, RemoteOnnxEmbeddingBackend};
 pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 
 /// Pumas library model IDs are artifact-qualified paths (category, family,
@@ -156,16 +162,64 @@ impl OnnxModelPath {
     }
 }
 
+/// The ONNX Runtime library of one installed, host-selected runtime version.
+///
+/// The host resolves it from the version manager's selection. It is never
+/// built from a request or model, because loading it executes native code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnnxRuntimeLibrary {
+    version_tag: String,
+    path: PathBuf,
+}
+
+impl OnnxRuntimeLibrary {
+    /// The library inside an installed version directory.
+    pub fn installed_version(version_tag: impl Into<String>, version_dir: &Path) -> Self {
+        Self {
+            version_tag: version_tag.into(),
+            path: version_dir.join(crate::onnx_runtime_distribution::library_relative_path()),
+        }
+    }
+
+    pub fn version_tag(&self) -> &str {
+        &self.version_tag
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnnxExecutionProvider {
     Cpu,
+    /// NVIDIA CUDA, from an installed `+cuda12` or `+cuda13` build.
+    Cuda,
+    /// Apple CoreML, part of the macOS build.
+    #[serde(rename = "coreml")]
+    CoreMl,
 }
 
 impl OnnxExecutionProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Cpu => "cpu",
+            Self::Cuda => "cuda",
+            Self::CoreMl => "coreml",
+        }
+    }
+}
+
+impl From<crate::onnx_runtime_distribution::OnnxRuntimeExecutionProvider>
+    for OnnxExecutionProvider
+{
+    fn from(provider: crate::onnx_runtime_distribution::OnnxRuntimeExecutionProvider) -> Self {
+        use crate::onnx_runtime_distribution::OnnxRuntimeExecutionProvider as Distribution;
+        match provider {
+            Distribution::Cpu => Self::Cpu,
+            Distribution::Cuda => Self::Cuda,
+            Distribution::CoreMl => Self::CoreMl,
         }
     }
 }

@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, RefreshCw, Server } from 'lucide-react';
 import { getElectronAPI } from '../../../api/adapter';
+import { useInstalledRuntimeVersions } from '../../../hooks/useInstalledRuntimeVersions';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
-import type { RuntimeProviderId } from '../../../types/api-runtime-profiles';
+import { findRuntimeProvider, useRuntimeProviders } from '../../../hooks/useRuntimeProviders';
+import type {
+  RuntimeProviderId,
+  RuntimeProviderInfo,
+} from '../../../types/api-runtime-profiles';
 import {
   draftToProfile,
   newProfileDraft,
   profileToDraft,
 } from './RuntimeProfileSettingsDraft';
 import {
-  providerModes,
+  providerLabel,
   RuntimeProfileEditor,
   RuntimeProfileList,
   type RuntimeProfileDraft,
@@ -19,7 +24,52 @@ type RuntimeProfileSettingsSectionProps = {
   provider: RuntimeProviderId;
 };
 
+/**
+ * Runtime profiles of one provider. The provider's modes and runtime app come
+ * from the backend registry, so the editor waits for it rather than guessing.
+ */
 export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettingsSectionProps) {
+  const { providers, isLoading, error, refresh } = useRuntimeProviders();
+  const providerInfo = findRuntimeProvider(providers, provider);
+
+  if (providerInfo) {
+    return <RuntimeProfileSettingsBody providerInfo={providerInfo} />;
+  }
+
+  const waiting = providers === null && (isLoading || error === null);
+  return (
+    <section className="w-full space-y-3">
+      <div className="text-xs uppercase tracking-wider text-[hsl(var(--launcher-text-muted))] flex items-center gap-2">
+        <Server className="w-3.5 h-3.5" />
+        <span>Runtime Profiles</span>
+      </div>
+      {waiting ? (
+        <div className="text-xs text-[hsl(var(--launcher-text-muted))]">
+          Loading runtime provider details...
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-xs text-[hsl(var(--accent-error))]">
+          <span>
+            {error
+              ? `Runtime provider details unavailable: ${error}`
+              : `${providerLabel(provider)} is not a runtime provider of this backend.`}
+          </span>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="p-1.5 rounded-md border border-[hsl(var(--launcher-border)/0.35)] text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))]"
+            aria-label="Retry loading runtime provider details"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RuntimeProfileSettingsBody({ providerInfo }: { providerInfo: RuntimeProviderInfo }) {
+  const { provider } = providerInfo;
   const {
     profiles,
     statuses,
@@ -27,8 +77,11 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
     error,
     refreshRuntimeProfiles,
   } = useRuntimeProfiles();
+  const installedVersions = useInstalledRuntimeVersions(
+    providerInfo.version_managed ? providerInfo.app_id : null
+  );
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<RuntimeProfileDraft>(() => newProfileDraft(provider));
+  const [draft, setDraft] = useState<RuntimeProfileDraft>(() => newProfileDraft(providerInfo));
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRuntimeActionRunning, setIsRuntimeActionRunning] = useState(false);
@@ -64,9 +117,9 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
     }
     if (selectedProfileId && !providerProfiles.some((profile) => profile.profile_id === selectedProfileId)) {
       setSelectedProfileId(providerProfiles[0]?.profile_id ?? null);
-      setDraft(newProfileDraft(provider));
+      setDraft(newProfileDraft(providerInfo));
     }
-  }, [isCreatingProfile, provider, providerProfiles, selectedProfileId]);
+  }, [isCreatingProfile, providerInfo, providerProfiles, selectedProfileId]);
 
   useEffect(() => {
     if (isCreatingProfile) {
@@ -74,13 +127,13 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
         current.provider === provider
           ? current
           : {
-              ...newProfileDraft(provider),
+              ...newProfileDraft(providerInfo),
               name: current.name,
               profile_id: current.profile_id,
             }
       );
     }
-  }, [isCreatingProfile, provider]);
+  }, [isCreatingProfile, provider, providerInfo]);
 
   useEffect(() => {
     if (!isCreatingProfile && selectedProfile) {
@@ -95,8 +148,8 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
     setDraft((current) => {
       const next = { ...current, [key]: value };
       next.provider = provider;
-      if (!providerModes[provider].includes(next.provider_mode)) {
-        next.provider_mode = providerModes[provider][0] ?? 'ollama_serve';
+      if (!providerInfo.provider_modes.includes(next.provider_mode)) {
+        next.provider_mode = providerInfo.provider_modes[0] ?? next.provider_mode;
       }
       if (key === 'device_mode') {
         if (value !== 'gpu' && value !== 'specific_device') {
@@ -112,12 +165,15 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
         next.endpoint_url = '';
         next.port = '';
       }
+      if (key === 'management_mode' && value === 'external') {
+        next.runtime_version = '';
+      }
       return next;
     });
   };
 
   const handleNewProfile = () => {
-    const nextDraft = newProfileDraft(provider);
+    const nextDraft = newProfileDraft(providerInfo);
     setIsCreatingProfile(true);
     setSelectedProfileId(null);
     setDraft(nextDraft);
@@ -171,7 +227,7 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
       }
       setIsCreatingProfile(false);
       setSelectedProfileId(null);
-      setDraft(newProfileDraft(provider));
+      setDraft(newProfileDraft(providerInfo));
       await refreshRuntimeProfiles();
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : 'Failed to delete runtime profile');
@@ -234,7 +290,10 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void refreshRuntimeProfiles()}
+            onClick={() => {
+              void refreshRuntimeProfiles();
+              void installedVersions.refresh();
+            }}
             className="p-1.5 rounded-md border border-[hsl(var(--launcher-border)/0.35)] text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))]"
             aria-label="Refresh runtime profiles"
           >
@@ -261,6 +320,8 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
         />
         <RuntimeProfileEditor
           draft={draft}
+          installedVersions={installedVersions}
+          providerInfo={providerInfo}
           selectedProfileId={selectedProfileId}
           selectedStatus={selectedStatus}
           isSaving={isSaving || isRuntimeActionRunning}

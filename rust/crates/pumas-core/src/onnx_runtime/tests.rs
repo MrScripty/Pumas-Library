@@ -354,7 +354,9 @@ fn real_session_loader_uses_validated_model_directory_contract() {
     // Model parsing is reached only when the explicitly provisioned native
     // library is available; otherwise the missing dependency is reported first.
     if err.field.as_deref() == Some("runtime_library") {
-        assert!(err.message.contains("do not download ONNX Runtime"));
+        assert!(err
+            .message
+            .contains("install a compatible ONNX Runtime version"));
     } else {
         assert!(err.message.contains("model load failed"));
     }
@@ -441,7 +443,7 @@ fn real_session_runtime_error_child() {
     assert_eq!(error.code, OnnxRuntimeErrorCode::Backend);
     assert_eq!(error.field.as_deref(), Some("runtime_library"));
     assert!(error.message.contains(match case.as_str() {
-        "missing" => "file is missing",
+        "missing" => "ORT_DYLIB_PATH is missing",
         "invalid" => "could not be loaded",
         "symbol" => "lacks OrtGetApiBase",
         "null" => "null API base",
@@ -450,7 +452,9 @@ fn real_session_runtime_error_child() {
         _ => panic!("unknown fixture case"),
     }));
     assert!(error.message.contains("ORT_DYLIB_PATH"));
-    assert!(error.message.contains("do not download ONNX Runtime"));
+    assert!(error
+        .message
+        .contains("install a compatible ONNX Runtime version"));
 }
 
 #[test]

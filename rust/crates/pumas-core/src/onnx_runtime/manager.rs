@@ -13,8 +13,8 @@ use tokio::{
 };
 
 use super::{
-    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest, OnnxModelId, OnnxRerankRequest,
-    OnnxRerankResponse, OnnxRuntimeError, OnnxSessionStatus,
+    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxHostEndpoint, OnnxLoadRequest, OnnxModelId,
+    OnnxRerankRequest, OnnxRerankResponse, OnnxRuntimeError, OnnxSessionStatus,
 };
 
 /// One admitted operation's share of [`OnnxSessionManager`]'s concurrency limit.
@@ -71,6 +71,17 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
         let result = self.load(request).await;
         drop(lease);
         result
+    }
+
+    /// [`Self::load_leased`] into the ONNX host of a runtime profile. Backends
+    /// that hold their sessions themselves load locally and ignore the host.
+    async fn load_leased_on_host(
+        &self,
+        request: OnnxLoadRequest,
+        _host: OnnxHostEndpoint,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        self.load_leased(request, lease).await
     }
 
     /// [`Self::embed_with_admission`] while `lease` is held for as long as the
@@ -146,6 +157,16 @@ where
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
         let lease = OnnxOperationLease::new(self.operation_permit().await?);
         self.backend.load_leased(request, lease).await
+    }
+
+    /// Load into the ONNX host of the runtime profile at `host`.
+    pub async fn load_on_host(
+        &self,
+        request: OnnxLoadRequest,
+        host: OnnxHostEndpoint,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        let lease = OnnxOperationLease::new(self.operation_permit().await?);
+        self.backend.load_leased_on_host(request, host, lease).await
     }
 
     pub async fn unload(

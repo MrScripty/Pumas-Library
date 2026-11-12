@@ -3,6 +3,7 @@ import { api, isAPIAvailable } from '../api/adapter';
 import { APIError } from '../errors';
 import type { CacheStatus, VersionRelease } from '../types/versions';
 import { getLogger } from '../utils/logger';
+import { useCurrentAppGuard } from './useCurrentAppGuard';
 
 const logger = getLogger('useAvailableVersionState');
 
@@ -25,6 +26,7 @@ export function useAvailableVersionState({
   });
   const [isRateLimited, setIsRateLimited] = useState(false);
   const [rateLimitRetryAfter, setRateLimitRetryAfter] = useState<number | null>(null);
+  const isCurrentApp = useCurrentAppGuard(resolvedAppId);
 
   const followupRefreshRef = useRef<NodeJS.Timeout | null>(null);
   // Set when the listing was served from an expired cache, which the backend
@@ -61,6 +63,8 @@ export function useAvailableVersionState({
         ? null
         : await api.get_github_cache_status(resolvedAppId).catch(() => null);
       const result = await api.get_available_versions(forceRefresh, resolvedAppId);
+      // A listing for a previously selected app never replaces this one.
+      if (!isCurrentApp(resolvedAppId)) return;
       if (result.success) {
         listingMayBeStaleRef.current = before !== null && !before.is_valid;
         const mapped = result.versions.map((version) => ({
@@ -101,13 +105,14 @@ export function useAvailableVersionState({
       logger.error('Unknown error fetching available versions', { error });
       throw new APIError(String(error), 'get_available_versions');
     }
-  }, [isEnabled, resolvedAppId]);
+  }, [isCurrentApp, isEnabled, resolvedAppId]);
 
   fetchAvailableVersionsRef.current = fetchAvailableVersions;
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     let waitTimeout: NodeJS.Timeout | null = null;
+    let stopped = false;
 
     if (!isEnabled || !trackAvailableVersions) {
       return () => {};
@@ -117,6 +122,7 @@ export function useAvailableVersionState({
       try {
         if (!isAPIAvailable()) return;
         const status = await api.get_github_cache_status(resolvedAppId);
+        if (stopped) return;
         setCacheStatus(status);
         // Reload a stale listing once its background refresh has completed,
         // however briefly the refresh was visible to this poll.
@@ -161,6 +167,7 @@ export function useAvailableVersionState({
     waitAndStartPolling();
 
     return () => {
+      stopped = true;
       if (interval) clearInterval(interval);
       if (waitTimeout) clearTimeout(waitTimeout);
       if (followupRefreshRef.current) clearTimeout(followupRefreshRef.current);

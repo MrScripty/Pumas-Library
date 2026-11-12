@@ -753,6 +753,13 @@ impl GitHubClient {
         if app_id == AppId::LlamaCpp {
             return Self::expand_llama_cpp_release_variants(releases);
         }
+        if app_id == AppId::OnnxRuntime {
+            return Self::onnx_runtime_installable_releases(
+                releases,
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+            );
+        }
         // Populate archive_size from platform-matched assets
         Self::populate_archive_sizes(&mut releases, app_id);
         releases
@@ -916,6 +923,50 @@ impl GitHubClient {
             && name.contains(platform)
             && name.contains(arch)
             && (name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz"))
+    }
+
+    /// ONNX Runtime releases that export the C API Pumas requests, as one
+    /// installable `+cpu`, `+cuda12` or `+cuda13` entry per build this
+    /// platform has an archive for.
+    ///
+    /// Compatibility is derived from each release's version, so new upstream
+    /// releases appear without a Pumas change.
+    fn onnx_runtime_installable_releases(
+        releases: Vec<GitHubRelease>,
+        os: &str,
+        arch: &str,
+    ) -> Vec<GitHubRelease> {
+        use crate::onnx_runtime_distribution as distribution;
+        releases
+            .into_iter()
+            .flat_map(|release| {
+                let Some(version) = distribution::release_version(&release.tag_name)
+                    .filter(distribution::is_compatible_version)
+                else {
+                    return Vec::new();
+                };
+                distribution::OnnxRuntimeVariant::ALL
+                    .into_iter()
+                    .filter_map(|variant| {
+                        let asset = distribution::select_variant_archive(
+                            &release.assets,
+                            &version,
+                            variant,
+                            os,
+                            arch,
+                        )?
+                        .clone();
+                        let mut listed = release.clone();
+                        listed.tag_name = format!("{}+{}", release.tag_name, variant.id());
+                        listed.name = format!("{} ({})", release.tag_name, variant.label());
+                        listed.archive_size = Some(asset.size);
+                        listed.total_size = Some(asset.size);
+                        listed.assets = vec![asset];
+                        Some(listed)
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     /// Get the latest non-prerelease release.
@@ -1842,6 +1893,50 @@ mod tests {
 
         assert!(cache.get_memory("test/repo").is_none());
         assert!(cache.get_disk("test/repo").is_none());
+    }
+
+    #[test]
+    fn onnx_runtime_listing_offers_each_compatible_build_with_a_platform_archive() {
+        let release = |tag: &str, assets: Vec<GitHubAsset>| {
+            let mut release = github_release(assets);
+            release.tag_name = tag.into();
+            release.name = tag.into();
+            release
+        };
+        let releases = vec![
+            release(
+                "v1.25.0",
+                vec![
+                    github_asset("onnxruntime-linux-x64-gpu-1.25.0.tgz", 9),
+                    github_asset("onnxruntime-linux-x64-1.25.0.tgz", 7),
+                ],
+            ),
+            release(
+                "v1.24.2",
+                vec![github_asset("onnxruntime-win-x64-1.24.2.zip", 5)],
+            ),
+            release(
+                "v1.23.2",
+                vec![github_asset("onnxruntime-linux-x64-1.23.2.tgz", 3)],
+            ),
+        ];
+
+        let listed = GitHubClient::onnx_runtime_installable_releases(releases, "linux", "x86_64");
+
+        let tags: Vec<_> = listed
+            .iter()
+            .map(|release| release.tag_name.as_str())
+            .collect();
+        assert_eq!(tags, vec!["v1.25.0+cpu", "v1.25.0+cuda12"]);
+        assert_eq!(listed[0].name, "v1.25.0 (CPU)");
+        assert_eq!(listed[0].archive_size, Some(7));
+        assert_eq!(listed[0].assets.len(), 1);
+        assert_eq!(listed[0].assets[0].name, "onnxruntime-linux-x64-1.25.0.tgz");
+        assert_eq!(listed[1].name, "v1.25.0 (CUDA 12)");
+        assert_eq!(
+            listed[1].assets[0].name,
+            "onnxruntime-linux-x64-gpu-1.25.0.tgz"
+        );
     }
 
     #[test]

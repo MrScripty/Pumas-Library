@@ -48,6 +48,7 @@ pub mod models;
 pub mod network;
 #[cfg(feature = "onnx-runtime")]
 pub mod onnx_runtime;
+pub mod onnx_runtime_distribution;
 pub mod platform;
 pub mod plugins;
 pub mod process;
@@ -84,11 +85,12 @@ pub use onnx_runtime::{
     FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingBackendKind,
     OnnxEmbeddingLimits, OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig,
     OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxEmbeddingUsage,
-    OnnxExecutionProvider, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxModelPath,
-    OnnxOutputTensorSelection, OnnxRerankRequest, OnnxRerankResponse, OnnxRerankScore,
-    OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeSession, OnnxScoreActivation,
-    OnnxSessionManager, OnnxSessionState, OnnxSessionStatus, OnnxSessionTask, OnnxTokenizedBatch,
-    OnnxTokenizedInput, OnnxTokenizer, RealOnnxEmbeddingBackend,
+    OnnxExecutionProvider, OnnxHostEndpoint, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId,
+    OnnxModelPath, OnnxOutputTensorSelection, OnnxRerankRequest, OnnxRerankResponse,
+    OnnxRerankScore, OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeLibrary,
+    OnnxRuntimeSession, OnnxScoreActivation, OnnxSessionManager, OnnxSessionState,
+    OnnxSessionStatus, OnnxSessionTask, OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer,
+    RealOnnxEmbeddingBackend, RemoteOnnxEmbeddingBackend,
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::ProcessManager;

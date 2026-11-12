@@ -44,7 +44,12 @@ use crate::{PumasError, Result};
 use tokio::sync::broadcast;
 
 use launch_specs::derive_managed_profile_launch_specs;
-pub use launch_specs::{torch_api_token, TORCH_API_TOKEN_HEADER};
+#[cfg(feature = "onnx-runtime")]
+pub(crate) use launch_specs::onnx_host_executable;
+pub use launch_specs::{
+    onnx_device_mode_arg, parse_onnx_device_mode, register_onnx_host_executable, torch_api_token,
+    TORCH_API_TOKEN_HEADER,
+};
 pub(crate) use launch_specs::{torch_model_roots, TORCH_MODEL_ROOTS_ENV};
 pub use launch_strategy::{
     RuntimeProfileBinaryLaunchKind, RuntimeProfileInProcessRuntimeKind,
@@ -686,6 +691,7 @@ impl RuntimeProfileService {
                     pid: None,
                     log_path: None,
                     last_error: None,
+                    runtime_version: None,
                 }))
             })
             .await
@@ -1367,7 +1373,38 @@ async fn validate_profile_config(
     }
 
     validate_profile_provider_behavior(profile, provider_registry)?;
+    validate_profile_runtime_version(profile)?;
     provider_adapters.validate_profile(profile).await
+}
+
+/// A pinned runtime version names one installed version directory of a managed
+/// profile's runtime. Whether it is installed is checked where the version
+/// manager is available (profile save and launch in the RPC host).
+fn validate_profile_runtime_version(profile: &RuntimeProfileConfig) -> Result<()> {
+    let Some(version) = profile.runtime_version.as_deref() else {
+        return Ok(());
+    };
+    if profile.management_mode != RuntimeManagementMode::Managed {
+        return Err(PumasError::InvalidParams {
+            message: "runtime_version applies only to managed runtime profiles; an external \
+                      profile does not launch a Pumas-installed runtime"
+                .to_string(),
+        });
+    }
+    let is_single_component = !version.is_empty()
+        && version.trim() == version
+        && version != "."
+        && version != ".."
+        && !version.contains(['/', '\\', '\0']);
+    if !is_single_component {
+        return Err(PumasError::InvalidParams {
+            message: format!(
+                "runtime_version {version:?} is not an installed version tag; choose one of the \
+                 runtime's installed versions or leave it empty to follow the active version"
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn validate_profile_provider_behavior(
@@ -1482,6 +1519,7 @@ mod tests {
             port: RuntimePort::parse(18080).ok(),
             device: RuntimeDeviceSettings::default(),
             scheduler: RuntimeSchedulerSettings::default(),
+            runtime_version: None,
         }
     }
 
@@ -1500,6 +1538,7 @@ mod tests {
                 ..RuntimeDeviceSettings::default()
             },
             scheduler: RuntimeSchedulerSettings::default(),
+            runtime_version: None,
         }
     }
 
@@ -1585,6 +1624,38 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("managed in-process"));
+    }
+
+    #[tokio::test]
+    async fn runtime_version_must_be_one_version_tag_of_a_managed_profile() {
+        let mut profile = managed_llama_cpp_profile("llama-pinned");
+        profile.runtime_version = Some("b9082+cuda-12".into());
+        validate_builtin_profile_config(&profile).await.unwrap();
+
+        for invalid in ["", " b9082", "../b9082", "b9082/x", "..", "a\\b"] {
+            profile.runtime_version = Some(invalid.into());
+            let error = validate_builtin_profile_config(&profile)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("not an installed version tag"),
+                "{invalid}: {error}"
+            );
+        }
+
+        let mut external = RuntimeProfileConfig::default_ollama();
+        external.management_mode = RuntimeManagementMode::External;
+        external.endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:11434").ok();
+        external.runtime_version = Some("v0.5.0".into());
+        let error = validate_builtin_profile_config(&external)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("only to managed runtime profiles"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
@@ -2171,6 +2242,7 @@ mod tests {
                 pid: Some(1234),
                 log_path: None,
                 last_error: None,
+                runtime_version: None,
             })
             .unwrap();
         let running = service

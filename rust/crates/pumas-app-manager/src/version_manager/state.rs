@@ -214,7 +214,7 @@ impl VersionState {
         ))
     }
     async fn native_versions_lock(&self) -> Result<Option<NativeVersionsLock>> {
-        if self.app_id != AppId::LlamaCpp {
+        if !self.app_id.uses_native_archive_installer() {
             return Ok(None);
         }
         NativeVersionsLock::acquire(self.launcher_root.join(self.app_id.versions_dir_name()))
@@ -646,11 +646,12 @@ impl VersionState {
         } else if let Some(lock) = native_lock {
             let metadata = self.metadata_manager.clone();
             let selected = tag.to_owned();
+            let app_id = self.app_id;
             self.mutation_tasks
                 .leased_transaction(lock, move || {
                     std::fs::write(&active_file, &selected)
                         .map_err(|error| PumasError::io_with_path(error, &active_file))?;
-                    metadata.set_last_selected_version(Some(&selected), Some(AppId::LlamaCpp))
+                    metadata.set_last_selected_version(Some(&selected), Some(app_id))
                 })
                 .await?;
         } else {
@@ -715,9 +716,10 @@ impl VersionState {
         } else if let Some(lock) = native_lock {
             let metadata = self.metadata_manager.clone();
             let selected = tag.map(str::to_owned);
+            let app_id = self.app_id;
             self.mutation_tasks
                 .leased_transaction(lock, move || {
-                    metadata.set_default_version(selected.as_deref(), Some(AppId::LlamaCpp))
+                    metadata.set_default_version(selected.as_deref(), Some(app_id))
                 })
                 .await?;
         } else {
@@ -769,14 +771,14 @@ impl VersionState {
     ) -> Result<()> {
         self.mutation_tasks.ensure_open()?;
         let _lock = self.torch_versions_lock()?;
-        let _native_lock = if self.app_id == AppId::LlamaCpp {
+        let _native_lock = if self.app_id.uses_native_archive_installer() {
             Some(NativeVersionsLock::try_acquire(
                 &self.launcher_root.join(self.app_id.versions_dir_name()),
             )?)
         } else {
             None
         };
-        if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp) {
+        if self.app_id == AppId::Torch || self.app_id.uses_native_archive_installer() {
             let versions = self.metadata_manager.load_versions(Some(self.app_id))?;
             self.installed_tags = versions.installed.keys().cloned().collect();
             self.installed_metadata = versions.installed;
@@ -814,11 +816,12 @@ impl VersionState {
         if let Some(lock) = native_lock {
             let metadata = self.metadata_manager.clone();
             let removed = tag.to_owned();
+            let app_id = self.app_id;
             let marker = super::active_version_path(&self.launcher_root, self.app_id);
             let remove_marker = self.active_version.as_deref() == Some(tag);
             self.mutation_tasks
                 .leased_transaction(lock, move || {
-                    metadata.remove_installed_version(&removed, Some(AppId::LlamaCpp))?;
+                    metadata.remove_installed_version(&removed, Some(app_id))?;
                     if remove_marker {
                         match std::fs::remove_file(&marker) {
                             Ok(()) => {}
@@ -1050,16 +1053,14 @@ impl VersionState {
                 }
                 return Self::contains_llama_cpp_server_binary(version_path).await;
             }
+            AppId::OnnxRuntime => vec![version_path
+                .join(pumas_library::onnx_runtime_distribution::library_relative_path())],
             AppId::Torch => vec![
                 version_path.join("runtime.json"),
                 version_path.join("serve.py"),
                 pumas_library::platform::paths::venv_python(version_path),
                 version_path.join("requirements.txt"),
             ],
-            _ => {
-                // Generic check - just need the directory to exist
-                vec![version_path.to_path_buf()]
-            }
         };
 
         for required_path in required {

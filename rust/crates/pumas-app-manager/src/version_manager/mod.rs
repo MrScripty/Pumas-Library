@@ -49,6 +49,8 @@ mod installer;
 mod launcher;
 mod managed_depot_lease;
 mod managed_python;
+#[cfg(all(test, unix))]
+mod onnx_runtime_tests;
 mod operation_receipt;
 mod progress;
 pub mod size_calculator;
@@ -125,7 +127,8 @@ async fn clear_matching_completed_progress(
         return;
     };
     if CompletedProgressIdentity::capture(&current).as_ref() != Some(&expected)
-        || (app_id == AppId::LlamaCpp && installer::has_native_cleanup_pending(&current))
+        || (app_id.uses_native_archive_installer()
+            && installer::has_native_cleanup_pending(&current))
     {
         return;
     }
@@ -232,12 +235,12 @@ fn torch_process_blocker(pid_file: &Path) -> Option<String> {
 }
 
 fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
-    // Preserve the established native-runtime marker; Torch must not overwrite
-    // llama.cpp selection when a user activates an image runtime.
-    root.join(if app_id == AppId::Torch {
-        ".active-version-torch"
-    } else {
-        ".active-version"
+    // Preserve the established native-runtime marker; Torch and ONNX Runtime
+    // must not overwrite llama.cpp selection when a user activates them.
+    root.join(match app_id {
+        AppId::Torch => ".active-version-torch",
+        AppId::OnnxRuntime => ".active-version-onnx-runtime",
+        AppId::Ollama | AppId::LlamaCpp => ".active-version",
     })
 }
 
@@ -339,8 +342,9 @@ impl VersionManager {
 
     /// Create a new version manager.
     ///
-    /// llama.cpp installation requires [`Self::new_with_acquisition`] with the
-    /// application's existing shared acquisition owner.
+    /// llama.cpp and ONNX Runtime installation require
+    /// [`Self::new_with_acquisition`] with the application's existing shared
+    /// acquisition owner.
     ///
     /// # Arguments
     ///
@@ -355,15 +359,6 @@ impl VersionManager {
         app_id: AppId,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
-        if !app_id.has_version_manager() {
-            return Err(PumasError::Config {
-                message: format!(
-                    "{} is provided in-process and does not use the version manager",
-                    app_id
-                ),
-            });
-        }
-
         let launcher_root = pumas_library::platform::paths::absolute_launcher_root(&launcher_root)?;
 
         if !path_exists(&launcher_root).await? {
@@ -502,8 +497,9 @@ impl VersionManager {
         Ok(manager)
     }
 
-    /// Construct the llama.cpp manager with the application's existing shared
-    /// acquisition owner. A second service/store is never created here.
+    /// Construct a native-archive manager (llama.cpp or ONNX Runtime) with the
+    /// application's existing shared acquisition owner. A second service/store
+    /// is never created here.
     pub async fn new_with_acquisition(
         launcher_root: impl Into<PathBuf>,
         app_id: AppId,
@@ -518,14 +514,13 @@ impl VersionManager {
         acquisition: Arc<AcquisitionService>,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
-        if app_id != AppId::LlamaCpp {
-            return Err(PumasError::Config {
-                message: "Shared artifact acquisition is currently required for llama.cpp".into(),
-            });
-        }
+        let runtime =
+            installer::NativeRuntime::for_app(app_id).map_err(|_| PumasError::Config {
+                message: "Shared artifact acquisition is used by llama.cpp and ONNX Runtime".into(),
+            })?;
         let mut manager =
             Self::new_with_github_client(launcher_root, app_id, configured_client).await?;
-        let consumer = Arc::new(acquisition.open_consumer("runtime.llama.cpp")?);
+        let consumer = Arc::new(acquisition.open_consumer(runtime.consumer_owner())?);
         manager.acquisition_consumer = Some(consumer.clone());
         let store = acquisition.store().clone();
         let records = consumer
@@ -543,7 +538,7 @@ impl VersionManager {
         .with_acquisition_consumer(manager.acquisition_consumer.clone())
         .with_github_client(manager.github_client.clone());
         if let Err(error) = installer
-            .reconcile_retained_llama_cpp(records.into_values().collect())
+            .reconcile_retained_native_archives(records.into_values().collect())
             .await
         {
             let settlement = manager.shutdown_installations().await;
@@ -953,7 +948,7 @@ impl VersionManager {
             return Ok(false);
         }
 
-        if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp)
+        if (self.app_id == AppId::Torch || self.app_id.uses_native_archive_installer())
             && !self.torch_control.request_cancel()
         {
             return Ok(false);
@@ -1075,10 +1070,13 @@ impl VersionManager {
         tag: &str,
         preview_id: Option<&str>,
     ) -> Result<mpsc::Receiver<ProgressUpdate>> {
-        if self.app_id == AppId::LlamaCpp && self.acquisition_consumer.is_none() {
+        if self.app_id.uses_native_archive_installer() && self.acquisition_consumer.is_none() {
+            let runtime = installer::NativeRuntime::for_app(self.app_id)?;
             return Err(PumasError::Config {
-                message: "llama.cpp installation requires the shared artifact acquisition service"
-                    .into(),
+                message: format!(
+                    "{} installation requires the shared artifact acquisition service",
+                    runtime.display_name()
+                ),
             });
         }
         if self.app_id == AppId::Torch && torch_alternatives::stable_release_version(tag).is_none()
@@ -1183,7 +1181,7 @@ impl VersionManager {
                 });
             }
             self.cancel_flag.store(false, Ordering::SeqCst);
-            if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp) {
+            if self.app_id == AppId::Torch || self.app_id.uses_native_archive_installer() {
                 self.torch_control.start();
             }
             *installing = Some(tag.to_string());
@@ -1291,7 +1289,7 @@ impl VersionManager {
             }
             .await;
 
-            if matches!(app_id, AppId::Torch | AppId::LlamaCpp) {
+            if app_id == AppId::Torch || app_id.uses_native_archive_installer() {
                 torch_control.finish();
             }
 
@@ -1393,7 +1391,15 @@ impl VersionManager {
         &self,
         tag: &str,
     ) -> Result<pumas_library::network::GitHubRelease> {
-        if self.app_id == AppId::LlamaCpp {
+        if self.app_id == AppId::OnnxRuntime {
+            // The listing omits incompatible releases; say why one is refused.
+            if let Some(reason) =
+                pumas_library::onnx_runtime_distribution::incompatibility_reason(tag)
+            {
+                return Err(PumasError::InstallationFailed { message: reason });
+            }
+        }
+        if self.app_id.uses_native_archive_installer() {
             return self
                 .get_available_releases(false)
                 .await?
@@ -1476,7 +1482,7 @@ impl VersionManager {
     pub async fn remove_version(&self, tag: &str) -> Result<bool> {
         let _install_guard = self.install_lock.lock().await;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let native_versions_lock = if self.app_id == AppId::LlamaCpp {
+        let native_versions_lock = if self.app_id.uses_native_archive_installer() {
             Some(installer::NativeVersionsLock::acquire(self.versions_dir()).await?)
         } else {
             None
@@ -3101,7 +3107,7 @@ mod tests {
             .with_acquisition_consumer(Some(consumer.clone()));
         let error = tokio::time::timeout(
             Duration::from_secs(5),
-            direct.reconcile_retained_llama_cpp(records.into_values().collect()),
+            direct.reconcile_retained_native_archives(records.into_values().collect()),
         )
         .await
         .expect("injected recovery worker must refuse without waiting for a source")
@@ -3211,7 +3217,8 @@ mod tests {
             .with_acquisition_consumer(Some(missing_custody_consumer.clone()));
         let missing_custody = tokio::time::timeout(
             Duration::from_secs(5),
-            missing_custody_installer.reconcile_retained_llama_cpp(records.into_values().collect()),
+            missing_custody_installer
+                .reconcile_retained_native_archives(records.into_values().collect()),
         )
         .await
         .expect("missing-custody recovery must stop promptly")
@@ -3462,7 +3469,8 @@ mod tests {
             Ok(Ok(records)) => Some(
                 tokio::time::timeout(
                     Duration::from_secs(5),
-                    direct_installer.reconcile_retained_llama_cpp(records.into_values().collect()),
+                    direct_installer
+                        .reconcile_retained_native_archives(records.into_values().collect()),
                 )
                 .await,
             ),
@@ -6944,18 +6952,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn onnx_runtime_is_rejected_by_version_manager() {
+    async fn onnx_runtime_install_requires_the_shared_acquisition_service() {
         let temp_dir = TempDir::new().unwrap();
+        let manager = VersionManager::new(temp_dir.path(), AppId::OnnxRuntime)
+            .await
+            .unwrap();
+        assert!(manager.versions_dir().ends_with("onnx-runtime-versions"));
 
-        let error = match VersionManager::new(temp_dir.path(), AppId::OnnxRuntime).await {
-            Ok(_) => panic!("ONNX Runtime should not create a version manager"),
-            Err(error) => error,
-        };
+        let error = manager.install_version("v1.24.2+cpu").await.unwrap_err();
 
         assert!(
             error
                 .to_string()
-                .contains("does not use the version manager"),
+                .contains("ONNX Runtime installation requires the shared artifact acquisition"),
             "{error}"
         );
     }

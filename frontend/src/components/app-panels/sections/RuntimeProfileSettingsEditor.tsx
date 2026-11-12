@@ -1,3 +1,4 @@
+import type { InstalledRuntimeVersionsState } from '../../../hooks/useInstalledRuntimeVersions';
 import type { RuntimeProfileStatus } from '../../../types/api-runtime-profiles';
 import { RuntimeProfileSettingsActions } from './RuntimeProfileSettingsActions';
 import { RuntimeProfileSettingsFields } from './RuntimeProfileSettingsFields';
@@ -8,6 +9,7 @@ import type {
 
 type RuntimeProfileEditorProps = {
   draft: RuntimeProfileDraft;
+  installedVersions: InstalledRuntimeVersionsState;
   selectedProfileId: string | null;
   selectedStatus: RuntimeProfileStatus | null;
   isSaving: boolean;
@@ -22,6 +24,7 @@ type RuntimeProfileEditorProps = {
 
 export function RuntimeProfileEditor({
   draft,
+  installedVersions,
   selectedProfileId,
   selectedStatus,
   isSaving,
@@ -40,6 +43,7 @@ export function RuntimeProfileEditor({
     <div className="space-y-3 px-3 py-3 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)]">
       <RuntimeProfileSettingsFields
         draft={draft}
+        installedVersions={installedVersions}
         isExistingProfile={isExistingProfile}
         isManagedProfile={isManagedProfile}
         onUpdateDraft={onUpdateDraft}

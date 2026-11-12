@@ -21,6 +21,7 @@ export function profileToDraft(profile: RuntimeProfileConfig): RuntimeProfileDra
     device_mode: profile.device.mode,
     device_id: profile.device.device_id ?? '',
     gpu_layers: profile.device.gpu_layers?.toString() ?? '',
+    runtime_version: profile.runtime_version ?? '',
   };
 }
 
@@ -39,6 +40,7 @@ export function newProfileDraft(provider: RuntimeProviderId): RuntimeProfileDraf
     device_mode: descriptor.deviceModes[0] ?? 'auto',
     device_id: '',
     gpu_layers: '',
+    runtime_version: '',
   };
 }
 
@@ -71,7 +73,17 @@ export function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig
       max_concurrent_models: null,
       keep_alive_seconds: null,
     },
+    runtime_version: draftRuntimeVersion(draft),
   };
+}
+
+// A pin applies only to profiles Pumas launches; external profiles and an
+// empty selection follow the runtime's active version.
+function draftRuntimeVersion(draft: RuntimeProfileDraft): string | null {
+  if (draft.management_mode !== 'managed') {
+    return null;
+  }
+  return draft.runtime_version.trim() || null;
 }
 
 function parseLlamaCppGpuLayers(draft: RuntimeProfileDraft): number | null {

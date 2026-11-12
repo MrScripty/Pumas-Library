@@ -1,4 +1,6 @@
 import type {
+  RuntimeProfileConfig as DesktopRuntimeProfileConfig,
+  RuntimeProfileStatus as DesktopRuntimeProfileStatus,
   RuntimeProfileEvent as DesktopRuntimeProfileEvent,
   RuntimeProfileEventKind as DesktopRuntimeProfileEventKind,
   RuntimeProfileUpdateFeed as DesktopRuntimeProfileUpdateFeed,
@@ -42,18 +44,10 @@ export interface RuntimeSchedulerSettings {
   keep_alive_seconds?: number | null;
 }
 
-export interface RuntimeProfileConfig {
-  profile_id: string;
-  provider: RuntimeProviderId;
-  provider_mode: RuntimeProviderMode;
-  management_mode: RuntimeManagementMode;
-  name: string;
-  enabled: boolean;
-  endpoint_url?: string | null;
-  port?: number | null;
-  device: RuntimeDeviceSettings;
-  scheduler: RuntimeSchedulerSettings;
-}
+// Declared once by the backend (`RuntimeProfileConfig`) and generated. A managed
+// profile's `runtime_version` pins the installed runtime version it launches;
+// absent or null follows the runtime's active version.
+export type RuntimeProfileConfig = DesktopRuntimeProfileConfig;
 
 export interface ModelRuntimeRoute {
   provider: RuntimeProviderId;
@@ -62,14 +56,9 @@ export interface ModelRuntimeRoute {
   auto_load: boolean;
 }
 
-export interface RuntimeProfileStatus {
-  profile_id: string;
-  state: RuntimeLifecycleState;
-  endpoint_url?: string | null;
-  pid?: number | null;
-  log_path?: string | null;
-  last_error?: string | null;
-}
+// Declared once by the backend (`RuntimeProfileStatus`) and generated.
+// `runtime_version` is the installed version a running instance launched from.
+export type RuntimeProfileStatus = DesktopRuntimeProfileStatus;
 
 export interface RuntimeProfilesSnapshot {
   schema_version: number;

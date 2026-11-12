@@ -376,7 +376,7 @@ impl HuggingFaceClient {
             repo_id: repo_id.to_string(),
             lfs_files,
             regular_files,
-            regular_file_details,
+            regular_file_details: Some(regular_file_details),
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None, // Would need separate API call to get this
             cache_version: REPO_FILE_TREE_VERSION,

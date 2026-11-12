@@ -108,6 +108,30 @@ pub(crate) fn classify(path: &str) -> CompanionKind {
     }
 }
 
+/// Extensions of LFS-stored files that are documentation, samples or
+/// metadata. Regular (non-LFS) files are small by construction and are kept by
+/// rule; an LFS file is large, and anything not known to be one of these may be
+/// another framework's weights (`tf_model.h5`, `rust_model.ot`, `*.tflite`),
+/// calibration data (`imatrix.dat`) or checkpoints, so it is not a companion.
+const LFS_COMPANION_EXTENSIONS: &[&str] = &[
+    // Text metadata, tokenizers and chat templates.
+    "json", "jsonl", "txt", "md", "markdown", "jinja", "yaml", "yml", "toml", "csv", "tsv", "model",
+    "tiktoken", "spm", "vocab", "bpe", // Documentation images.
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", // Demo audio samples.
+    "wav", "mp3", "flac", "ogg", "m4a",
+];
+
+/// Whether an LFS-stored file is a companion by what it is: a model card,
+/// license, code, or a documentation, sample or metadata file.
+pub(crate) fn is_lfs_companion(path: &str) -> bool {
+    if classify(path) != CompanionKind::Metadata {
+        return true;
+    }
+    let name = basename(path).to_ascii_lowercase();
+    name.rsplit_once('.')
+        .is_some_and(|(_, extension)| LFS_COMPANION_EXTENSIONS.contains(&extension))
+}
+
 /// The directories whose companions travel with a selected set of weights.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CompanionScope {
@@ -162,6 +186,12 @@ fn is_sidecar_of(path: &str, weight: &str) -> bool {
     name.strip_prefix(weight_name)
         .and_then(|rest| rest.chars().next())
         .is_some_and(|separator| matches!(separator, '.' | '_' | '-'))
+}
+
+/// Whether a file is a sidecar of a selected weight, such as the external
+/// data of a selected ONNX graph. It is part of the selected weights.
+pub(crate) fn belongs_to_selected_weight(path: &str, selected: &BTreeSet<&str>) -> bool {
+    selected.iter().any(|weight| is_sidecar_of(path, weight))
 }
 
 /// Whether a candidate belongs to a weight variant that was not selected.
@@ -278,8 +308,10 @@ fn is_markdown(path: &str) -> bool {
     path.to_ascii_lowercase().ends_with(".md")
 }
 
-/// Scan a model directory for stored companion files. Blocking.
-pub(crate) fn scan_companions(model_dir: &Path) -> Result<CompanionInventory> {
+/// Every visible file in a model directory with its size, as `/`-separated
+/// relative paths. Hidden entries (Pumas markers, staging, `.git*`) are
+/// skipped; companions and weights are never hidden. Blocking.
+pub(crate) fn model_files(model_dir: &Path) -> Result<Vec<(String, u64)>> {
     let mut files = Vec::new();
     for entry in walkdir::WalkDir::new(model_dir)
         .follow_links(false)
@@ -294,37 +326,74 @@ pub(crate) fn scan_companions(model_dir: &Path) -> Result<CompanionInventory> {
         if !entry.file_type().is_file() {
             continue;
         }
-        let Ok(relative) = entry.path().strip_prefix(model_dir) else {
-            continue;
-        };
-        let Some(relative) = relative
-            .components()
-            .map(|component| component.as_os_str().to_str())
-            .collect::<Option<Vec<_>>>()
+        let Some(relative) = entry
+            .path()
+            .strip_prefix(model_dir)
+            .ok()
+            .and_then(|relative| {
+                relative
+                    .components()
+                    .map(|component| component.as_os_str().to_str())
+                    .collect::<Option<Vec<_>>>()
+            })
             .map(|components| components.join("/"))
         else {
             continue;
         };
-        if !is_companion_candidate(&relative) {
-            continue;
-        }
-        let size_bytes = entry
+        let size = entry
             .metadata()
             .map_err(|error| PumasError::Other(format!("Failed to stat {relative}: {error}")))?
             .len();
-        files.push(StoredCompanion {
-            kind: classify(&relative),
-            path: relative,
-            size_bytes,
-        });
+        files.push((relative, size));
     }
-    files.sort_by(|left, right| left.path.cmp(&right.path));
+    files.sort();
+    Ok(files)
+}
+
+/// Scan a model directory for stored companion files. Blocking.
+pub(crate) fn scan_companions(model_dir: &Path) -> Result<CompanionInventory> {
+    let files = model_files(model_dir)?
+        .into_iter()
+        .filter(|(path, _)| is_companion_candidate(path))
+        .map(|(path, size_bytes)| StoredCompanion {
+            kind: classify(&path),
+            path,
+            size_bytes,
+        })
+        .collect();
     let (auto_map_modules, external_auto_map_references) = auto_map_code(model_dir)?;
     Ok(CompanionInventory {
         files,
         auto_map_modules,
         external_auto_map_references,
     })
+}
+
+/// The code recorded for a model: its existing sources, stored `*.py` files
+/// and the code `auto_map` names, sorted and deduplicated.
+pub(crate) fn custom_code_sources(
+    existing: Option<&[String]>,
+    inventory: &CompanionInventory,
+) -> Vec<String> {
+    existing
+        .unwrap_or_default()
+        .iter()
+        .cloned()
+        .chain(
+            inventory
+                .of_kind(CompanionKind::Code)
+                .map(|file| file.path.clone()),
+        )
+        .chain(inventory.auto_map_modules.iter().cloned())
+        .chain(inventory.external_auto_map_references.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Whether `auto_map` names code a transformers loader would have to execute.
+pub(crate) fn names_custom_code(inventory: &CompanionInventory) -> bool {
+    !inventory.auto_map_modules.is_empty() || !inventory.external_auto_map_references.is_empty()
 }
 
 /// Module files and external references named by `auto_map` in the root
@@ -470,27 +539,13 @@ pub(crate) fn record_companions(
         }
     }
 
-    let mut sources = metadata
-        .custom_code_sources
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    sources.extend(
-        inventory
-            .of_kind(CompanionKind::Code)
-            .map(|file| file.path.clone()),
-    );
-    sources.extend(inventory.auto_map_modules.iter().cloned());
-    sources.extend(inventory.external_auto_map_references.iter().cloned());
-    let next_sources = (!sources.is_empty()).then(|| sources.into_iter().collect::<Vec<_>>());
+    let sources = custom_code_sources(metadata.custom_code_sources.as_deref(), inventory);
+    let next_sources = (!sources.is_empty()).then_some(sources);
     if next_sources.is_some() && metadata.custom_code_sources != next_sources {
         metadata.custom_code_sources = next_sources;
         changed = true;
     }
-    let needs_code = !inventory.auto_map_modules.is_empty()
-        || !inventory.external_auto_map_references.is_empty();
-    if needs_code && metadata.requires_custom_code != Some(true) {
+    if names_custom_code(inventory) && metadata.requires_custom_code != Some(true) {
         metadata.requires_custom_code = Some(true);
         changed = true;
     }

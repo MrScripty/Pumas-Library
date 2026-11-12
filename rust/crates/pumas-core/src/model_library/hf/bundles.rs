@@ -159,7 +159,7 @@ mod tests {
                 .iter()
                 .map(|path| (*path).to_string())
                 .collect(),
-            regular_file_details: Vec::new(),
+            regular_file_details: None,
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None,
             cache_version: REPO_FILE_TREE_VERSION,

@@ -218,17 +218,29 @@ async fn record_stored_companions(
     let model_dir = model_dir.to_path_buf();
     library
         .run_import_blocking("record stored companion files", move || {
-            let mut metadata = metadata;
-            let inventory = super::companion_files::scan_companions(&model_dir)?;
-            super::companion_files::record_companions(
-                &model_dir,
-                &mut metadata,
-                &inventory,
-                source.as_ref(),
-            )?;
-            Ok::<_, PumasError>(metadata)
+            // Best effort: an unreadable card or license must not fail the
+            // import of the weights it travels with. The record is retried by
+            // the companion backfill, which reports its own reasons.
+            let mut recorded = metadata.clone();
+            match super::companion_files::scan_companions(&model_dir).and_then(|inventory| {
+                super::companion_files::record_companions(
+                    &model_dir,
+                    &mut recorded,
+                    &inventory,
+                    source.as_ref(),
+                )
+            }) {
+                Ok(_) => recorded,
+                Err(error) => {
+                    tracing::warn!(
+                        "Could not record the model card, license or code stored in {}: {error}",
+                        model_dir.display()
+                    );
+                    metadata
+                }
+            }
         })
-        .await?
+        .await
 }
 
 impl ModelImporter {
@@ -1914,6 +1926,39 @@ mod tests {
             )
             .unwrap();
         (temp_dir, library)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unreadable_license_does_not_fail_recording_the_import() {
+        use std::os::unix::fs::PermissionsExt;
+        let (temp, library) = setup().await;
+        let model_dir = temp.path().join("llm/acme/model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("README.md"), "# card").unwrap();
+        let license = model_dir.join("LICENSE");
+        std::fs::write(&license, "Apache").unwrap();
+        std::fs::set_permissions(&license, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&license).is_ok() {
+            // Running with privileges that ignore file modes; nothing to prove.
+            return;
+        }
+        let metadata = ModelMetadata {
+            model_id: Some("llm/acme/model".into()),
+            ..Default::default()
+        };
+        let recorded = record_stored_companions(
+            &library,
+            &model_dir,
+            metadata,
+            Some("acme/model"),
+            &DownloadRevision::legacy_main(),
+        )
+        .await
+        .unwrap();
+        std::fs::set_permissions(&license, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(recorded.model_id.as_deref(), Some("llm/acme/model"));
+        assert!(recorded.license_artifact.is_none());
     }
 
     pub(super) async fn custody_fixture() -> (

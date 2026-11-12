@@ -759,10 +759,11 @@ pub struct RepoFileTree {
     pub lfs_files: Vec<LfsFileInfo>,
     /// Non-LFS files
     pub regular_files: Vec<String>,
-    /// Size and Git blob id for each non-LFS file the Hub described.
-    /// Older cache entries and fixtures leave this empty.
+    /// Size and Git blob id for each non-LFS file the Hub described. `None`
+    /// for a tree cached before these were recorded; callers that need them
+    /// refetch the tree.
     #[serde(default)]
-    pub regular_file_details: Vec<RegularFileInfo>,
+    pub regular_file_details: Option<Vec<RegularFileInfo>>,
     /// When this was cached
     pub cached_at: String,
     /// Last modified timestamp from HuggingFace (for cache invalidation)
@@ -771,6 +772,16 @@ pub struct RepoFileTree {
     /// Cache format version — old/missing entries are treated as stale.
     #[serde(default)]
     pub cache_version: u32,
+}
+
+impl RepoFileTree {
+    /// The Hub's size and Git blob id for one regular file, when recorded.
+    pub(crate) fn regular_file_detail(&self, filename: &str) -> Option<&RegularFileInfo> {
+        self.regular_file_details
+            .as_deref()?
+            .iter()
+            .find(|detail| detail.filename == filename)
+    }
 }
 
 /// Optional filter for listing models that still need metadata review.

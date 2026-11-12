@@ -7,10 +7,12 @@
 //! `upstream_revision`) or the model directory name.
 
 use crate::model_library::companion_files::{
-    record_companions, scan_companions, CompanionInventory, CompanionKind, CompanionSource,
+    custom_code_sources, model_files, names_custom_code, record_companions, scan_companions,
+    CompanionKind, CompanionSource,
 };
 use crate::model_library::{
-    place_companions, CompanionBackfillTarget, CompanionPlanOutcome, LocalWeight, ModelLibrary,
+    place_companions, CompanionBackfillTarget, CompanionFetchPlan, CompanionPlanOutcome,
+    HuggingFaceClient, LocalWeight, ModelLibrary,
 };
 use crate::models::{
     CompanionBackfillFile, CompanionBackfillModelReport, CompanionBackfillOutcome,
@@ -18,6 +20,7 @@ use crate::models::{
     ModelDocument, ModelDocumentsResponse, ModelMetadata, StorageKind,
 };
 use crate::{PumasApi, PumasError, Result};
+use futures::StreamExt;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -45,18 +48,20 @@ impl PumasApi {
     ) -> Result<CompanionBackfillReport> {
         let primary = self.try_primary()?;
         existing_model_dir(&primary.model_library, model_id).await?;
-        let report = backfill_one(
+        let planned = plan_one(
             primary.model_library.clone(),
             primary.hf_client.clone(),
-            model_id,
-            dry_run,
+            model_id.to_string(),
         )
         .await;
+        let report = execute(&primary.model_library, planned, dry_run).await;
         Ok(CompanionBackfillReport::from_models(dry_run, vec![report]))
     }
 
-    /// Backfill every library model in turn. Models that cannot be backfilled
-    /// are reported as skipped with a reason; one failure does not stop the rest.
+    /// Backfill every library model. Planning (revision and tree reads) runs
+    /// with bounded concurrency; fetching and placement stay one model at a
+    /// time. Models that cannot be backfilled are reported as skipped with a
+    /// reason; one failure does not stop the rest.
     pub async fn backfill_library_companion_files(
         &self,
         dry_run: bool,
@@ -70,17 +75,16 @@ impl PumasApi {
             .map(|record| record.id)
             .collect::<Vec<_>>();
         model_ids.sort();
-        let mut reports = Vec::with_capacity(model_ids.len());
-        for model_id in model_ids {
-            reports.push(
-                backfill_one(
-                    primary.model_library.clone(),
-                    primary.hf_client.clone(),
-                    &model_id,
-                    dry_run,
-                )
-                .await,
-            );
+        let library = primary.model_library.clone();
+        let client = primary.hf_client.clone();
+        let plans = futures::stream::iter(model_ids)
+            .map(|model_id| plan_one(library.clone(), client.clone(), model_id))
+            .buffered(crate::config::NetworkConfig::HF_METADATA_REQUEST_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        let mut reports = Vec::with_capacity(plans.len());
+        for planned in plans {
+            reports.push(execute(&primary.model_library, planned, dry_run).await);
         }
         Ok(CompanionBackfillReport::from_models(dry_run, reports))
     }
@@ -143,17 +147,6 @@ fn model_documents(
         })
         .collect::<Result<Vec<_>>>()?;
     licenses.sort_by_key(|license| Some(&license.path) != primary_license.as_ref());
-    let mut custom_code_sources = metadata
-        .custom_code_sources
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .chain(inventory.auto_map_modules.iter().cloned())
-        .chain(inventory.external_auto_map_references.iter().cloned())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    custom_code_sources.sort();
     Ok(ModelDocumentsResponse {
         model_id: model_id.to_string(),
         model_card,
@@ -166,9 +159,11 @@ fn model_documents(
             })
             .collect(),
         requires_custom_code: metadata.requires_custom_code == Some(true)
-            || !inventory.auto_map_modules.is_empty()
-            || !inventory.external_auto_map_references.is_empty(),
-        custom_code_sources,
+            || names_custom_code(&inventory),
+        custom_code_sources: custom_code_sources(
+            metadata.custom_code_sources.as_deref(),
+            &inventory,
+        ),
         backfill_available: metadata.repo_id.is_some()
             && metadata.storage_kind != Some(StorageKind::ExternalReference),
     })
@@ -204,37 +199,6 @@ struct LocalModelState {
     metadata: ModelMetadata,
     weights: Vec<LocalWeight>,
     present: BTreeSet<String>,
-}
-
-fn relative_files(model_dir: &Path) -> Result<Vec<(String, u64)>> {
-    let mut files = Vec::new();
-    for entry in walkdir::WalkDir::new(model_dir).follow_links(false) {
-        let entry = entry
-            .map_err(|error| PumasError::Other(format!("Model directory scan failed: {error}")))?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let Some(relative) = entry
-            .path()
-            .strip_prefix(model_dir)
-            .ok()
-            .and_then(|relative| {
-                relative
-                    .components()
-                    .map(|component| component.as_os_str().to_str())
-                    .collect::<Option<Vec<_>>>()
-            })
-            .map(|components| components.join("/"))
-        else {
-            continue;
-        };
-        let size = entry
-            .metadata()
-            .map_err(|error| PumasError::Other(format!("Model file stat failed: {error}")))?
-            .len();
-        files.push((relative, size));
-    }
-    Ok(files)
 }
 
 /// The stored weights that scope the backfill, with recorded digests. The
@@ -285,7 +249,7 @@ fn read_local_state(library: &ModelLibrary, model_dir: &Path) -> Result<Option<L
     let Some(metadata) = library.load_metadata(model_dir)? else {
         return Ok(None);
     };
-    let files = relative_files(model_dir)?;
+    let files = model_files(model_dir)?;
     let weights = local_weights(&metadata, &files);
     Ok(Some(LocalModelState {
         metadata,
@@ -301,14 +265,27 @@ fn selects_whole_repository(metadata: &ModelMetadata) -> bool {
         .is_some_and(|id| id.contains("__full_repo") || id.contains("__bundle_"))
 }
 
-async fn backfill_one(
+/// A model's read-only planning result.
+struct PlannedModel {
+    report: CompanionBackfillModelReport,
+    model_dir: PathBuf,
+    fetch: Option<(Arc<HuggingFaceClient>, CompanionFetchPlan)>,
+}
+
+/// Read local state and plan against the Hub. Read-only; never errors: a
+/// model that cannot be planned carries its skip or failure in the report.
+async fn plan_one(
     library: Arc<ModelLibrary>,
-    client: Option<Arc<crate::model_library::HuggingFaceClient>>,
-    model_id: &str,
-    dry_run: bool,
-) -> CompanionBackfillModelReport {
-    let base = report(model_id, CompanionBackfillOutcome::Skipped);
-    let model_dir = library.library_root().join(model_id);
+    client: Option<Arc<HuggingFaceClient>>,
+    model_id: String,
+) -> PlannedModel {
+    let model_dir = library.library_root().join(&model_id);
+    let finished = |report| PlannedModel {
+        report,
+        model_dir: model_dir.clone(),
+        fetch: None,
+    };
+    let base = report(&model_id, CompanionBackfillOutcome::Skipped);
     let state = {
         let library = library.clone();
         let model_dir = model_dir.clone();
@@ -317,58 +294,58 @@ async fn backfill_one(
     let state = match state {
         Ok(Ok(Some(state))) => state,
         Ok(Ok(None)) => {
-            return refused(
+            return finished(refused(
                 base,
                 CompanionBackfillOutcome::Failed,
                 CompanionBackfillReason::MetadataUnavailable,
                 "The model has no metadata.json",
-            )
+            ))
         }
         Ok(Err(error)) => {
-            return refused(
+            return finished(refused(
                 base,
                 CompanionBackfillOutcome::Failed,
                 CompanionBackfillReason::MetadataUnavailable,
                 error.to_string(),
-            )
+            ))
         }
         Err(error) => {
-            return refused(
+            return finished(refused(
                 base,
                 CompanionBackfillOutcome::Failed,
                 CompanionBackfillReason::MetadataUnavailable,
                 error.to_string(),
-            )
+            ))
         }
     };
     let Some(repo_id) = state.metadata.repo_id.clone() else {
-        return refused(
+        return finished(refused(
             base,
             CompanionBackfillOutcome::Skipped,
             CompanionBackfillReason::NoRepoId,
             "The model records no Hugging Face repository (a local import)",
-        );
+        ));
     };
     let mut base = base;
     base.repo_id = Some(repo_id.clone());
     if state.metadata.storage_kind == Some(StorageKind::ExternalReference) {
-        return refused(
+        return finished(refused(
             base,
             CompanionBackfillOutcome::Skipped,
             CompanionBackfillReason::NotLibraryOwned,
             "The model's files live outside the library",
-        );
+        ));
     }
     let Some(client) = client else {
-        return refused(
+        return finished(refused(
             base,
             CompanionBackfillOutcome::Failed,
             CompanionBackfillReason::HubUnavailable,
             "The Hugging Face client is not configured",
-        );
+        ));
     };
     let target = CompanionBackfillTarget {
-        repo_id: repo_id.clone(),
+        repo_id,
         recorded_revision: state.metadata.upstream_revision.clone(),
         whole_repository: selects_whole_repository(&state.metadata),
         weights: state.weights,
@@ -377,20 +354,25 @@ async fn backfill_one(
     let plan = match client.plan_companion_backfill(&target).await {
         Ok(CompanionPlanOutcome::Ready(plan)) => plan,
         Ok(CompanionPlanOutcome::Skipped { reason, message }) => {
-            return refused(base, CompanionBackfillOutcome::Skipped, reason, message)
+            return finished(refused(
+                base,
+                CompanionBackfillOutcome::Skipped,
+                reason,
+                message,
+            ))
         }
         Err(error) => {
-            return refused(
+            return finished(refused(
                 base,
                 CompanionBackfillOutcome::Failed,
                 CompanionBackfillReason::HubUnavailable,
                 error.to_string(),
-            )
+            ))
         }
     };
     base.revision = Some(plan.revision.as_str().to_string());
     base.revision_binding = Some(plan.binding);
-    let planned_files = plan
+    base.files = plan
         .files
         .iter()
         .map(|file| CompanionBackfillFile {
@@ -398,33 +380,50 @@ async fn backfill_one(
             kind: file.kind.as_str().to_string(),
             size_bytes: file.size,
         })
-        .collect::<Vec<_>>();
-    if dry_run {
-        base.outcome = if planned_files.is_empty() {
-            CompanionBackfillOutcome::UpToDate
-        } else {
-            CompanionBackfillOutcome::Planned
-        };
-        base.files = planned_files;
-        return base;
+        .collect();
+    base.outcome = if base.files.is_empty() {
+        CompanionBackfillOutcome::UpToDate
+    } else {
+        CompanionBackfillOutcome::Planned
+    };
+    PlannedModel {
+        report: base,
+        model_dir: model_dir.clone(),
+        fetch: Some((client, plan)),
     }
+}
 
+/// Report a dry run, or fetch, place and record one planned model.
+async fn execute(
+    library: &Arc<ModelLibrary>,
+    planned: PlannedModel,
+    dry_run: bool,
+) -> CompanionBackfillModelReport {
+    let PlannedModel {
+        mut report,
+        model_dir,
+        fetch,
+    } = planned;
+    let Some((client, plan)) = fetch else {
+        return report;
+    };
+    if dry_run {
+        return report;
+    }
+    let model_id = report.model_id.clone();
     let source = CompanionSource {
-        repo_id,
+        repo_id: plan.repo_id.clone(),
         revision: plan.revision.as_str().to_string(),
     };
-    match fetch_and_record(&library, &client, model_id, &model_dir, &plan, source).await {
+    match fetch_and_record(library, &client, &model_id, &model_dir, &plan, source).await {
         Ok(placed) => {
-            base.outcome = if placed.is_empty() {
+            report.outcome = if placed.is_empty() {
                 CompanionBackfillOutcome::UpToDate
             } else {
                 CompanionBackfillOutcome::Fetched
             };
-            base.files = planned_files
-                .into_iter()
-                .filter(|file| placed.contains(&file.path))
-                .collect();
-            base
+            report.files.retain(|file| placed.contains(&file.path));
+            report
         }
         Err(error) => {
             let (outcome, reason) = match &error {
@@ -445,56 +444,60 @@ async fn backfill_one(
                     CompanionBackfillReason::HubUnavailable,
                 ),
             };
-            refused(base, outcome, reason, error.to_string())
+            report.files.clear();
+            refused(report, outcome, reason, error.to_string())
         }
     }
 }
 
-/// Fetch and place the planned files under the model's mutation guard, then
-/// record the stored companions in its metadata and reindex it.
+/// Stage the planned files without holding the library-root grant, then take
+/// the model's guard only to place them and record them in metadata. A busy
+/// model leaves the verified stage for the next run to place.
 async fn fetch_and_record(
     library: &Arc<ModelLibrary>,
-    client: &crate::model_library::HuggingFaceClient,
+    client: &HuggingFaceClient,
     model_id: &str,
     model_dir: &Path,
-    plan: &crate::model_library::CompanionFetchPlan,
+    plan: &CompanionFetchPlan,
     source: CompanionSource,
 ) -> Result<BTreeSet<String>> {
+    if plan.files.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let staged = client.stage_companions(plan, model_id).await?;
+
     let authority = library.mutation_authority()?;
     let target = [(model_id.to_string(), model_dir.to_path_buf())];
-    let mut guard = tokio::task::spawn_blocking(move || authority.protect_metadata(&target))
-        .await
-        .map_err(|error| PumasError::Other(format!("Model guard failed: {error}")))??;
-    guard.mark_started();
-
     let place_dir = model_dir.to_path_buf();
-    let placed = client
-        .fetch_companions(
-            plan,
-            model_id,
-            library.library_root(),
-            move |files| async move {
-                tokio::task::spawn_blocking(move || place_companions(&place_dir, files))
-                    .await
-                    .map_err(|error| {
-                        PumasError::Other(format!("Companion placement failed: {error}"))
-                    })?
-            },
-        )
-        .await?;
-
-    let record_dir = model_dir.to_path_buf();
+    let files = plan.files.clone();
     let record_library = library.clone();
-    let updated = tokio::task::spawn_blocking(move || -> Result<Option<ModelMetadata>> {
-        let Some(mut metadata) = record_library.load_metadata(&record_dir)? else {
-            return Ok(None);
-        };
-        let inventory: CompanionInventory = scan_companions(&record_dir)?;
-        let changed = record_companions(&record_dir, &mut metadata, &inventory, Some(&source))?;
-        Ok(changed.then_some(metadata))
+    let (placed, updated, guard) = tokio::task::spawn_blocking(move || {
+        let mut guard = authority.protect_metadata(&target)?;
+        guard.mark_started();
+        let placed = place_companions(&place_dir, staged.dir(), &files)?;
+        let updated =
+            record_library.load_metadata(&place_dir)?.and_then(
+                |mut metadata| match scan_companions(&place_dir).and_then(|inventory| {
+                    record_companions(&place_dir, &mut metadata, &inventory, Some(&source))
+                }) {
+                    Ok(true) => Some(metadata),
+                    Ok(false) => None,
+                    Err(error) => {
+                        tracing::warn!(
+                            "Recording companion files for {place_dir:?} failed: {error}"
+                        );
+                        None
+                    }
+                },
+            );
+        // The files are placed; the stage is no longer needed.
+        if let Err(error) = staged.remove() {
+            tracing::warn!("Failed to remove a placed companion stage: {error}");
+        }
+        Ok::<_, PumasError>((placed, updated, guard))
     })
     .await
-    .map_err(|error| PumasError::Other(format!("Companion record failed: {error}")))??;
+    .map_err(|error| PumasError::Other(format!("Companion placement failed: {error}")))??;
     if let Some(metadata) = updated {
         library.save_metadata(model_dir, &metadata).await?;
         library.index_model_dir(model_dir).await?;

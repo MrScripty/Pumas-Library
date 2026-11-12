@@ -8,13 +8,41 @@
 
 use super::types::FileToDownload;
 use crate::model_library::companion_files::{
-    belongs_to_unselected_weight, is_companion_candidate, is_weight_data, CompanionScope,
+    belongs_to_selected_weight, belongs_to_unselected_weight, is_companion_candidate,
+    is_lfs_companion, is_weight_data, CompanionScope,
 };
 use crate::model_library::types::RepoFileTree;
 use std::collections::BTreeSet;
 
 /// Pipeline configs that explicit-file downloads keep from any directory.
 const PIPELINE_CONFIG_FILENAMES: &[&str] = &["model_index.json", "scheduler_config.json"];
+
+/// Runtime config and tokenizer files that quant and single-file downloads
+/// keep from any directory, matched by filename. A pipeline component's
+/// weights need its siblings' configs, tokenizers and scheduler (for example
+/// `unet/...` needs `text_encoder/config.json` and `tokenizer/*`). Companion
+/// selection adds to this set; it never replaces it.
+const RUNTIME_CONFIG_FILENAMES: &[&str] = &[
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "generation_config.json",
+    "special_tokens_map.json",
+    "tokenizer.model",
+    "spiece.model",
+    "vocab.json",
+    "merges.txt",
+    "added_tokens.json",
+    "preprocessor_config.json",
+    "chat_template.jinja",
+    "model.safetensors.index.json",
+    "scheduler_config.json",
+    "model_index.json",
+];
+
+fn filename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
 
 /// How a request chose its weights, which decides the companion scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,13 +115,23 @@ pub(crate) fn select_companion_files(
     let mut companions = Vec::new();
     let mut seen = BTreeSet::new();
     for path in &tree.regular_files {
-        let pipeline_config = mode == CompanionMode::ExplicitFiles
-            && PIPELINE_CONFIG_FILENAMES.contains(&path.rsplit('/').next().unwrap_or(path));
-        if keeps(path, pipeline_config) && seen.insert(path.as_str()) {
+        let anywhere = match mode {
+            CompanionMode::ExplicitFiles => PIPELINE_CONFIG_FILENAMES.contains(&filename(path)),
+            CompanionMode::Scoped => RUNTIME_CONFIG_FILENAMES.contains(&filename(path)),
+            CompanionMode::WholeRepository => true,
+        };
+        if keeps(path, anywhere) && seen.insert(path.as_str()) {
             companions.push(regular(path));
         }
     }
     for file in &tree.lfs_files {
+        // An LFS file is large: keep it only when it is a document, sample
+        // or metadata file, or part of a selected weight (ONNX external data).
+        if !is_lfs_companion(&file.filename)
+            && !belongs_to_selected_weight(&file.filename, &selected)
+        {
+            continue;
+        }
         let anywhere = mode == CompanionMode::ExplicitFiles;
         if keeps(&file.filename, anywhere) && seen.insert(file.filename.as_str()) {
             companions.push(FileToDownload {
@@ -111,9 +149,7 @@ pub(crate) fn select_companion_files(
 pub(crate) fn companion_size_bytes(tree: &RepoFileTree, files: &[FileToDownload]) -> Option<u64> {
     files.iter().try_fold(0_u64, |total, file| {
         let size = file.size.or_else(|| {
-            tree.regular_file_details
-                .iter()
-                .find(|detail| detail.filename == file.filename)
+            tree.regular_file_detail(&file.filename)
                 .map(|detail| detail.size)
         })?;
         total.checked_add(size)
@@ -138,14 +174,16 @@ mod tests {
             repo_id: "acme/model".into(),
             lfs_files,
             regular_files: regular.iter().map(|path| path.to_string()).collect(),
-            regular_file_details: regular
-                .iter()
-                .map(|path| RegularFileInfo {
-                    filename: path.to_string(),
-                    size: 10,
-                    git_oid: "b".repeat(40),
-                })
-                .collect(),
+            regular_file_details: Some(
+                regular
+                    .iter()
+                    .map(|path| RegularFileInfo {
+                        filename: path.to_string(),
+                        size: 10,
+                        git_oid: "b".repeat(40),
+                    })
+                    .collect(),
+            ),
             cached_at: String::new(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -243,6 +281,9 @@ mod tests {
                 "onnx/README.md",
                 "onnx/config.json",
                 "onnx/model_q4.onnx_data",
+                // Runtime configs come from any folder, as before; the
+                // folder's card is out of scope.
+                "other/config.json",
             ]
         );
     }
@@ -283,9 +324,99 @@ mod tests {
     }
 
     #[test]
+    fn other_framework_weights_and_calibration_data_are_never_companions() {
+        let tree = tree(
+            &["README.md"],
+            vec![
+                lfs("model.safetensors", 100),
+                lfs("tf_model.h5", 100),
+                lfs("rust_model.ot", 100),
+                lfs("model.tflite", 100),
+                lfs("weights.npz", 100),
+                lfs("model.keras", 100),
+                lfs("imatrix.dat", 100),
+                lfs("assets/benchmark.png", 7),
+                lfs("samples/demo.wav", 9),
+                lfs("tokenizer.json", 11),
+            ],
+        );
+        for mode in [
+            CompanionMode::Scoped,
+            CompanionMode::ExplicitFiles,
+            CompanionMode::WholeRepository,
+        ] {
+            let selected = select_companion_files(&tree, &payload(&["model.safetensors"]), mode);
+            let selected = names(&selected);
+            for weight in [
+                "tf_model.h5",
+                "rust_model.ot",
+                "model.tflite",
+                "weights.npz",
+                "model.keras",
+                "imatrix.dat",
+            ] {
+                assert!(!selected.contains(&weight), "{mode:?} kept {weight}");
+            }
+            assert!(selected.contains(&"tokenizer.json"), "{mode:?}");
+            assert!(selected.contains(&"README.md"), "{mode:?}");
+        }
+        let whole = select_companion_files(
+            &tree,
+            &payload(&["model.safetensors"]),
+            CompanionMode::WholeRepository,
+        );
+        assert!(names(&whole).contains(&"assets/benchmark.png"));
+        assert!(names(&whole).contains(&"samples/demo.wav"));
+    }
+
+    // Formerly `test_select_auxiliary_files_ignores_subdirectory_paths`: quant
+    // and single-file downloads keep runtime configs and tokenizers from any
+    // folder by name, and companions only add to them.
+    #[test]
+    fn scoped_downloads_keep_runtime_configs_from_any_folder() {
+        let tree = tree(
+            &[
+                "model_index.json",
+                "README.md",
+                "text_encoder/config.json",
+                "text_encoder/README.md",
+                "tokenizer/vocab.json",
+                "tokenizer/merges.txt",
+                "tokenizer/tokenizer_config.json",
+                "scheduler/scheduler_config.json",
+                "subdir/config.json",
+                "unet/config.json",
+            ],
+            vec![
+                lfs("unet/diffusion_pytorch_model.safetensors", 100),
+                lfs("text_encoder/model.safetensors", 100),
+            ],
+        );
+        let selected = select_companion_files(
+            &tree,
+            &payload(&["unet/diffusion_pytorch_model.safetensors"]),
+            CompanionMode::Scoped,
+        );
+        assert_eq!(
+            names(&selected),
+            [
+                "README.md",
+                "model_index.json",
+                "scheduler/scheduler_config.json",
+                "subdir/config.json",
+                "text_encoder/config.json",
+                "tokenizer/merges.txt",
+                "tokenizer/tokenizer_config.json",
+                "tokenizer/vocab.json",
+                "unet/config.json",
+            ]
+        );
+    }
+
+    #[test]
     fn unknown_regular_sizes_leave_the_companion_total_unknown() {
         let mut tree = tree(&["README.md"], Vec::new());
-        tree.regular_file_details.clear();
+        tree.regular_file_details = None;
         assert_eq!(companion_size_bytes(&tree, &payload(&["README.md"])), None);
     }
 }

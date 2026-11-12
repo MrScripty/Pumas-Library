@@ -13,9 +13,8 @@ use super::HuggingFaceClient;
 use crate::acquisition::{
     AcquiredArtifactUse, AcquisitionConsumerReceipt, AcquisitionDemand, AcquisitionHost,
     AcquisitionHttpRequest, AcquisitionHttpSource, AcquisitionPhase, AcquisitionRetryPolicy,
-    AcquisitionWorkspace, ArtifactFile, ArtifactManifest, ArtifactRevisionEvidence,
-    ArtifactSourceIdentity, FileVerificationRequirement, HttpAttemptHost, RevisionStrength,
-    Sha256Evidence,
+    ArtifactFile, ArtifactManifest, ArtifactRevisionEvidence, ArtifactSourceIdentity,
+    FileVerificationRequirement, HttpAttemptHost, RevisionStrength, Sha256Evidence,
 };
 use crate::model_library::artifact_identity::DownloadRevision;
 use crate::model_library::companion_files::{classify, git_blob_oid, CompanionKind};
@@ -173,7 +172,7 @@ impl HuggingFaceClient {
         // A tree cached before regular-file hashes were recorded is refetched:
         // regular companions are verified against their Git blob ids.
         let tree = match cached {
-            Ok(tree) if tree.regular_file_details.len() < tree.regular_files.len() => {
+            Ok(tree) if tree.regular_file_details.is_none() => {
                 self.refresh_repo_files_at_revision(&target.repo_id, &revision)
                     .await
             }
@@ -225,16 +224,12 @@ impl HuggingFaceClient {
             }
             let planned = match (companion.size, companion.sha256) {
                 (Some(size), Some(sha256)) => Some((size, CompanionDigest::LfsSha256(sha256))),
-                _ => tree
-                    .regular_file_details
-                    .iter()
-                    .find(|detail| detail.filename == companion.filename)
-                    .map(|detail| {
-                        (
-                            detail.size,
-                            CompanionDigest::GitBlob(detail.git_oid.clone()),
-                        )
-                    }),
+                _ => tree.regular_file_detail(&companion.filename).map(|detail| {
+                    (
+                        detail.size,
+                        CompanionDigest::GitBlob(detail.git_oid.clone()),
+                    )
+                }),
             };
             match planned {
                 Some((size, digest)) => files.push(PlannedCompanion {
@@ -258,87 +253,122 @@ impl HuggingFaceClient {
         }))
     }
 
-    /// Fetch a plan's files through shared acquisition into a staging
-    /// directory under `staging_root`, verify each against the Hub's
-    /// published hash, then hand the verified open files to `place`. A rerun
-    /// of an interrupted plan resumes the same acquisition and staging
-    /// directory. `place` receives each file's path and verified handle.
-    pub(crate) async fn fetch_companions<Place, PlaceFut>(
+    /// Bring a plan's files into a private stage through shared acquisition,
+    /// verified against the Hub's published hashes. No library-root grant is
+    /// held: nothing outside the stage is written. The caller places the
+    /// staged files under the model's guard and then removes the stage.
+    ///
+    /// The stage is named by the attempt, so a rerun resumes an unfinished
+    /// transfer in the same stage, and a finished one whose files were not
+    /// placed yet (the model was busy) is reused without fetching again.
+    /// A failed attempt that cannot resume removes its stage.
+    pub(crate) async fn stage_companions(
         &self,
         plan: &CompanionFetchPlan,
         model_key: &str,
-        staging_root: &Path,
-        place: Place,
-    ) -> Result<Vec<String>>
-    where
-        Place: FnOnce(Vec<(String, std::fs::File)>) -> PlaceFut + Send + 'static,
-        PlaceFut: std::future::Future<Output = Result<Vec<String>>> + Send + 'static,
-    {
-        if plan.files.is_empty() {
-            return Ok(Vec::new());
-        }
-        let manifest = companion_manifest(plan)?;
-        let base_operation = companion_operation_key(model_key, plan);
-        // Resume an interrupted transfer of this exact plan. A finished one
-        // cannot be replayed, so each attempt gets a fresh suffix and a later
-        // identical plan starts afresh once no unfinished attempt remains.
-        let attempt_prefix = format!("{base_operation}:");
-        let unfinished = self
+    ) -> Result<StagedCompanions> {
+        let root = self
+            .destination_root
+            .clone()
+            .ok_or_else(|| PumasError::Config {
+                message: "Companion backfill requires a configured library root".into(),
+            })?;
+        let attempt_prefix = format!("{}:", companion_operation_key(model_key, plan));
+        let attempts = self
             .acquisition
             .store()
             .acquisitions()?
             .into_values()
-            .find(|record| {
+            .filter(|record| {
                 record.demand.consumer == COMPANION_BACKFILL_CONSUMER
                     && record.demand.operation.starts_with(&attempt_prefix)
-                    && matches!(
-                        record.phase,
-                        AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady
-                    )
-            });
-        let resuming = unfinished.is_some();
+            })
+            .collect::<Vec<_>>();
+
+        // A finished transfer whose files are still staged and verify.
+        for record in attempts
+            .iter()
+            .filter(|record| matches!(record.phase, AcquisitionPhase::Adopted { .. }))
+        {
+            let Some(stage) = open_stage(&root, &record.demand.operation, false).await? else {
+                continue;
+            };
+            let stage_dir = stage.display_path().to_path_buf();
+            let files = plan.files.clone();
+            let verified =
+                tokio::task::spawn_blocking(move || staged_files_verify(&stage_dir, &files))
+                    .await
+                    .map_err(|error| {
+                        PumasError::Other(format!("Stage verification failed: {error}"))
+                    })?;
+            if verified {
+                return Ok(StagedCompanions { stage });
+            }
+            remove_stage(stage).await;
+        }
+
+        let unfinished = attempts.iter().find(|record| {
+            matches!(
+                record.phase,
+                AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady
+            )
+        });
         let operation = match unfinished {
-            Some(record) => record.demand.operation,
+            Some(record) => record.demand.operation.clone(),
             None => format!("{attempt_prefix}{}", uuid::Uuid::new_v4()),
         };
-        let staging_name = format!(
-            "{}companions-{}",
-            crate::model_library::TEMP_IMPORT_PREFIX,
-            &hex::encode(Sha256::digest(operation.as_bytes()))[..16]
-        );
-        let staging_dir = staging_root.join(&staging_name);
-        tokio::fs::create_dir_all(&staging_dir).await?;
-        if resuming {
-            // Acquisition reuses a retained transfer only when a SHA-256 can
-            // prove it complete. Regular files carry a Git blob id instead,
-            // so their retained bytes are discarded and fetched again; they
-            // are small, and LFS companions still resume.
-            for file in &plan.files {
-                if matches!(file.digest, CompanionDigest::GitBlob(_)) {
-                    let staged = file
-                        .path
-                        .split('/')
-                        .fold(staging_dir.clone(), |dir, part| dir.join(part));
-                    for candidate in [
-                        staged.clone(),
-                        PathBuf::from(format!("{}.part", staged.display())),
-                    ] {
-                        match tokio::fs::remove_file(&candidate).await {
-                            Ok(()) => {}
-                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                            Err(error) => return Err(PumasError::io_with_path(error, &candidate)),
-                        }
-                    }
-                }
-            }
+        let stage = open_stage(&root, &operation, true)
+            .await?
+            .ok_or_else(|| PumasError::Other("Companion stage was not created".into()))?;
+        if unfinished.is_some_and(|record| record.phase == AcquisitionPhase::Transferring) {
+            // A transferring record re-acquires every file. Acquisition
+            // reuses a retained file only when a SHA-256 proves it complete;
+            // regular files carry a Git blob id instead, so their retained
+            // bytes are discarded and fetched again. Files of a FilesReady
+            // record are already verified and are kept.
+            let stage_dir = stage.display_path().to_path_buf();
+            let git_blob_paths = plan
+                .files
+                .iter()
+                .filter(|file| matches!(file.digest, CompanionDigest::GitBlob(_)))
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>();
+            tokio::task::spawn_blocking(move || discard_staged(&stage_dir, &git_blob_paths))
+                .await
+                .map_err(|error| PumasError::Other(format!("Stage cleanup failed: {error}")))??;
         }
-        let workspace = AcquisitionWorkspace::from_reserved_directory(
-            staging_root,
-            Path::new(&staging_name),
-            std::sync::Arc::new(()),
-            || Ok(()),
-        )?;
 
+        let result = self.acquire_into_stage(plan, &operation, &stage).await;
+        if let Err(error) = result {
+            let resumable = self
+                .acquisition
+                .store()
+                .acquisitions()?
+                .into_values()
+                .any(|record| {
+                    record.demand.consumer == COMPANION_BACKFILL_CONSUMER
+                        && record.demand.operation == operation
+                        && matches!(
+                            record.phase,
+                            AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady
+                        )
+                });
+            if !resumable {
+                remove_stage(stage).await;
+            }
+            return Err(error);
+        }
+        Ok(StagedCompanions { stage })
+    }
+
+    async fn acquire_into_stage(
+        &self,
+        plan: &CompanionFetchPlan,
+        operation: &str,
+        stage: &crate::model_library::DownloadRecoveryDestination,
+    ) -> Result<()> {
+        let manifest = companion_manifest(plan)?;
+        let workspace = stage.acquisition_workspace(std::sync::Arc::new(()))?;
         let download_base = super::types::HF_HUB_BASE;
         #[cfg(any(test, feature = "test-support"))]
         let download_base = self.download_base_url.as_deref().unwrap_or(download_base);
@@ -368,7 +398,6 @@ impl HuggingFaceClient {
                 .with_max_attempts(max_attempts.max(1))
                 .with_base_delay(crate::config::NetworkConfig::HF_DOWNLOAD_RETRY_BASE_DELAY),
         };
-
         let git_blobs = plan
             .files
             .iter()
@@ -391,7 +420,7 @@ impl HuggingFaceClient {
                 AcquisitionHttpRequest {
                     demand: AcquisitionDemand {
                         consumer: COMPANION_BACKFILL_CONSUMER.into(),
-                        operation,
+                        operation: operation.to_string(),
                     },
                     manifest,
                     workspace,
@@ -407,33 +436,124 @@ impl HuggingFaceClient {
                             .run_blocking("hash companion git blob", move || git_blob_oid(file))
                             .await?;
                         if !actual.eq_ignore_ascii_case(&expected) {
-                            return Err(PumasError::Validation {
-                                field: "companion_files.integrity".into(),
-                                message: format!(
-                                    "{path} does not match the Hub's published Git blob id"
-                                ),
-                            });
+                            return Err(integrity_mismatch(&path, "Git blob id"));
                         }
                     }
-                    Ok((acquired, serde_json::json!({ "companions": paths })))
+                    Ok(((), serde_json::json!({ "companions": paths })))
                 },
-                move |acquired: AcquiredArtifactUse, _receipt: AcquisitionConsumerReceipt| async move {
-                    let mut files = Vec::new();
-                    for (index, file) in acquired.record().manifest.files().iter().enumerate() {
-                        files.push((file.logical_path().to_string(), acquired.open_file(index).await?));
-                    }
-                    place(files).await
-                },
+                // The verified files stay staged; placement into the model
+                // happens later under the model's guard.
+                |(), _receipt: AcquisitionConsumerReceipt| async move { Ok(()) },
             )
             .await;
         let shutdown = consumer.shutdown().await;
-        let placed = result?;
-        shutdown?;
-        if let Err(error) = tokio::fs::remove_dir_all(&staging_dir).await {
-            warn!("Failed to remove companion staging directory: {error}");
-        }
-        Ok(placed)
+        result?;
+        shutdown
     }
+}
+
+/// Verified companion files held in a private stage until placement.
+pub(crate) struct StagedCompanions {
+    stage: crate::model_library::DownloadRecoveryDestination,
+}
+
+impl StagedCompanions {
+    pub(crate) fn dir(&self) -> &Path {
+        self.stage.display_path()
+    }
+
+    /// Remove the stage after its files were placed. Blocking.
+    pub(crate) fn remove(self) -> Result<()> {
+        self.stage.remove_model_directory_all()
+    }
+}
+
+fn stage_name(operation: &str) -> String {
+    format!(
+        "companions-{}",
+        &hex::encode(Sha256::digest(operation.as_bytes()))[..16]
+    )
+}
+
+async fn open_stage(
+    root: &crate::model_library::DownloadDestinationRoot,
+    operation: &str,
+    create: bool,
+) -> Result<Option<crate::model_library::DownloadRecoveryDestination>> {
+    let root = root.clone();
+    let name = stage_name(operation);
+    tokio::task::spawn_blocking(move || root.open_named_import_stage(&name, create))
+        .await
+        .map_err(|error| PumasError::Other(format!("Companion stage open failed: {error}")))?
+}
+
+async fn remove_stage(stage: crate::model_library::DownloadRecoveryDestination) {
+    let removed = tokio::task::spawn_blocking(move || stage.remove_model_directory_all()).await;
+    if !matches!(removed, Ok(Ok(()))) {
+        warn!("Failed to remove an abandoned companion stage: {removed:?}");
+    }
+}
+
+fn staged_path(stage_dir: &Path, path: &str) -> PathBuf {
+    path.split('/')
+        .fold(stage_dir.to_path_buf(), |dir, part| dir.join(part))
+}
+
+/// Remove retained bytes (final and partial) of `paths` from a stage. Blocking.
+fn discard_staged(stage_dir: &Path, paths: &[String]) -> Result<()> {
+    for path in paths {
+        let staged = staged_path(stage_dir, path);
+        for candidate in [
+            staged.clone(),
+            PathBuf::from(format!("{}.part", staged.display())),
+        ] {
+            match std::fs::remove_file(&candidate) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(PumasError::io_with_path(error, &candidate)),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn integrity_mismatch(path: &str, hash: &str) -> PumasError {
+    PumasError::Validation {
+        field: "companion_files.integrity".into(),
+        message: format!("{path} does not match the Hub's published {hash}"),
+    }
+}
+
+/// Check one file's size and the Hub's published hash. Blocking.
+fn verify_file(file: &std::path::Path, planned: &PlannedCompanion) -> Result<()> {
+    let opened =
+        std::fs::File::open(file).map_err(|error| PumasError::io_with_path(error, file))?;
+    if opened.metadata()?.len() != planned.size {
+        return Err(integrity_mismatch(&planned.path, "size"));
+    }
+    match &planned.digest {
+        CompanionDigest::GitBlob(expected) => {
+            if !git_blob_oid(opened)?.eq_ignore_ascii_case(expected) {
+                return Err(integrity_mismatch(&planned.path, "Git blob id"));
+            }
+        }
+        CompanionDigest::LfsSha256(expected) => {
+            let mut hasher = Sha256::new();
+            let mut opened = opened;
+            std::io::copy(&mut opened, &mut hasher)?;
+            if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(expected) {
+                return Err(integrity_mismatch(&planned.path, "SHA-256"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether every planned file is staged and verifies. Blocking.
+fn staged_files_verify(stage_dir: &Path, files: &[PlannedCompanion]) -> bool {
+    files
+        .iter()
+        .all(|file| verify_file(&staged_path(stage_dir, &file.path), file).is_ok())
 }
 
 fn companion_operation_key(model_key: &str, plan: &CompanionFetchPlan) -> String {
@@ -528,15 +648,20 @@ impl AcquisitionHost for BackfillHost {
     }
 }
 
-/// Copy verified files into `model_dir`, never replacing an existing file.
-/// Returns the paths written. Blocking.
+/// Place staged files into `model_dir`. Each file is copied to a hidden
+/// temporary file beside its target, synced, verified against the Hub's
+/// published hash, and then linked into place without replacing anything,
+/// so a failed copy never leaves a partial file that looks stored. Existing
+/// files stay authoritative. Returns the paths written. Blocking.
 pub(crate) fn place_companions(
     model_dir: &Path,
-    files: Vec<(String, std::fs::File)>,
+    stage_dir: &Path,
+    files: &[PlannedCompanion],
 ) -> Result<Vec<String>> {
     let mut placed = Vec::new();
-    for (path, mut source) in files {
-        if !crate::model_library::companion_files::is_companion_candidate(&path)
+    for file in files {
+        let path = file.path.as_str();
+        if !crate::model_library::companion_files::is_companion_candidate(path)
             || path
                 .split('/')
                 .any(|component| component.is_empty() || component == "..")
@@ -546,25 +671,37 @@ pub(crate) fn place_companions(
                 message: format!("{path} is not a placeable companion path"),
             });
         }
-        let target: PathBuf = path
-            .split('/')
-            .fold(model_dir.to_path_buf(), |dir, part| dir.join(part));
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
+        let target = staged_path(model_dir, path);
+        if target.symlink_metadata().is_ok() {
+            continue;
         }
-        let mut output = match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&target)
-        {
-            Ok(output) => output,
-            // Stored meanwhile: the existing file stays authoritative.
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(PumasError::io_with_path(error, &target)),
-        };
-        std::io::copy(&mut source, &mut output)?;
-        output.sync_all()?;
-        placed.push(path);
+        let parent = target.parent().unwrap_or(model_dir);
+        std::fs::create_dir_all(parent)?;
+        let name = target
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let temporary = parent.join(format!(".{name}.{}.companion-tmp", uuid::Uuid::new_v4()));
+        let outcome = (|| -> Result<bool> {
+            let mut source = std::fs::File::open(staged_path(stage_dir, path))?;
+            let mut output = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
+            std::io::copy(&mut source, &mut output)?;
+            output.sync_all()?;
+            drop(output);
+            verify_file(&temporary, file)?;
+            match std::fs::hard_link(&temporary, &target) {
+                Ok(()) => Ok(true),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+                Err(error) => Err(PumasError::io_with_path(error, &target)),
+            }
+        })();
+        let _ = std::fs::remove_file(&temporary);
+        if outcome? {
+            placed.push(file.path.clone());
+        }
     }
     Ok(placed)
 }
@@ -579,7 +716,7 @@ mod tests {
             repo_id: "acme/model".into(),
             lfs_files: lfs,
             regular_files: Vec::new(),
-            regular_file_details: Vec::new(),
+            regular_file_details: None,
             cached_at: String::new(),
             last_modified: None,
             cache_version: crate::model_library::REPO_FILE_TREE_VERSION,
@@ -604,21 +741,54 @@ mod tests {
         assert!(weights_match_tree(&[weight(10, Some("b".repeat(64)))], &remote).is_err());
     }
 
+    fn planned(path: &str, body: &[u8]) -> PlannedCompanion {
+        use sha1::Digest as _;
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(format!("blob {}\0", body.len()).as_bytes());
+        hasher.update(body);
+        PlannedCompanion {
+            path: path.into(),
+            kind: classify(path),
+            size: body.len() as u64,
+            digest: CompanionDigest::GitBlob(hex::encode(hasher.finalize())),
+        }
+    }
+
+    fn stage(files: &[(&str, &[u8])]) -> tempfile::TempDir {
+        let stage = tempfile::tempdir().unwrap();
+        for (path, body) in files {
+            let target = staged_path(stage.path(), path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, body).unwrap();
+        }
+        stage
+    }
+
+    fn hidden_leftovers(dir: &Path) -> Vec<PathBuf> {
+        walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".companion-tmp")
+            })
+            .map(|entry| entry.path().to_path_buf())
+            .collect()
+    }
+
     #[test]
     fn placement_never_replaces_existing_files() {
         let dir = tempfile::tempdir().unwrap();
-        let staged = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("README.md"), "kept").unwrap();
-        let open = |name: &str, body: &str| {
-            let path = staged.path().join(name);
-            std::fs::write(&path, body).unwrap();
-            std::fs::File::open(path).unwrap()
-        };
+        let staged = stage(&[("README.md", b"new"), ("onnx/LICENSE", b"license")]);
         let placed = place_companions(
             dir.path(),
-            vec![
-                ("README.md".into(), open("a", "new")),
-                ("onnx/LICENSE".into(), open("b", "license")),
+            staged.path(),
+            &[
+                planned("README.md", b"new"),
+                planned("onnx/LICENSE", b"license"),
             ],
         )
         .unwrap();
@@ -627,8 +797,52 @@ mod tests {
             std::fs::read_to_string(dir.path().join("README.md")).unwrap(),
             "kept"
         );
+        assert_eq!(
+            std::fs::read(dir.path().join("onnx/LICENSE")).unwrap(),
+            b"license"
+        );
+        assert!(hidden_leftovers(dir.path()).is_empty());
+        let reserved = stage(&[("metadata.json", b"{}")]);
+        assert!(place_companions(
+            dir.path(),
+            reserved.path(),
+            &[planned("metadata.json", b"{}")]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_failed_or_truncated_copy_never_leaves_a_file_that_looks_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        // The staged bytes were cut short: the copy must not land.
+        let truncated = stage(&[("LICENSE", b"Apache Lic")]);
+        let error = place_companions(
+            dir.path(),
+            truncated.path(),
+            &[planned("LICENSE", b"Apache License 2.0\n")],
+        )
+        .unwrap_err();
         assert!(
-            place_companions(dir.path(), vec![("metadata.json".into(), open("c", "{}"))]).is_err()
+            matches!(error, PumasError::Validation { ref field, .. } if field == "companion_files.integrity")
+        );
+        assert!(!dir.path().join("LICENSE").exists());
+        // The staged file is missing altogether: the copy fails before landing.
+        let empty = stage(&[]);
+        assert!(
+            place_companions(dir.path(), empty.path(), &[planned("README.md", b"# card")]).is_err()
+        );
+        assert!(!dir.path().join("README.md").exists());
+        assert!(hidden_leftovers(dir.path()).is_empty());
+        // A later run places the verified file.
+        let good = stage(&[("LICENSE", b"Apache License 2.0\n")]);
+        assert_eq!(
+            place_companions(
+                dir.path(),
+                good.path(),
+                &[planned("LICENSE", b"Apache License 2.0\n")]
+            )
+            .unwrap(),
+            ["LICENSE"]
         );
     }
 }

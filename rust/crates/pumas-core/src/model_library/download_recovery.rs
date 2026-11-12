@@ -379,6 +379,47 @@ impl DownloadDestinationRoot {
         }
     }
 
+    /// Open the private stage `TEMP_IMPORT_PREFIX + name`, creating it with
+    /// the same owner-only permissions as [`Self::create_import_stage`] when
+    /// `create` is set. A named stage is found again by a later attempt of
+    /// the same work, so an interrupted transfer can resume in it. `None`
+    /// when it does not exist and `create` is not set.
+    pub(crate) fn open_named_import_stage(
+        &self,
+        name: &str,
+        create: bool,
+    ) -> Result<Option<DownloadRecoveryDestination>> {
+        self.0.require_current()?;
+        if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+            return Err(invalid_capability_path().into());
+        }
+        let name = format!("{}{name}", super::importer::TEMP_IMPORT_PREFIX);
+        let builder = cap_std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        let builder = {
+            use cap_std::fs::DirBuilderExt;
+            let mut builder = builder;
+            builder.mode(0o700);
+            builder
+        };
+        if !create {
+            match self.0.root.symlink_metadata(&name) {
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            match self.0.root.create_dir_with(&name, &builder) {
+                Ok(()) => sync_directory(&self.0.root)?,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let destination = self.resolve(Path::new(&name))?;
+        destination.directory(false)?;
+        Ok(Some(destination))
+    }
+
     /// Exclusively create a private copied-import workspace under this held root.
     /// A failed bind after mkdir retains the workspace; it must never be recovered
     /// by scanning names or reacquiring pathname authority.

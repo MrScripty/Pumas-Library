@@ -866,11 +866,11 @@ mod tests {
                 "LICENSE".into(),
                 "Q4_K_M/notes.md".into(),
             ],
-            regular_file_details: vec![
+            regular_file_details: Some(vec![
                 detail("README.md", 30),
                 detail("LICENSE", 20),
                 detail("Q4_K_M/notes.md", 5),
-            ],
+            ]),
             cached_at: "2026-01-01T00:00:00Z".to_string(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -886,12 +886,13 @@ mod tests {
             .find(|option| option.quant == "Q4_K_M")
             .unwrap();
         assert_eq!(q4.size_bytes, Some(4_000));
-        assert_eq!(q4.companion_size_bytes, Some(955));
+        // Calibration data is not a companion: only the card, license and notes.
+        assert_eq!(q4.companion_size_bytes, Some(55));
         let q8 = options
             .iter()
             .find(|option| option.quant == "Q8_0")
             .unwrap();
-        assert_eq!(q8.companion_size_bytes, Some(950));
+        assert_eq!(q8.companion_size_bytes, Some(50));
     }
 
     #[test]
@@ -905,7 +906,7 @@ mod tests {
                 lfs("Q2_K/model-Q2_K.gguf", 41_800_000_000),
             ],
             regular_files: vec![],
-            regular_file_details: Vec::new(),
+            regular_file_details: None,
             cached_at: "2026-01-01T00:00:00Z".to_string(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -937,7 +938,7 @@ mod tests {
                 lfs("OpenAI-20B-NEOPlus-Uncensored-Q8_0.gguf", 22_100_000_000),
             ],
             regular_files: vec![],
-            regular_file_details: Vec::new(),
+            regular_file_details: None,
             cached_at: "2026-01-01T00:00:00Z".to_string(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,

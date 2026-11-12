@@ -54,6 +54,13 @@ impl UiConfig {
 pub struct NetworkConfig;
 
 impl NetworkConfig {
+    /// Hugging Face metadata requests (revision and tree reads) that one bulk
+    /// library operation keeps in flight. The HF client has no shared
+    /// request governor; this is the owner for bulk reads, kept small so a
+    /// library-wide scan stays within the Hub's per-client rate limits while
+    /// still overlapping round-trips. File transfers are not covered and stay
+    /// serialized.
+    pub const HF_METADATA_REQUEST_CONCURRENCY: usize = 4;
     pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
     pub const QUICK_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
     pub const MAX_RETRIES: u32 = 3;

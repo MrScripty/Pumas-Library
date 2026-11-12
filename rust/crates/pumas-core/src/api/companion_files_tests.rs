@@ -15,11 +15,15 @@ const LATEST: &str = "89abcdef0123456789abcdef0123456789abcdef";
 const WEIGHTS: &[u8] = b"pretend safetensors weights";
 
 type Routes = Arc<Mutex<HashMap<String, (u16, Vec<u8>)>>>;
+/// A request path the hub holds open: it signals arrival and answers only
+/// after release.
+type Hold = Arc<Mutex<Option<(String, Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>>;
 
 struct Hub {
     base: String,
     routes: Routes,
     requests: Arc<Mutex<Vec<String>>>,
+    hold: Hold,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -29,7 +33,9 @@ impl Hub {
         let base = format!("http://{}", listener.local_addr().unwrap());
         let routes: Routes = Arc::default();
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let (served_routes, served_requests) = (routes.clone(), requests.clone());
+        let hold: Hold = Arc::default();
+        let (served_routes, served_requests, served_hold) =
+            (routes.clone(), requests.clone(), hold.clone());
         let task = tokio::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
@@ -53,6 +59,15 @@ impl Hub {
                     .unwrap_or_default()
                     .to_string();
                 served_requests.lock().unwrap().push(path.clone());
+                let held = served_hold
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .filter(|(held, _, _)| *held == path);
+                if let Some((_, arrived, release)) = held {
+                    arrived.notify_one();
+                    release.notified().await;
+                }
                 let (status, body) = served_routes
                     .lock()
                     .unwrap()
@@ -72,8 +87,18 @@ impl Hub {
             base,
             routes,
             requests,
+            hold,
             task,
         }
+    }
+
+    /// Hold `path` open until the returned release is notified; the first
+    /// notifier fires when the request arrives.
+    fn hold(&self, path: String) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+        let arrived = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        *self.hold.lock().unwrap() = Some((path, arrived.clone(), release.clone()));
+        (arrived, release)
     }
 
     fn route(&self, path: impl Into<String>, status: u16, body: impl Into<Vec<u8>>) {
@@ -489,6 +514,61 @@ async fn backfill_rejects_bytes_that_do_not_match_the_published_hash() {
         .unwrap()
         .unwrap();
     assert!(metadata.model_card_artifact.is_none());
+    assert_eq!(
+        staging_dirs(&api),
+        0,
+        "a failed attempt that cannot resume removes its stage"
+    );
+}
+
+fn staging_dirs(api: &PumasApi) -> usize {
+    std::fs::read_dir(api.primary().model_library.library_root())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().contains("companions-"))
+        .count()
+}
+
+#[tokio::test]
+async fn a_backfill_transfer_holds_no_library_mutation_grant() {
+    let hub = Hub::start().await;
+    standard_repo(&hub, "acme/model", COMMIT);
+    let root = tempfile::TempDir::new().unwrap();
+    let api = recovery_api_fixture(root.path(), Some(hub.base.clone())).await;
+    let model_dir = install_model(
+        &api,
+        "llm/acme/model",
+        Some("acme/model"),
+        Some(COMMIT),
+        None,
+    )
+    .await;
+    let api = Arc::new(api);
+    let (arrived, release) = hub.hold(format!("/acme/model/resolve/{COMMIT}/README.md"));
+    let backfill = {
+        let api = api.clone();
+        tokio::spawn(async move {
+            api.backfill_model_companion_files("llm/acme/model", false)
+                .await
+                .unwrap()
+        })
+    };
+    arrived.notified().await;
+    // While the Hub transfer is in flight, other library mutations proceed.
+    let authority = api.primary().model_library.mutation_authority().unwrap();
+    let target = [("llm/acme/model".to_string(), model_dir.clone())];
+    let guard = authority
+        .protect_metadata(&target)
+        .expect("a backfill transfer must not hold the library-root grant");
+    guard.finish_unstarted().unwrap();
+    release.notify_one();
+    let report = backfill.await.unwrap();
+    assert_eq!(
+        report.models[0].outcome,
+        CompanionBackfillOutcome::Fetched,
+        "{report:?}"
+    );
+    assert!(model_dir.join("README.md").exists());
 }
 
 #[tokio::test]

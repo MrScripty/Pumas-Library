@@ -28,7 +28,13 @@ enum Reply {
     /// Announce the whole body, send this many bytes, then go silent while
     /// keeping the connection open.
     Stalled(usize),
+    /// Refuse any range with 416 Range Not Satisfiable.
+    NotSatisfiable,
 }
+
+/// One install selection, as `torch.rs` derives it from release, build,
+/// Python, dependency profile, platform and wheel role.
+const SELECTION: &str = "v2.10.0|cpu|python3.12|none|linux-x86_64|torch";
 
 /// Test stall bound: long enough for loopback, short enough for a test.
 const TEST_STALL: Duration = Duration::from_millis(300);
@@ -102,6 +108,13 @@ async fn serve_named(path: &str, body: Vec<u8>, script: Vec<Reply>) -> WheelOrig
                         body.len() - start
                     ),
                     &body[start..],
+                ),
+                (Reply::NotSatisfiable, _) => (
+                    format!(
+                        "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    ),
+                    &body[..0],
                 ),
                 (Reply::Truncated(sent) | Reply::Stalled(sent), _) => (
                     format!(
@@ -260,7 +273,7 @@ async fn interrupted_wheel_transfer_resumes_instead_of_restarting() {
 
     let held = owner
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .unwrap()
         .unwrap();
@@ -301,7 +314,11 @@ async fn exhausted_retries_keep_bytes_and_the_next_install_resumes() {
     let wheel = locked(&origin, &body);
 
     let first = Owner::open(root.path(), 1);
-    let failed = match first.acquisition.hold(vec![wheel.clone()], false).await {
+    let failed = match first
+        .acquisition
+        .hold(SELECTION, vec![wheel.clone()], false)
+        .await
+    {
         Err(error) => error.to_string(),
         Ok(_) => panic!("a single truncated attempt must fail"),
     };
@@ -321,7 +338,7 @@ async fn exhausted_retries_keep_bytes_and_the_next_install_resumes() {
     let second = Owner::open(root.path(), 1);
     let held = second
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .unwrap()
         .unwrap();
@@ -350,7 +367,11 @@ async fn bytes_that_do_not_match_the_locked_sha256_are_never_handed_off() {
     let mut tampered = body.clone();
     tampered[0] ^= 0xff;
     let wheel = locked(&origin, &tampered);
-    assert!(owner.acquisition.hold(vec![wheel], false).await.is_err());
+    assert!(owner
+        .acquisition
+        .hold(SELECTION, vec![wheel], false)
+        .await
+        .is_err());
     assert!(owner.records().await.iter().all(|record| !matches!(
         record.phase,
         AcquisitionPhase::Using { .. } | AcquisitionPhase::Adopted { .. }
@@ -370,7 +391,7 @@ async fn retained_wheels_are_reused_and_discarded_wheels_are_removed() {
 
     let held = owner
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .unwrap()
         .unwrap();
@@ -379,7 +400,7 @@ async fn retained_wheels_are_reused_and_discarded_wheels_are_removed() {
 
     let held = owner
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .unwrap()
         .unwrap();
@@ -423,7 +444,7 @@ async fn use_left_by_an_interrupted_install_is_released_and_its_inputs_reused() 
                 AcquisitionHttpRequest {
                     demand: AcquisitionDemand {
                         consumer: TORCH_WHEEL_CONSUMER.into(),
-                        operation: format!("{DEMAND_PREFIX}:{key}:1"),
+                        operation: demand_operation(&selection_scope(SELECTION), &key, 1),
                     },
                     manifest,
                     workspace: grant.acquisition_workspace().unwrap(),
@@ -461,7 +482,7 @@ async fn use_left_by_an_interrupted_install_is_released_and_its_inputs_reused() 
     let owner = Owner::open(root.path(), 1);
     let held = owner
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .unwrap()
         .unwrap();
@@ -474,9 +495,15 @@ async fn use_left_by_an_interrupted_install_is_released_and_its_inputs_reused() 
         .map(|record| (record.demand.operation, record.phase))
         .collect();
     phases.sort_by(|left, right| left.0.cmp(&right.0));
-    assert_eq!(phases[0].0, format!("{DEMAND_PREFIX}:{key}:1"));
+    assert_eq!(
+        phases[0].0,
+        demand_operation(&selection_scope(SELECTION), &key, 1)
+    );
     assert_eq!(phases[0].1, AcquisitionPhase::Withdrawn);
-    assert_eq!(phases[1].0, format!("{DEMAND_PREFIX}:{key}:2"));
+    assert_eq!(
+        phases[1].0,
+        demand_operation(&selection_scope(SELECTION), &key, 2)
+    );
     assert!(matches!(phases[1].1, AcquisitionPhase::Adopted { .. }));
     owner.close().await;
 }
@@ -490,13 +517,13 @@ async fn cancellation_during_transfer_discards_the_partial_wheel() {
     let wheel = locked(&origin, &body);
     assert!(owner
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .is_err());
     assert_eq!(partial_files(root.path()).len(), 1);
     // The user cancels the retry that would resume those bytes.
     owner.acquisition.cancel_flag.store(true, Ordering::SeqCst);
-    let result = owner.acquisition.hold(vec![wheel], false).await;
+    let result = owner.acquisition.hold(SELECTION, vec![wheel], false).await;
     let message = match result {
         Err(error) => error.to_string(),
         Ok(_) => panic!("cancelled acquisition must not hand off"),
@@ -523,12 +550,12 @@ async fn settled_workspaces_of_other_selections_are_removed_and_unfinished_ones_
     let partial = LockedWheel::new("torch", &unfinished.url, &sha256_hex(&other_body)).unwrap();
     assert!(owner
         .acquisition
-        .hold(vec![partial.clone()], false)
+        .hold("selection-unfinished", vec![partial.clone()], false)
         .await
         .is_err());
     let kept = owner
         .acquisition
-        .hold(vec![locked(&settled, &body)], false)
+        .hold("selection-settled", vec![locked(&settled, &body)], false)
         .await;
     kept.unwrap()
         .unwrap()
@@ -546,7 +573,7 @@ async fn settled_workspaces_of_other_selections_are_removed_and_unfinished_ones_
     let third_wheel = LockedWheel::new("torch", &third.url, &sha256_hex(&third_body)).unwrap();
     owner
         .acquisition
-        .hold(vec![third_wheel.clone()], false)
+        .hold("selection-third", vec![third_wheel.clone()], false)
         .await
         .unwrap()
         .unwrap()
@@ -561,7 +588,7 @@ async fn settled_workspaces_of_other_selections_are_removed_and_unfinished_ones_
     // Holding the known closure removes the other settled (retained) set only.
     let held = owner
         .acquisition
-        .hold(vec![third_wheel], true)
+        .hold("selection-third", vec![third_wheel], true)
         .await
         .unwrap()
         .unwrap();
@@ -591,7 +618,9 @@ async fn stalled_wheel_transfer_retries_and_resumes() {
 
     let held = tokio::time::timeout(
         Duration::from_secs(20),
-        owner.acquisition.hold(vec![wheel.clone()], false),
+        owner
+            .acquisition
+            .hold(SELECTION, vec![wheel.clone()], false),
     )
     .await
     .expect("a stalled transfer must not hang the install")
@@ -618,7 +647,7 @@ async fn shutdown_keeps_partial_wheels_for_the_next_start() {
     let first = Owner::open(root.path(), 1);
     assert!(first
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .is_err());
     first
@@ -626,7 +655,11 @@ async fn shutdown_keeps_partial_wheels_for_the_next_start() {
         .shutdown_flag
         .store(true, Ordering::SeqCst);
     first.acquisition.cancel_flag.store(true, Ordering::SeqCst);
-    let stopped = match first.acquisition.hold(vec![wheel.clone()], false).await {
+    let stopped = match first
+        .acquisition
+        .hold(SELECTION, vec![wheel.clone()], false)
+        .await
+    {
         Err(error) => error.to_string(),
         Ok(_) => panic!("shutdown must not hand off"),
     };
@@ -644,7 +677,7 @@ async fn shutdown_keeps_partial_wheels_for_the_next_start() {
     let second = Owner::open(root.path(), 1);
     let held = second
         .acquisition
-        .hold(vec![wheel.clone()], false)
+        .hold(SELECTION, vec![wheel.clone()], false)
         .await
         .unwrap()
         .unwrap();
@@ -680,13 +713,21 @@ async fn the_same_wheel_set_in_another_order_resumes() {
 
     assert!(owner
         .acquisition
-        .hold(vec![alpha_wheel.clone(), beta_wheel.clone()], true)
+        .hold(
+            SELECTION,
+            vec![alpha_wheel.clone(), beta_wheel.clone()],
+            true
+        )
         .await
         .is_err());
     let interrupted = owner.records().await;
     let held = owner
         .acquisition
-        .hold(vec![beta_wheel.clone(), alpha_wheel.clone()], true)
+        .hold(
+            SELECTION,
+            vec![beta_wheel.clone(), alpha_wheel.clone()],
+            true,
+        )
         .await
         .unwrap()
         .unwrap();
@@ -702,5 +743,170 @@ async fn the_same_wheel_set_in_another_order_resumes() {
     assert_eq!(resumed.len(), 1);
     assert_eq!(resumed[0].demand, interrupted[0].demand);
     held.finish(WheelUse::Consumed).await.unwrap();
+    owner.close().await;
+}
+
+/// The source answers the resume request with the whole body (it ignores
+/// Range). The partial cannot be continued, so the wheel restarts from byte
+/// zero and is still verified, instead of failing forever.
+#[tokio::test]
+async fn a_source_that_ignores_range_restarts_the_wheel_from_byte_zero() {
+    let root = tempfile::TempDir::new().unwrap();
+    let body = wheel_bytes();
+    let cut = body.len() / 3;
+    let origin = serve_wheel(
+        body.clone(),
+        vec![Reply::Truncated(cut), Reply::Full, Reply::Full],
+    )
+    .await;
+    let owner = Owner::open(root.path(), 3);
+    let wheel = locked(&origin, &body);
+
+    let held = owner
+        .acquisition
+        .hold(SELECTION, vec![wheel.clone()], false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(std::fs::read(held.file(&wheel)).unwrap(), body);
+    let ranges: Vec<_> = origin
+        .served()
+        .iter()
+        .map(|reply| reply.range_start)
+        .collect();
+    // Fresh, refused continuation (the full body is not appended), restart.
+    assert_eq!(ranges, vec![None, Some(cut), None]);
+    held.finish(WheelUse::Consumed).await.unwrap();
+    owner.close().await;
+}
+
+/// A later install finds a retained partial, but the source now answers 416.
+/// The partial is discarded and the wheel downloads again in full.
+#[tokio::test]
+async fn a_416_for_a_retained_partial_restarts_the_wheel_from_byte_zero() {
+    let root = tempfile::TempDir::new().unwrap();
+    let body = wheel_bytes();
+    let cut = body.len() / 2;
+    let origin = serve_wheel(
+        body.clone(),
+        vec![Reply::Truncated(cut), Reply::NotSatisfiable, Reply::Full],
+    )
+    .await;
+    let wheel = locked(&origin, &body);
+
+    let first = Owner::open(root.path(), 1);
+    assert!(first
+        .acquisition
+        .hold(SELECTION, vec![wheel.clone()], false)
+        .await
+        .is_err());
+    assert_eq!(partial_files(root.path()).len(), 1);
+    first.close().await;
+
+    let second = Owner::open(root.path(), 1);
+    let held = second
+        .acquisition
+        .hold(SELECTION, vec![wheel.clone()], false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(std::fs::read(held.file(&wheel)).unwrap(), body);
+    let ranges: Vec<_> = origin
+        .served()
+        .iter()
+        .map(|reply| reply.range_start)
+        .collect();
+    assert_eq!(ranges, vec![None, Some(cut), None]);
+    held.finish(WheelUse::Consumed).await.unwrap();
+    second.close().await;
+}
+
+/// A new resolution of the same install selection names a different wheel
+/// set. No current demand can resume the old set's bytes, so it is withdrawn
+/// and removed. Another selection's unfinished set stays resumable.
+#[tokio::test]
+async fn a_new_resolution_supersedes_its_unfinished_set_but_not_other_selections() {
+    const OTHER_SELECTION: &str = "v2.10.0|cpu|python3.13|none|linux-x86_64|torch";
+    let root = tempfile::TempDir::new().unwrap();
+    let body = wheel_bytes();
+    let old = serve_named(
+        "packages/old-1.0-py3-none-any.whl",
+        body.clone(),
+        vec![Reply::Truncated(1024)],
+    )
+    .await;
+    let other = serve_named(
+        "packages/other-1.0-py3-none-any.whl",
+        body.clone(),
+        vec![Reply::Truncated(2048), Reply::Ranged],
+    )
+    .await;
+    let new = serve_named(
+        "packages/new-1.0-py3-none-any.whl",
+        body.clone(),
+        vec![Reply::Full],
+    )
+    .await;
+    let old_wheel = LockedWheel::new("old", &old.url, &sha256_hex(&body)).unwrap();
+    let other_wheel = LockedWheel::new("other", &other.url, &sha256_hex(&body)).unwrap();
+    let new_wheel = LockedWheel::new("new", &new.url, &sha256_hex(&body)).unwrap();
+    let owner = Owner::open(root.path(), 1);
+
+    assert!(owner
+        .acquisition
+        .hold(SELECTION, vec![old_wheel], false)
+        .await
+        .is_err());
+    assert!(owner
+        .acquisition
+        .hold(OTHER_SELECTION, vec![other_wheel.clone()], false)
+        .await
+        .is_err());
+    assert_eq!(partial_files(root.path()).len(), 2);
+
+    let held = owner
+        .acquisition
+        .hold(SELECTION, vec![new_wheel], false)
+        .await
+        .unwrap()
+        .unwrap();
+    let parts: Vec<_> = partial_files(root.path())
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !parts.contains(&"old-1.0-py3-none-any.whl.part".to_owned()),
+        "{parts:?}"
+    );
+    assert!(
+        parts.contains(&"other-1.0-py3-none-any.whl.part".to_owned()),
+        "{parts:?}"
+    );
+    let phase_of = |records: &[AcquisitionRecord], name: &str| {
+        records
+            .iter()
+            .find(|record| record.manifest.files()[0].logical_path() == name)
+            .map(|record| record.phase.clone())
+    };
+    let records = owner.records().await;
+    assert_eq!(
+        phase_of(&records, "old-1.0-py3-none-any.whl"),
+        Some(AcquisitionPhase::Withdrawn)
+    );
+    assert_eq!(
+        phase_of(&records, "other-1.0-py3-none-any.whl"),
+        Some(AcquisitionPhase::Transferring)
+    );
+    held.finish(WheelUse::Consumed).await.unwrap();
+
+    // The other selection's demand still resumes its bytes.
+    let resumed = owner
+        .acquisition
+        .hold(OTHER_SELECTION, vec![other_wheel], false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(other.served().last().unwrap().range_start, Some(2048));
+    resumed.finish(WheelUse::Consumed).await.unwrap();
     owner.close().await;
 }

@@ -2278,6 +2278,17 @@ impl VersionInstaller {
         } else {
             format!("{version}+{build}")
         };
+        // The install selection a wheel set serves. A later resolution of the
+        // same selection supersedes its unfinished sets that it no longer names.
+        let wheel_selection = |role: &str| {
+            format!(
+                "{}|{build}|python{minor}|{}|{}-{}|{role}",
+                selection.tag,
+                selection.adapter,
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )
+        };
 
         // Phase 0, with shared acquisition: select the official Torch wheel
         // and download it resumably with SHA-256 verification, so the
@@ -2341,7 +2352,10 @@ impl VersionInstaller {
                         &format!("Downloading the verified Torch {build} wheel"),
                     )
                     .await;
-                    match acquisition.hold(vec![wheel.clone()], false).await? {
+                    match acquisition
+                        .hold(&wheel_selection("torch"), vec![wheel.clone()], false)
+                        .await?
+                    {
                         Ok(held) => held_torch = Some((held, wheel)),
                         Err(reason) => self.note_torch_pip_downloads(
                             log_path,
@@ -2467,7 +2481,7 @@ impl VersionInstaller {
                             &format!("Downloading {} verified Torch dependency wheels", rest.len()),
                         )
                         .await;
-                        match acquisition.hold(rest.clone(), true).await? {
+                        match acquisition.hold(&wheel_selection("dependencies"), rest.clone(), true).await? {
                             Ok(held) => {
                                 for wheel in &rest {
                                     local_files.insert(wheel.name.clone(), held.file(wheel));

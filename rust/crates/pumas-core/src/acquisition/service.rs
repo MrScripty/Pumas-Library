@@ -563,6 +563,15 @@ pub trait AcquisitionHost: HttpAttemptHost {
         None
     }
 
+    /// Whether a partial file may be discarded and fetched again from byte
+    /// zero when its source refuses to continue it (a full body or 416 for a
+    /// range request). Applies only to a file with an expected SHA-256, so the
+    /// fresh transfer is still verified, and at most once per file per
+    /// acquisition. The default keeps the partial and fails, as before.
+    fn restart_refused_continuation(&self) -> bool {
+        false
+    }
+
     /// Optional observation only: an exact manifest member is about to acquire.
     /// Default no-op preserves existing hosts and transfer/publication policy.
     fn file_started(&mut self, _index: usize) {}
@@ -1266,6 +1275,7 @@ impl AcquisitionService {
         let key = (operation.record.id, file_index);
         let started = Instant::now();
         let mut attempt = 0_u32;
+        let mut restarted_refused_continuation = false;
         loop {
             if transfer_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now()) {
                 return Err(match source {
@@ -1560,6 +1570,29 @@ impl AcquisitionService {
                 Ok(HttpBodyOutcome::Cancelled) => {
                     self.forget_checkpoint(key)?;
                     return Err(PumasError::DownloadCancelled);
+                }
+                Err(error)
+                    if resume > 0
+                        && !restarted_refused_continuation
+                        && file.expected_sha256().is_some()
+                        && super::http::is_refused_continuation(&error)
+                        && host.restart_refused_continuation()
+                        && !host.cancel_requested() =>
+                {
+                    // The source cannot continue this representation. Under a
+                    // publisher digest a fresh full transfer is still verified,
+                    // so the consumer chose to restart rather than keep a
+                    // partial that can never complete.
+                    restarted_refused_continuation = true;
+                    self.forget_checkpoint(key)?;
+                    let discard = workspace.clone();
+                    let path = file.logical_path().to_owned();
+                    owned(context, "discard refused acquisition partial", move || {
+                        discard.remove_part(&path)
+                    })
+                    .await?;
+                    host.retry(attempt, None, Some(&error.to_string())).await?;
+                    continue;
                 }
                 Err(error) => {
                     if !error.is_retryable() || host.cancel_requested() {
@@ -2052,6 +2085,79 @@ impl AcquisitionConsumer {
                     },
                 };
                 use_handle.withdraw_after_cleanup(cleanup).await?;
+                Ok(true)
+            })
+            .await
+    }
+
+    /// Withdraw an unfinished transfer (`Transferring` or `FilesReady`) that
+    /// its consumer has superseded, so no later demand can resume its bytes.
+    ///
+    /// The caller must hold exclusive authority over `workspace`: no transfer
+    /// for this demand may be running. A live warm checkpoint for the record is
+    /// refused as evidence of one. `cleanup` runs after the exact unreceipted
+    /// record is rechecked and must reclaim the workspace's partial bytes; only
+    /// its success permits withdrawal. Returns `false` when the demand has no
+    /// record; a record under consumer use or already terminal is refused.
+    pub async fn withdraw_unfinished_transfer(
+        &self,
+        demand: AcquisitionDemand,
+        manifest: ArtifactManifest,
+        workspace: AcquisitionWorkspace,
+        cleanup: impl FnOnce() -> Result<()> + Send + 'static,
+    ) -> Result<bool> {
+        if demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        let service = self.service.clone();
+        self.scope
+            .run_worker_invocation(move |context| async move {
+                service.require_schema(&context).await?;
+                let store = service.store.clone();
+                let lookup = demand.clone();
+                let Some(record) = owned(&context, "observe unfinished transfer", move || {
+                    Ok(store
+                        .acquisitions()?
+                        .into_values()
+                        .find(|record| record.demand == lookup))
+                })
+                .await?
+                else {
+                    return Ok(false);
+                };
+                if record.manifest != manifest || &record.workspace != workspace.identity() {
+                    return Err(invalid(
+                        "Unfinished transfer does not match the supplied selection or workspace",
+                    ));
+                }
+                if !matches!(
+                    record.phase,
+                    AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady
+                ) {
+                    return Err(invalid(
+                        "Only an unfinished transfer can be withdrawn as superseded",
+                    ));
+                }
+                {
+                    let mut checkpoints = service
+                        .checkpoints
+                        .lock()
+                        .map_err(|_| invalid("Checkpoint owner poisoned"))?;
+                    checkpoints.retain(|_, checkpoint| checkpoint.owner.is_live());
+                    if checkpoints.keys().any(|(id, _)| *id == record.id) {
+                        return Err(invalid(
+                            "A live transfer still holds this acquisition's continuation",
+                        ));
+                    }
+                }
+                workspace.validate()?;
+                let operation = AcquisitionOperation {
+                    record,
+                    context: context.clone(),
+                };
+                service
+                    .cleanup_cancelled_transfer(&context, operation, Box::new(cleanup))
+                    .await?;
                 Ok(true)
             })
             .await
@@ -4784,6 +4890,128 @@ mod tests {
     #[tokio::test]
     async fn cleanup_failure_retains_using_record_and_verified_file() {
         withdrawal_waits_for_consumer_effect(true).await;
+    }
+
+    #[tokio::test]
+    async fn superseded_unfinished_transfer_is_withdrawn_only_after_cleanup() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "superseded-selection".into(),
+        };
+        // The source is unavailable, so the transfer stays unfinished.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let failed = consumer
+            .acquire_http(
+                AcquisitionHttpRequest {
+                    demand: demand.clone(),
+                    manifest: manifest("payload.bin"),
+                    workspace: workspace(&stage),
+                    sources: vec![AcquisitionHttpSource {
+                        url,
+                        authorization: None,
+                    }],
+                    retry: retry(),
+                },
+                reqwest::Client::new(),
+                Box::new(Host),
+                |_use_handle| async move { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                |(), _receipt| async move { Ok::<(), PumasError>(()) },
+            )
+            .await;
+        assert!(failed.is_err());
+        server.await.unwrap();
+        assert_eq!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Transferring
+        );
+
+        let unknown = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "never-admitted".into(),
+        };
+        assert!(!consumer
+            .withdraw_unfinished_transfer(
+                unknown,
+                manifest("payload.bin"),
+                workspace(&stage),
+                || { Ok(()) }
+            )
+            .await
+            .unwrap());
+        // Another selection cannot withdraw this record.
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand.clone(),
+                manifest("other.bin"),
+                workspace(&stage),
+                || Ok(())
+            )
+            .await
+            .is_err());
+        // Failed cleanup keeps the unfinished transfer resumable.
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Err(PumasError::Validation {
+                    field: "fixture".into(),
+                    message: "partial still present".into(),
+                }),
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Transferring
+        );
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let observed = cleaned.clone();
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                move || {
+                    observed.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap());
+        assert!(cleaned.load(Ordering::SeqCst));
+        assert_eq!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Withdrawn
+        );
+        // A terminal record is not withdrawn again.
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand,
+                manifest("payload.bin"),
+                workspace(&stage),
+                || { Ok(()) }
+            )
+            .await
+            .is_err());
+        consumer.shutdown().await.unwrap();
+        service.shutdown().await.unwrap();
     }
 
     #[tokio::test]

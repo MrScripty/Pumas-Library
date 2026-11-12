@@ -4,14 +4,19 @@
 //! and index SHA-256. This module downloads that exact set with the same
 //! acquisition lifecycle llama.cpp archives use: transfers retry and resume
 //! from retained bytes, and every file is verified against its SHA-256 before
-//! the installer may read it. The verified use lease stays held while pip
-//! installs from the local files, then settles.
+//! the installer may read it. A source that refuses to continue a partial (a
+//! full body or 416 for a range request) restarts that wheel from byte zero.
+//! The verified use lease stays held while pip installs from the local files,
+//! then settles.
 //!
-//! Retention: a workspace is named by its exact wheel set. A failed transfer
-//! keeps its partial bytes so the next install resumes them; a failed install
-//! keeps its verified wheels for the next attempt. Success and cancellation
-//! remove the workspace. Once an attempt knows its whole wheel closure, it
-//! removes settled workspaces it does not use; unfinished transfers stay.
+//! Retention: a workspace is named by its exact wheel set, and its demand by
+//! the install selection it serves. A failed transfer keeps its partial bytes
+//! so the next install resumes them; a failed install keeps its verified
+//! wheels for the next attempt. Success and cancellation remove the workspace.
+//! When a new resolution of a selection names a different set, that
+//! selection's older unfinished sets can never be resumed and are removed;
+//! other selections' unfinished sets stay. Once an attempt knows its whole
+//! wheel closure, it removes settled workspaces it does not use.
 
 use super::*;
 use pumas_library::acquisition::{
@@ -149,14 +154,37 @@ fn wheel_set(wheels: &[LockedWheel]) -> std::result::Result<(String, ArtifactMan
     Ok((key, ArtifactManifest::new(source, files).map_err(invalid)?))
 }
 
-fn demand_generation(operation: &str, key: &str) -> Option<u64> {
-    operation
+/// The durable demand names the install selection it serves, its exact wheel
+/// set and a generation: `wheels:<selection>:<set>:<generation>`.
+fn demand_operation(selection: &str, key: &str, generation: u64) -> String {
+    format!("{DEMAND_PREFIX}:{selection}:{key}:{generation}")
+}
+
+fn parse_demand_operation(operation: &str) -> Option<(&str, &str, u64)> {
+    let mut parts = operation
         .strip_prefix(DEMAND_PREFIX)?
         .strip_prefix(':')?
-        .strip_prefix(key)?
-        .strip_prefix(':')?
-        .parse()
-        .ok()
+        .split(':');
+    let selection = parts.next()?;
+    let key = parts.next()?;
+    let generation = parts.next()?.parse().ok()?;
+    parts
+        .next()
+        .is_none()
+        .then_some((selection, key, generation))
+}
+
+/// A short stable identity for an install selection (release, build, Python,
+/// dependency profile, platform and wheel role), as recorded in demands.
+pub(super) fn selection_scope(selection: &str) -> String {
+    format!("{:x}", Sha256::digest(selection.as_bytes()))[..16].to_owned()
+}
+
+fn is_unfinished(record: &AcquisitionRecord) -> bool {
+    matches!(
+        record.phase,
+        AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady
+    )
 }
 
 fn is_settled(record: &AcquisitionRecord) -> bool {
@@ -200,11 +228,18 @@ impl TorchWheelAcquisition {
     /// the existing pip download and reports the reason. A transfer failure is
     /// an error, with partial bytes kept so a retry resumes them.
     ///
+    /// `selection` identifies the install selection and wheel role this set
+    /// serves (see [`selection_scope`]). An unfinished set this selection held
+    /// before, which the new resolution no longer names, is superseded: no
+    /// demand can resume it again, so it is withdrawn and its bytes removed.
+    /// Unfinished sets of other selections stay resumable.
+    ///
     /// With `collect_settled`, settled workspaces of other sets are removed
     /// first. Pass it only once the attempt's whole wheel closure is known, so
     /// a set the attempt is about to reuse is never removed.
     pub(super) async fn hold(
         &self,
+        selection: &str,
         wheels: Vec<LockedWheel>,
         collect_settled: bool,
     ) -> Result<std::result::Result<HeldWheels, String>> {
@@ -218,6 +253,8 @@ impl TorchWheelAcquisition {
             Ok(selection) => selection,
             Err(reason) => return Ok(Err(reason)),
         };
+        let scope = selection_scope(selection);
+        let selection = scope.as_str();
         let root = self.root.clone();
         let lease = self.lease.clone();
         let relative = key.clone();
@@ -234,7 +271,23 @@ impl TorchWheelAcquisition {
             })
             .await?;
         let workspace_identity = grant.workspace_identity().clone();
-        let records = self.consumer.retained_acquisitions().await?;
+        let mut records = self.consumer.retained_acquisitions().await?;
+        let superseded: Vec<_> = records
+            .iter()
+            .filter(|record| {
+                is_unfinished(record)
+                    && record.workspace != workspace_identity
+                    && parse_demand_operation(&record.demand.operation)
+                        .is_some_and(|(scope, set, _)| scope == selection && set != key)
+            })
+            .cloned()
+            .collect();
+        if !superseded.is_empty() {
+            for record in &superseded {
+                self.withdraw_superseded(record).await;
+            }
+            records = self.consumer.retained_acquisitions().await?;
+        }
         if collect_settled {
             self.collect_garbage(&records, &key).await;
         }
@@ -281,13 +334,15 @@ impl TorchWheelAcquisition {
             None => {
                 let generation = on_workspace
                     .iter()
-                    .filter_map(|record| demand_generation(&record.demand.operation, &key))
+                    .filter_map(|record| parse_demand_operation(&record.demand.operation))
+                    .filter(|(scope, set, _)| *scope == selection && *set == key)
+                    .map(|(_, _, generation)| generation)
                     .max()
                     .unwrap_or(0)
                     + 1;
                 AcquisitionDemand {
                     consumer: self.consumer.owner().to_owned(),
-                    operation: format!("{DEMAND_PREFIX}:{key}:{generation}"),
+                    operation: demand_operation(selection, &key, generation),
                 }
             }
         };
@@ -394,6 +449,62 @@ impl TorchWheelAcquisition {
                          install resumes them: {error}"
                     ),
                 })
+            }
+        }
+    }
+
+    /// Withdraw an unfinished set its selection no longer names and remove its
+    /// bytes. The Torch versions lock this attempt holds excludes any transfer
+    /// for it. A failure is reported and the set kept for a later attempt.
+    async fn withdraw_superseded(&self, record: &AcquisitionRecord) {
+        let name = record.workspace.relative_target.clone();
+        let owned_name = name.strip_prefix(WHEEL_SET_PREFIX).is_some_and(|digest| {
+            digest.len() == WHEEL_SET_DIGEST_CHARS
+                && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        });
+        if !owned_name {
+            warn!(workspace = %name, "Superseded Torch wheel set has an unexpected workspace name; kept");
+            return;
+        }
+        let root = self.root.clone();
+        let lease = self.lease.clone();
+        let relative = name.clone();
+        let captured = self
+            .consumer
+            .run_blocking("reserve superseded Torch wheel workspace", move || {
+                let directory = root.join(&relative);
+                match std::fs::create_dir(&directory) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(PumasError::io_with_path(error, &directory)),
+                }
+                ReservedDirectory::capture(&root, Path::new(&relative), lease, || Ok(()))
+            })
+            .await;
+        let result = async {
+            let grant = captured?;
+            if grant.workspace_identity() != &record.workspace {
+                return Err(PumasError::Other(
+                    "the workspace root changed since the set was admitted".into(),
+                ));
+            }
+            let clear = grant.clone();
+            self.consumer
+                .withdraw_unfinished_transfer(
+                    record.demand.clone(),
+                    record.manifest.clone(),
+                    grant.acquisition_workspace()?,
+                    move || clear.clear_contents(),
+                )
+                .await?;
+            remove_workspace(&self.consumer, grant).await;
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => info!(workspace = %name, "Removed a superseded unfinished Torch wheel set"),
+            Err(error) => {
+                warn!(workspace = %name, %error, "Superseded Torch wheel set was kept")
             }
         }
     }
@@ -644,6 +755,13 @@ impl AcquisitionHost for TorchWheelHost {
         self.cancelled_grant.take().map(|grant| {
             Box::new(move || grant.clear_contents()) as Box<dyn FnOnce() -> Result<()> + Send>
         })
+    }
+
+    /// Every wheel carries its index SHA-256, so a source that cannot continue
+    /// a partial is fetched again from byte zero and still verified, rather
+    /// than leaving a partial that can never complete.
+    fn restart_refused_continuation(&self) -> bool {
+        true
     }
 
     fn file_started(&mut self, index: usize) {

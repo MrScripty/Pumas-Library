@@ -21,6 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   management modes. The desktop app derives its version panels and runtime
   profile editor choices from it instead of hard-coded lists, so ONNX Runtime
   profiles now offer GPU.
+- Installing an ONNX Runtime CUDA build (`+cuda12`, `+cuda13`) also installs
+  the NVIDIA CUDA runtime, cuBLAS, cuFFT, cuRAND, NVRTC, nvJitLink and cuDNN
+  libraries it loads, into `cuda/lib` of that version, and the version's ONNX
+  host starts with its library search path pointing there. Which packages and
+  version ranges a build needs comes from the `cuda` and `cudnn` extras of the
+  matching `onnxruntime-gpu` release, read from PyPI or Microsoft's
+  `onnxruntime-cuda-12`/`onnxruntime-cuda-13` feed; Pumas then takes the
+  newest compatible NVIDIA wheels on PyPI, with no pinned versions. The wheels
+  download with the release archive through the shared acquisition path
+  (resumable, each verified against its published SHA-256), and a retried
+  install keeps the set it started with. Only shared libraries and licenses
+  are kept; `cuda/libraries.json` records their source and digests, and
+  removing the version removes them. A build without usable metadata (CUDA 12
+  builds from 1.30, CUDA 13 builds before 1.28, as published today) is refused
+  with the reason. The NVIDIA driver remains the operating system's. CPU builds
+  are unchanged. See
+  [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md#amendment-2026-11-12-cuda-libraries).
 
 ### Changed
 
@@ -42,9 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   build's execution provider (CPU, CUDA, or CoreML on macOS); a provider that
   cannot initialize, or a missing runtime, refuses the launch with the reason.
   For CUDA the reason says whether the NVIDIA driver is missing, too old for
-  the build, or present with the CUDA runtime or cuDNN libraries missing; the
-  driver stays the operating system's, and Pumas only points at NVIDIA's
-  download. Hosts run with ONNX Runtime telemetry disabled
+  the build, or present while the CUDA runtime or cuDNN libraries installed
+  with the version did not load (reinstall the version); the driver stays the
+  operating system's, and Pumas only points at NVIDIA's download. Hosts run with ONNX Runtime telemetry disabled
   (`ORT_DISABLE_TELEMETRY=1` and telemetry events off), so ONNX Runtime
   creates no device id or telemetry database in the user cache.
   Serving launches the profile's host when needed. `ORT_DYLIB_PATH` remains a

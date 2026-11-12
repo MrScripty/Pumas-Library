@@ -738,4 +738,56 @@ mod onnx_host_tests {
             );
         }
     }
+
+    #[test]
+    fn an_onnx_host_searches_the_cuda_libraries_installed_with_its_version() {
+        use crate::onnx_runtime_distribution as distribution;
+        let temp = tempfile::TempDir::new().unwrap();
+        let version_dir = temp.path().join("v1.31.1+cuda12");
+        std::fs::create_dir_all(version_dir.join("lib")).unwrap();
+        let Some((variable, separator)) = distribution::library_search_path_variable() else {
+            // macOS has no CUDA builds; its host gets no search path.
+            let config = crate::process::BinaryLaunchConfig::onnx_host(
+                "v1.31.1+cpu",
+                &version_dir,
+                "/fixture/bin/pumas-rpc",
+            );
+            assert!(!config.env_vars.contains_key("DYLD_LIBRARY_PATH"));
+            return;
+        };
+
+        // Without installed CUDA libraries the host's search path is untouched.
+        let config = crate::process::BinaryLaunchConfig::onnx_host(
+            "v1.31.1+cuda12",
+            &version_dir,
+            "/fixture/bin/pumas-rpc",
+        );
+        assert!(!config.env_vars.contains_key(variable));
+
+        let library_dir = distribution::join_relative(&version_dir, distribution::CUDA_LIBRARY_DIR);
+        std::fs::create_dir_all(&library_dir).unwrap();
+        // A directory without the record of what filled it is not an install.
+        assert_eq!(distribution::installed_cuda_library_dir(&version_dir), None);
+        std::fs::write(
+            distribution::join_relative(&version_dir, distribution::CUDA_LIBRARIES_RECORD),
+            b"{}",
+        )
+        .unwrap();
+        assert_eq!(
+            distribution::installed_cuda_library_dir(&version_dir).as_deref(),
+            Some(library_dir.as_path())
+        );
+        let config = crate::process::BinaryLaunchConfig::onnx_host(
+            "v1.31.1+cuda12",
+            &version_dir,
+            "/fixture/bin/pumas-rpc",
+        );
+        let search_path = config.env_vars.get(variable).expect("library search path");
+        let first = search_path.split(separator).next().unwrap();
+        assert_eq!(first, library_dir.to_string_lossy());
+        if variable == "LD_LIBRARY_PATH" {
+            // The inherited LD_LIBRARY_PATH is never passed to owned children.
+            assert_eq!(search_path, &library_dir.to_string_lossy());
+        }
+    }
 }

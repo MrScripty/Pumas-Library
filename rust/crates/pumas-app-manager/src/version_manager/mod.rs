@@ -344,6 +344,9 @@ pub struct VersionManager {
     torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
     #[cfg(test)]
     native_receipt_pause: Option<Arc<installer::TorchPublicationPause>>,
+    /// Loopback package indexes standing in for PyPI and the ONNX Runtime feeds.
+    #[cfg(test)]
+    cuda_wheel_sources: Option<installer::CudaWheelSources>,
     #[cfg(test)]
     interrupt_after_native_rename: Option<Arc<AtomicBool>>,
     #[cfg(test)]
@@ -503,6 +506,8 @@ impl VersionManager {
             torch_publication_pause: None,
             #[cfg(test)]
             native_receipt_pause: None,
+            #[cfg(test)]
+            cuda_wheel_sources: None,
             #[cfg(test)]
             interrupt_after_native_rename: None,
             #[cfg(test)]
@@ -1272,6 +1277,12 @@ impl VersionManager {
         #[cfg(test)]
         let installer = if let Some(pause) = &self.native_receipt_pause {
             installer.with_native_receipt_pause(pause.clone())
+        } else {
+            installer
+        };
+        #[cfg(test)]
+        let installer = if let Some(sources) = &self.cuda_wheel_sources {
+            installer.with_cuda_wheel_sources(sources.clone())
         } else {
             installer
         };

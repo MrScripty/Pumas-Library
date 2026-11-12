@@ -4,9 +4,14 @@
 
 #[cfg(test)]
 mod native_archive_tests;
+mod onnx_cuda;
+#[cfg(test)]
+mod onnx_cuda_tests;
+mod python_index;
 mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
+pub(crate) use onnx_cuda::CudaWheelSources;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
 #[cfg(test)]
@@ -829,6 +834,8 @@ struct NativeHttpAttemptHost {
     progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
     progress_tx: mpsc::Sender<ProgressUpdate>,
     total_size: Option<u64>,
+    /// Bytes of the files of a multi-file set that are already acquired.
+    acquired_bytes: u64,
     started: Instant,
 }
 
@@ -847,16 +854,17 @@ impl pumas_library::acquisition::HttpAttemptHost for NativeHttpAttemptHost {
     }
 
     async fn record_progress(&mut self, downloaded_for_file: u64) -> Result<()> {
+        let downloaded = self.acquired_bytes.saturating_add(downloaded_for_file);
         let elapsed = self.started.elapsed().as_secs_f64();
-        let speed = (elapsed > 0.0).then_some(downloaded_for_file as f64 / elapsed);
+        let speed = (elapsed > 0.0).then_some(downloaded as f64 / elapsed);
         self.progress_tracker
             .write()
             .await
-            .update_download_progress(downloaded_for_file, self.total_size, speed);
+            .update_download_progress(downloaded, self.total_size, speed);
         send_install_progress(
             &self.progress_tx,
             ProgressUpdate::Download {
-                downloaded_bytes: downloaded_for_file,
+                downloaded_bytes: downloaded,
                 total_bytes: self.total_size,
                 speed_bytes_per_sec: speed,
             },
@@ -874,6 +882,10 @@ impl pumas_library::acquisition::AcquisitionHost for NativeHttpAttemptHost {
         self.cancelled_transfer_workspace.take().map(|custody| {
             Box::new(move || custody.revoke_and_clear()) as Box<dyn FnOnce() -> Result<()> + Send>
         })
+    }
+
+    fn file_acquired(&mut self, _index: usize, bytes: u64) {
+        self.acquired_bytes = self.acquired_bytes.saturating_add(bytes);
     }
 
     async fn retry(
@@ -1436,6 +1448,8 @@ pub struct VersionInstaller {
     shutdown_flag: Arc<AtomicBool>,
     github_client: Option<Arc<GitHubClient>>,
     acquisition_consumer: Option<Arc<AcquisitionConsumer>>,
+    /// Where the CUDA libraries of ONNX Runtime CUDA builds are resolved from.
+    cuda_wheel_sources: CudaWheelSources,
     torch_control: Arc<TorchInstallControl>,
     torch_cleanup: Arc<TorchCleanupTasks>,
     torch_attempt_lock: Mutex<()>,
@@ -1509,6 +1523,7 @@ impl VersionInstaller {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             github_client: None,
             acquisition_consumer: None,
+            cuda_wheel_sources: CudaWheelSources::official(),
             torch_control: Arc::new(TorchInstallControl::new()),
             torch_cleanup: Arc::new(TorchCleanupTasks::default()),
             torch_attempt_lock: Mutex::new(()),
@@ -1596,6 +1611,14 @@ impl VersionInstaller {
     #[cfg(test)]
     pub(crate) fn with_native_rename_park_marker(mut self, marker: PathBuf) -> Self {
         self.park_after_native_rename_marker = Some(marker);
+        self
+    }
+
+    /// Resolve ONNX Runtime CUDA libraries from `sources` instead of PyPI and
+    /// Microsoft's ONNX Runtime package feeds.
+    #[cfg(test)]
+    pub(crate) fn with_cuda_wheel_sources(mut self, sources: CudaWheelSources) -> Self {
+        self.cuda_wheel_sources = sources;
         self
     }
 
@@ -2166,6 +2189,76 @@ impl VersionInstaller {
         })
     }
 
+    /// The CUDA library wheels an ONNX Runtime CUDA tag installs, or `None`
+    /// for every other install. An unfinished attempt of the same tag keeps
+    /// the selection it started with, so its retained downloads resume;
+    /// otherwise the current compatible releases are resolved.
+    async fn onnx_cuda_selection(
+        &self,
+        runtime: NativeRuntime,
+        tag: &str,
+    ) -> Result<Option<onnx_cuda::CudaWheelSelection>> {
+        use pumas_library::onnx_runtime_distribution as distribution;
+        if runtime != NativeRuntime::OnnxRuntime {
+            return Ok(None);
+        }
+        let Some(cuda_major) = distribution::OnnxRuntimeVariant::from_tag(tag)
+            .and_then(|variant| variant.cuda_major())
+        else {
+            return Ok(None);
+        };
+        let platform =
+            python_index::WheelPlatform::host().ok_or_else(|| PumasError::InstallationFailed {
+                message: format!(
+                    "ONNX Runtime CUDA builds and NVIDIA's CUDA libraries exist only for Linux \
+                     x64 and Windows x64, not {}-{}",
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                ),
+            })?;
+        let release =
+            distribution::release_version(tag).ok_or_else(|| PumasError::InstallationFailed {
+                message: format!("ONNX Runtime release {tag} does not have a semantic version"),
+            })?;
+        let versions = self.versions_dir();
+        let retained_tag = tag.to_owned();
+        let retained = tokio::task::spawn_blocking(move || {
+            let identity = read_native_attempt(&versions, &retained_tag)
+                .ok()
+                .flatten()?;
+            if identity.removed {
+                return None;
+            }
+            let path = native_workspace_path(&versions, &retained_tag, &identity.attempt)
+                .join(onnx_cuda::SELECTION_FILE);
+            onnx_cuda::read_selection(&path).ok().flatten()
+        })
+        .await
+        .map_err(|error| PumasError::Other(format!("CUDA selection lookup failed: {error}")))?;
+        if let Some(selection) =
+            retained.filter(|selection| selection.serves(tag, platform, cuda_major))
+        {
+            info!(
+                "Resuming the CUDA {cuda_major} libraries selected for {tag}: {}",
+                onnx_cuda::describe(&selection)
+            );
+            return Ok(Some(selection));
+        }
+        let selection = onnx_cuda::resolve(
+            &self.cuda_wheel_sources,
+            tag,
+            &release,
+            cuda_major,
+            platform,
+        )
+        .await?;
+        info!(
+            "Selected the CUDA {cuda_major} libraries for {tag}: {}",
+            onnx_cuda::describe(&selection)
+        );
+        Ok(Some(selection))
+    }
+
     fn extract_native_archive_from(
         runtime: NativeRuntime,
         archive: File,
@@ -2221,22 +2314,35 @@ impl VersionInstaller {
             .map_err(|error| PumasError::InstallationFailed {
                 message: format!("Could not verify {runtime_name} release asset: {error}"),
             })?;
-        let manifest = selection.manifest().clone();
         let selected_file =
-            manifest
+            selection
+                .manifest()
                 .files()
                 .first()
                 .ok_or_else(|| PumasError::InstallationFailed {
                     message: format!("Verified {runtime_name} release selection has no file"),
                 })?;
-        let total_size = selected_file.expected_size();
-        let download_url = selection.download_url().to_owned();
-
         info!(
             "Selected publisher-verified {runtime_name} asset: {} ({} bytes)",
             asset_name,
-            total_size.unwrap_or_default()
+            selected_file.expected_size().unwrap_or_default()
         );
+        let download_url = selection.download_url().to_owned();
+
+        // A CUDA build of ONNX Runtime brings its CUDA runtime and cuDNN
+        // libraries: they join the archive in one verified download set.
+        let cuda = self.onnx_cuda_selection(runtime, tag).await?;
+        let (manifest, source_urls) = match &cuda {
+            None => (selection.manifest().clone(), vec![download_url.clone()]),
+            Some(cuda) => (
+                onnx_cuda::composite_manifest(selection.manifest(), cuda)?,
+                std::iter::once(download_url.clone())
+                    .chain(cuda.wheels.iter().map(|wheel| wheel.url.clone()))
+                    .collect(),
+            ),
+        };
+        let total_size = manifest.total_bytes();
+        self.check_cancelled()?;
 
         let log_dir = self.logs_dir();
         let log_path = log_dir.join(format!(
@@ -2269,6 +2375,21 @@ impl VersionInstaller {
                 prepare_native_acquisition_workspace(workspace_versions, workspace_tag, None)
             })
             .await?;
+        if let Some(cuda) = &cuda {
+            // Keep the selection with the attempt, so a retried or resumed
+            // install downloads exactly these files.
+            let path = custody.path().join(onnx_cuda::SELECTION_FILE);
+            let selection = cuda.clone();
+            consumer
+                .run_blocking("keep the CUDA library selection", move || {
+                    if onnx_cuda::read_selection(&path).ok().flatten().as_ref() != Some(&selection)
+                    {
+                        onnx_cuda::write_selection(&path, &selection)?;
+                    }
+                    Ok(())
+                })
+                .await?;
+        }
 
         let demand = AcquisitionDemand {
             consumer: consumer.owner().to_owned(),
@@ -2354,6 +2475,7 @@ impl VersionInstaller {
                     progress_tracker: self.progress_tracker.clone(),
                     progress_tx: progress_tx.clone(),
                     total_size,
+                    acquired_bytes: 0,
                     started: Instant::now(),
                 };
                 let retry = AcquisitionRetryPolicy {
@@ -2405,12 +2527,16 @@ impl VersionInstaller {
                     demand,
                     manifest,
                     workspace,
-                    sources: vec![AcquisitionHttpSource {
-                        url: download_url,
-                        authorization: None,
-                    }],
+                    sources: source_urls
+                        .into_iter()
+                        .map(|url| AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        })
+                        .collect(),
                     retry,
                 };
+                let cuda_for_prepare = cuda.clone();
                 consumer
                     .acquire_http(
                         request,
@@ -2418,6 +2544,12 @@ impl VersionInstaller {
                         Box::new(host),
                         move |use_set| async move {
                             let archive = use_set.open_file(0).await?;
+                            let mut cuda_wheels = Vec::new();
+                            if let Some(cuda) = &cuda_for_prepare {
+                                for index in 0..cuda.wheels.len() {
+                                    cuda_wheels.push(use_set.open_file(index + 1).await?);
+                                }
+                            }
                             let stage_for_extract = stage.clone();
                             let custody_for_extract = custody_for_prepare.clone();
                             let asset_name = asset_for_prepare.clone();
@@ -2437,6 +2569,18 @@ impl VersionInstaller {
                                         &stage_for_extract,
                                         &asset_name,
                                     )?;
+                                    if let Some(cuda) = &cuda_for_prepare {
+                                        let platform = python_index::WheelPlatform::host()
+                                            .ok_or_else(|| PumasError::InstallationFailed {
+                                                message: "ONNX Runtime CUDA libraries exist only for Linux x64 and Windows x64".into(),
+                                            })?;
+                                        onnx_cuda::extract_libraries(
+                                            cuda_wheels,
+                                            cuda,
+                                            &stage_for_extract,
+                                            platform,
+                                        )?;
+                                    }
                                     sync_native_tree(&stage_for_extract)?;
                                     sync_native_directory(stage_for_extract.parent().ok_or_else(|| PumasError::Other("Native output parent absent".into()))?)?;
                                     let output_tree_sha256 = hash_native_tree(&stage_for_extract)?;

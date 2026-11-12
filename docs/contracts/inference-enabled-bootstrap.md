@@ -96,10 +96,13 @@ and model-read policy is admitted.
 
 ## Minimum real inference inputs
 
-Real ONNX acceptance requires an operator-selected trusted `libonnxruntime.so`
-supporting C API 24 (qualification pin 1.24.2), its complete native dependency
-closure and per-file hashes. Install it beside the exact executable or select its
-absolute path through `ORT_DYLIB_PATH`. Cargo and Pumas do not download this SDK.
+Real ONNX acceptance requires an ONNX Runtime supporting C API 24 (1.24 or
+newer; 1.24.2 is the verified combination). The desktop installs one from the
+ONNX Runtime versions, which download official release archives through the
+shared acquisition service and verify their publisher SHA-256; the provider
+loads the active version. A developer may instead select an absolute library
+file through `ORT_DYLIB_PATH`, and headless inference archives package it beside
+the executable. Cargo never downloads it.
 Also provide an explicitly selected compatible ONNX embedding model package,
 `tokenizer.json`, configuration with the required hidden-size metadata (its
 `max_position_embeddings` or `n_positions`, when present, bounds each input's

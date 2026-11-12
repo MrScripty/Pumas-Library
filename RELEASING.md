@@ -91,10 +91,7 @@ python3 -m ruff check torch-server scripts/release
 python3 -m ruff format --check torch-server scripts/release
 python3 -m unittest discover -s torch-server/tests
 ./launcher.sh --build-release
-pumas_ort_work=$(mktemp -d)
-python3 scripts/release/onnx_runtime_stage.py --target linux-x86_64 --download --output-dir "$pumas_ort_work/runtime"
-python3 scripts/release/onnx_runtime_probe.py --target linux-x86_64 --runtime-dir "$pumas_ort_work/runtime" --output "$pumas_ort_work/loader.json"
-python3 scripts/release/stage-rpc.py --target linux-x86_64 --runtime-dir "$pumas_ort_work/runtime"
+python3 scripts/release/stage-rpc.py
 python3 scripts/release/smoke-rpc.py electron/resources/bin
 smoke_root=$(mktemp -d)
 mkdir -p "$smoke_root/library/shared-resources/models" "$smoke_root/config"
@@ -321,14 +318,12 @@ flows.
 
 Before tagging or publishing, satisfy the remaining artifact-plan obligations:
 
-- Separately provision and verify ONNX Runtime for full inference packages.
-  Cargo never downloads it. Stage the selected 1.24.2 distribution's native
-  library closure beside RPC, with trusted archive/library hashes and notices;
-  `stage-rpc.py --target TARGET --runtime-dir DIRECTORY` accepts only named pinned
-  native members and notices from that explicitly provisioned directory; it never
-  searches ambient developer outputs for runtime libraries.
-  Prove real ONNX execution from the extracted package with developer runtime
-  paths removed. An SDK-free build/health check does not qualify inference.
+- Desktop packages do not bundle ONNX Runtime. `stage-rpc.py` stages only the
+  RPC executable, and the package smoke checks refuse a packaged ONNX Runtime
+  library. Users download a compatible ONNX Runtime from the ONNX Runtime
+  versions in the desktop. Prove real ONNX execution with a downloaded version
+  before claiming inference; an SDK-free build/health check does not qualify it.
+  Headless inference archives still package the pinned runtime (see below).
 - Extract each exact installer and verify renderer, RPC, native dependencies,
   version identity, and installation/startup on its target platform.
 - Exercise the required desktop, launcher-root recovery, and termination flows

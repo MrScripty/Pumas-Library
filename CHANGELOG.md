@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   its running profiles; they keep the version they started from, and the
   change applies to new launches. Removing a version is refused only while an
   instance runs that version, and the refusal names the profiles to stop.
+- ONNX Runtime is a downloaded, version-managed runtime like llama.cpp and
+  Torch, and desktop packages no longer bundle it. The ONNX Runtime panel lists
+  official `microsoft/onnxruntime` releases that support the C API Pumas uses
+  (1.24 or newer, CPU archive for the host). It installs them through the shared,
+  resumable and verified download path and tracks installed, active and default
+  versions. The in-process provider loads the active version; `ORT_DYLIB_PATH`
+  remains a developer override. Without an installed version, serving and
+  runtime-profile launch refuse with the reason and how to install one. A newly
+  selected version takes effect after Pumas restarts, because ONNX Runtime keeps
+  the first library a process loads. See
+  [ADR 0006](docs/adr/0006-onnx-runtime-downloaded-runtime.md).
 
 ## [0.8.0] - 2026-11-08
 

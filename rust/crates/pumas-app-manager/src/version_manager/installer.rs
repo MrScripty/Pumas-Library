@@ -2244,14 +2244,24 @@ impl VersionInstaller {
             );
             return Ok(Some(selection));
         }
-        let selection = onnx_cuda::resolve(
+        // Resolution only reads package indexes, so a cancel or shutdown
+        // abandons it at once instead of waiting for slow requests.
+        let resolution = onnx_cuda::resolve(
             &self.cuda_wheel_sources,
             tag,
             &release,
             cuda_major,
             platform,
-        )
-        .await?;
+        );
+        let selection = tokio::select! {
+            selection = resolution => selection?,
+            _ = super::wait_for_install_cancel(self.cancel_flag.clone()) => {
+                return Err(Self::cancellation_error());
+            }
+            _ = super::wait_for_install_cancel(self.shutdown_flag.clone()) => {
+                return Err(Self::cancellation_error());
+            }
+        };
         info!(
             "Selected the CUDA {cuda_major} libraries for {tag}: {}",
             onnx_cuda::describe(&selection)

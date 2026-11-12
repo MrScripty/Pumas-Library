@@ -58,7 +58,7 @@ const CUDA_RUNTIME_PROJECT: &str = "nvidia-cuda-runtime";
 /// Only NVIDIA library packages are followed; a requirement on anything else
 /// is a Python dependency that no shared library needs.
 const NVIDIA_PROJECT_PREFIX: &str = "nvidia-";
-const MAX_RESOLUTION_ROUNDS: usize = 16;
+const MAX_RESOLUTION_ROUNDS: usize = 64;
 const INDEX_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// The selection an install attempt downloads, kept in its workspace.
 pub(super) const SELECTION_FILE: &str = "cuda-wheels.json";
@@ -203,6 +203,8 @@ struct Wanted {
     requirements: Vec<Requirement>,
     extras: BTreeSet<String>,
     required_by: BTreeSet<String>,
+    /// The chosen NVIDIA packages among `required_by`, by project name.
+    required_by_packages: BTreeSet<String>,
 }
 
 /// Resolve the CUDA library wheels for ONNX Runtime `release`'s CUDA
@@ -285,10 +287,13 @@ pub(super) async fn resolve(
     let wheel_index = PackageIndex::new(&sources.wheel_index, client)?;
     let mut listings: HashMap<String, Vec<IndexFile>> = HashMap::new();
     let mut chosen: BTreeMap<String, Chosen> = BTreeMap::new();
+    // Releases set aside because what they require cannot be satisfied: the
+    // resolver then tries an older release of that package.
+    let mut excluded: HashMap<String, Vec<PyVersion>> = HashMap::new();
     let mut settled = false;
-    for _ in 0..MAX_RESOLUTION_ROUNDS {
+    'rounds: for _ in 0..MAX_RESOLUTION_ROUNDS {
         let mut wanted: BTreeMap<String, Wanted> = BTreeMap::new();
-        let mut want = |requirement: &Requirement, by: &str| {
+        let mut want = |requirement: &Requirement, by: &str, by_package: Option<&str>| {
             if !requirement.name.starts_with(NVIDIA_PROJECT_PREFIX) {
                 debug!(
                     "Not following {} (required by {by}): not an NVIDIA library",
@@ -300,15 +305,22 @@ pub(super) async fn resolve(
             entry.requirements.push(requirement.clone());
             entry.extras.extend(requirement.extras.iter().cloned());
             entry.required_by.insert(by.to_owned());
+            if let Some(package) = by_package {
+                entry.required_by_packages.insert(package.to_owned());
+            }
         };
         let root_name = format!("{ORT_GPU_PROJECT} {release}");
         for requirement in &roots {
-            want(requirement, &root_name);
+            want(requirement, &root_name, None);
         }
         for (name, package) in &chosen {
             for requirement in &package.requires {
                 if requirement.applies(platform, &package.extras) {
-                    want(requirement, &format!("{name} {}", package.version.as_str()));
+                    want(
+                        requirement,
+                        &format!("{name} {}", package.version.as_str()),
+                        Some(name),
+                    );
                 }
             }
         }
@@ -353,31 +365,45 @@ pub(super) async fn resolve(
                     .collect::<Vec<_>>()
                     .join(", ")
             };
+            let set_aside = excluded.get(&name);
             let version = platform_versions(files, platform)
                 .into_iter()
                 .find(|version| {
-                    wanted
-                        .requirements
-                        .iter()
-                        .all(|requirement| requirement.allows(version))
-                })
-                .ok_or_else(|| {
-                    refused(format!(
-                        "No release of {name} on {} has a {} wheel that satisfies {} \
+                    set_aside.is_none_or(|versions| !versions.contains(version))
+                        && wanted
+                            .requirements
+                            .iter()
+                            .all(|requirement| requirement.allows(version))
+                });
+            let Some(version) = version else {
+                if !wanted.required_by_packages.is_empty() {
+                    // Try older releases of the packages that asked for this.
+                    for requirer in &wanted.required_by_packages {
+                        if let Some(package) = chosen.remove(requirer) {
+                            excluded
+                                .entry(requirer.clone())
+                                .or_default()
+                                .push(package.version);
+                        }
+                    }
+                    continue 'rounds;
+                }
+                return Err(refused(format!(
+                    "No release of {name} on {} has a {} wheel that satisfies {} \
                          (required by {}), so the CUDA {cuda_major} libraries of ONNX Runtime \
                          {release} cannot be installed; install another build or release of \
                          ONNX Runtime",
-                        wheel_index.display(),
-                        platform.id(),
-                        ranges(),
-                        wanted
-                            .required_by
-                            .iter()
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ))
-                })?;
+                    wheel_index.display(),
+                    platform.id(),
+                    ranges(),
+                    wanted
+                        .required_by
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            };
             let file = best_wheel(files, &version, platform)
                 .cloned()
                 .ok_or_else(|| {

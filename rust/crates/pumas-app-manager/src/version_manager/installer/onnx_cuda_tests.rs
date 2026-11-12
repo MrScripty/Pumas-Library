@@ -44,6 +44,8 @@ struct ServerState {
     truncate_once: HashSet<String>,
     /// Every request: its path and any `Range` header.
     log: Vec<(String, Option<String>)>,
+    /// Paths that are never answered.
+    stalled: HashSet<String>,
 }
 
 /// A loopback HTTP origin with byte-range support.
@@ -87,6 +89,10 @@ impl FixtureServer {
             .unwrap()
             .routes
             .insert(path.to_owned(), Route { body, content_type });
+    }
+
+    fn stall(&self, path: &str) {
+        self.state.lock().unwrap().stalled.insert(path.to_owned());
     }
 
     fn unroute(&self, path: &str) {
@@ -147,13 +153,17 @@ async fn serve(mut stream: tokio::net::TcpStream, state: Arc<StdMutex<ServerStat
         name.eq_ignore_ascii_case("range")
             .then(|| value.trim().to_owned())
     });
-    let (route, truncate) = {
+    let (route, truncate, stalled) = {
         let mut state = state.lock().unwrap();
         state.log.push((path.clone(), range.clone()));
         let route = state.routes.get(&path).cloned();
         let truncate = range.is_none() && state.truncate_once.remove(&path);
-        (route, truncate)
+        (route, truncate, state.stalled.contains(&path))
     };
+    if stalled {
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        return;
+    }
     let Some(route) = route else {
         let _ = stream
             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -663,6 +673,51 @@ async fn a_wheel_without_a_published_sha256_is_refused() {
 }
 
 #[tokio::test]
+async fn an_older_release_is_tried_when_the_newest_needs_what_does_not_exist() {
+    let server = FixtureServer::start().await;
+    let platform = WheelPlatform::LinuxX64;
+    publish_onnxruntime_gpu(&server, "/pypi/simple", platform, CUDA12_EXTRAS);
+    publish_cuda12_closure(&server, platform, 64);
+    // The newest cuDNN needs a cuBLAS release that has no wheel for the host.
+    let cudnn = CUDA12_PACKAGES
+        .iter()
+        .find(|package| package.project == "nvidia-cudnn-cu12")
+        .unwrap();
+    publish(
+        &server,
+        "/pypi/simple",
+        cudnn.project,
+        vec![
+            package_entry(platform, cudnn, 64),
+            IndexEntry::wheel(
+                &wheel_filename(platform, cudnn.distribution, "9.29.0.1"),
+                b"needs a missing cuBLAS".to_vec(),
+                &["nvidia-cublas-cu12>=12.10"],
+            ),
+        ],
+    );
+
+    let selection = onnx_cuda::resolve(
+        &sources(&server),
+        "v1.24.2+cuda12",
+        &release(),
+        12,
+        platform,
+    )
+    .await
+    .unwrap();
+    let chosen = |project: &str| {
+        selection
+            .wheels
+            .iter()
+            .find(|wheel| wheel.project == project)
+            .map(|wheel| wheel.version.clone())
+    };
+    assert_eq!(chosen("nvidia-cudnn-cu12").as_deref(), Some("9.28.1.4"));
+    assert_eq!(chosen("nvidia-cublas-cu12").as_deref(), Some("12.9.3.13"));
+}
+
+#[tokio::test]
 async fn a_resolved_runtime_of_another_cuda_major_is_refused() {
     let server = FixtureServer::start().await;
     let platform = WheelPlatform::LinuxX64;
@@ -1159,6 +1214,49 @@ mod installs {
         manager.remove_version(CUDA_TAG).await.unwrap();
         assert!(!version_dir.exists());
         manager.shutdown_installations().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelling_stops_a_cuda_install_waiting_on_a_package_index() {
+        let root = tempfile::TempDir::new().unwrap();
+        let server = FixtureServer::start().await;
+        publish_release(&server, root.path());
+        let page = "/pypi/simple/onnxruntime-gpu/";
+        server.stall(page);
+        let api = test_api(root.path()).await;
+        let manager = onnx_manager(root.path(), &api, &server).await;
+
+        let mut updates = manager.install_version(CUDA_TAG).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while server.requests(page).is_empty() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(manager.cancel_installation().await.unwrap());
+        let outcome = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match updates.recv().await {
+                    Some(ProgressUpdate::Error { message }) => return message,
+                    Some(ProgressUpdate::Completed { success: true }) => {
+                        panic!("a cancelled install must not complete")
+                    }
+                    Some(_) => {}
+                    None => return String::new(),
+                }
+            }
+        })
+        .await
+        .expect("cancel does not wait for the stalled index");
+        assert!(outcome.contains("cancelled"), "{outcome}");
+        assert!(manager
+            .version_path(CUDA_TAG)
+            .is_ok_and(|path| !path.exists()));
+        tokio::time::timeout(Duration::from_secs(10), manager.shutdown_installations())
+            .await
+            .expect("shutdown does not wait for the stalled index")
+            .ok();
     }
 
     #[tokio::test]

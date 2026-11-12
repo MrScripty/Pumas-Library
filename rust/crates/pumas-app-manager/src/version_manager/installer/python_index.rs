@@ -371,10 +371,8 @@ impl WheelPlatform {
             return Some(1);
         }
         let matches = match self {
-            Self::LinuxX64 => {
-                // glibc builds only: ONNX Runtime's own Linux build needs glibc.
-                tag.starts_with("manylinux") && tag.ends_with("_x86_64")
-            }
+            // glibc builds only: ONNX Runtime's own Linux build needs glibc.
+            Self::LinuxX64 => linux_tag_supported(tag, host_glibc()),
             Self::WindowsX64 => tag == "win_amd64",
         };
         matches.then_some(0)
@@ -400,6 +398,52 @@ impl WheelPlatform {
             Self::WindowsX64 => name.len() > 4 && name.to_ascii_lowercase().ends_with(".dll"),
         }
     }
+}
+
+/// The glibc version a manylinux x86_64 platform tag requires (PEP 600, with
+/// the PEP 513/571/599 aliases), or `None` for any other tag.
+fn manylinux_x86_64_glibc(tag: &str) -> Option<(u32, u32)> {
+    match tag {
+        "manylinux1_x86_64" => Some((2, 5)),
+        "manylinux2010_x86_64" => Some((2, 12)),
+        "manylinux2014_x86_64" => Some((2, 17)),
+        _ => {
+            let (major, minor) = tag
+                .strip_prefix("manylinux_")?
+                .strip_suffix("_x86_64")?
+                .split_once('_')?;
+            Some((major.parse().ok()?, minor.parse().ok()?))
+        }
+    }
+}
+
+/// Whether a Linux x86_64 wheel tag runs with `glibc`: a manylinux tag whose
+/// glibc requirement the host meets. An unknown host glibc admits every
+/// manylinux tag (a library resolved for another machine).
+fn linux_tag_supported(tag: &str, glibc: Option<(u32, u32)>) -> bool {
+    manylinux_x86_64_glibc(tag)
+        .is_some_and(|required| glibc.is_none_or(|available| required <= available))
+}
+
+/// The glibc version of this process, when it runs on glibc.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[allow(unsafe_code)]
+fn host_glibc() -> Option<(u32, u32)> {
+    static VERSION: OnceLock<Option<(u32, u32)>> = OnceLock::new();
+    *VERSION.get_or_init(|| {
+        // SAFETY: gnu_get_libc_version takes no arguments and returns a
+        // pointer to a static NUL-terminated string owned by glibc.
+        let text = unsafe { std::ffi::CStr::from_ptr(libc::gnu_get_libc_version()) };
+        let mut parts = text.to_str().ok()?.split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        Some((major, minor))
+    })
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn host_glibc() -> Option<(u32, u32)> {
+    None
 }
 
 /// A parsed `Requires-Dist` requirement (PEP 508), without URL references.
@@ -958,7 +1002,8 @@ impl PackageIndex {
             };
             let metadata = entry
                 .get("core-metadata")
-                .or_else(|| entry.get("data-dist-info-metadata"));
+                // PEP 714 renamed the PEP 691 field `dist-info-metadata`.
+                .or_else(|| entry.get("dist-info-metadata"));
             let core_metadata = match metadata {
                 None | Some(serde_json::Value::Bool(false)) | Some(serde_json::Value::Null) => None,
                 Some(serde_json::Value::Bool(true)) => Some(None),
@@ -1203,6 +1248,35 @@ mod tests {
         assert!(windows.is_shared_library("cudnn_engines_precompiled64_9.dll"));
         assert!(windows.is_shared_library("CUDART64_13.DLL"));
         assert!(!windows.is_shared_library("cudart.lib"));
+    }
+
+    #[test]
+    fn linux_wheels_need_a_glibc_the_host_has() {
+        let host = Some((2, 28));
+        for tag in [
+            "manylinux1_x86_64",
+            "manylinux2014_x86_64",
+            "manylinux_2_27_x86_64",
+            "manylinux_2_28_x86_64",
+        ] {
+            assert!(linux_tag_supported(tag, host), "{tag}");
+        }
+        for tag in [
+            "manylinux_2_34_x86_64",
+            "manylinux_2_28_aarch64",
+            "musllinux_1_2_x86_64",
+            "linux_x86_64",
+            "win_amd64",
+        ] {
+            assert!(!linux_tag_supported(tag, host), "{tag}");
+        }
+        assert!(linux_tag_supported("manylinux_2_34_x86_64", None));
+        assert_eq!(
+            manylinux_x86_64_glibc("manylinux2010_x86_64"),
+            Some((2, 12))
+        );
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        assert!(host_glibc().is_some_and(|(major, _)| major == 2));
     }
 
     #[test]

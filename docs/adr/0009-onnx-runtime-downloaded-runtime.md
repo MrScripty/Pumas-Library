@@ -193,7 +193,9 @@ a refused build, because that would be a guess about what the build links.
 they require in turn (cuDNN requires cuBLAS, cuBLAS requires NVRTC, cuFFT
 requires nvJitLink) are resolved on PyPI: for each, the newest final,
 non-yanked release that satisfies every range and has a wheel for the host
-(manylinux x86_64 or win_amd64). A requirement on a project outside NVIDIA's
+(win_amd64, or a manylinux x86_64 wheel whose glibc version the host has).
+When what that release requires cannot be satisfied, older releases of it are
+tried. A requirement on a project outside NVIDIA's
 `nvidia-*` packages is a Python dependency and is not followed; a marker on a
 Python variable cannot exclude a library. The resolved CUDA runtime must have
 the build's CUDA major version. Each wheel needs the SHA-256 its index

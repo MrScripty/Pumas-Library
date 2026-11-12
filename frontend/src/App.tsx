@@ -65,6 +65,7 @@ export default function InferencePluginsApp() {
     installationProgress,
     llamaCppInstalledVersions,
     ollamaInstalledVersions,
+    onnxRuntimeInstalledVersions,
     torchInstalledVersions,
   } = useSelectedAppVersions(selectedAppId);
   const { connectionUrl: llamaCppConnectionUrl, runtimeState: llamaCppRuntimeState } =
@@ -92,6 +93,9 @@ export default function InferencePluginsApp() {
       launchError: llamaCppRuntimeState.launchError,
       installedVersions: llamaCppInstalledVersions,
     },
+    onnxRuntime: {
+      installedVersions: onnxRuntimeInstalledVersions,
+    },
     torch: {
       isStarting: torchIsStarting,
       isStopping: torchIsStopping,
@@ -105,6 +109,7 @@ export default function InferencePluginsApp() {
     ollamaIsStarting,
     ollamaIsStopping,
     ollamaLaunchError,
+    onnxRuntimeInstalledVersions,
     runningState,
     status,
     systemResources,

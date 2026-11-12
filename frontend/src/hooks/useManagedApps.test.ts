@@ -29,6 +29,7 @@ describe('decorateManagedApps', () => {
         gpuMemory: 250,
       }),
       llamaCpp: lifecycleState({ isStarting: true, installedVersions: ['b9082'] }),
+      onnxRuntime: lifecycleState({ installedVersions: ['v1.24.2+cpu'] }),
       torch: lifecycleState(),
     });
 

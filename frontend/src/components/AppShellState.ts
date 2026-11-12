@@ -34,6 +34,7 @@ export interface SelectedAppShellState {
 interface BuildManagedAppsStateOptions {
   llamaCpp: AppProcessVisualState;
   ollama: AppProcessVisualState;
+  onnxRuntime: Pick<AppProcessVisualState, 'installedVersions'>;
   running: AppRunningState;
   status: StatusResponse | null | undefined;
   systemResources?: SystemResources | undefined;
@@ -118,6 +119,7 @@ export function getLauncherLatestVersion(
 export function buildManagedAppsState({
   llamaCpp,
   ollama,
+  onnxRuntime,
   running,
   status,
   systemResources,
@@ -136,6 +138,13 @@ export function buildManagedAppsState({
     llamaCpp: {
       ...llamaCpp,
       isRunning: llamaCpp.isRunning ?? false,
+    },
+    onnxRuntime: {
+      installedVersions: onnxRuntime.installedVersions,
+      isRunning: false,
+      isStarting: false,
+      isStopping: false,
+      launchError: null,
     },
     torch: {
       ...torch,

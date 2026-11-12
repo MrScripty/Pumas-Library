@@ -16,6 +16,7 @@ interface UseManagedAppsOptions {
   systemResources?: SystemResources;
   llamaCpp: ManagedAppVisualState;
   ollama: ManagedAppVisualState;
+  onnxRuntime: ManagedAppVisualState;
   torch: ManagedAppVisualState;
 }
 
@@ -43,7 +44,7 @@ function deriveIconState({
 
 export function decorateManagedApps(
   apps: AppConfig[],
-  { systemResources, llamaCpp, ollama, torch }: UseManagedAppsOptions
+  { systemResources, llamaCpp, ollama, onnxRuntime, torch }: UseManagedAppsOptions
 ): AppConfig[] {
   return apps.map((app) => {
     if (app.id === 'ollama') {
@@ -63,6 +64,15 @@ export function decorateManagedApps(
         ramUsage: calculateUsagePercent(llamaCpp.ramMemory, systemResources?.ram.total),
         gpuUsage: calculateUsagePercent(llamaCpp.gpuMemory, systemResources?.gpu.memory_total),
         iconState: deriveIconState(llamaCpp),
+      };
+    }
+
+    if (app.id === 'onnx-runtime') {
+      // ONNX Runtime executes in-process; its state is whether a downloaded
+      // version is installed.
+      return {
+        ...app,
+        iconState: deriveIconState(onnxRuntime),
       };
     }
 

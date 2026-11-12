@@ -7,6 +7,7 @@ interface UseSelectedAppVersionsResult {
   installationProgress: UseVersionsResult['installationProgress'];
   llamaCppInstalledVersions: string[];
   ollamaInstalledVersions: string[];
+  onnxRuntimeInstalledVersions: string[];
   torchInstalledVersions: string[];
 }
 
@@ -19,6 +20,10 @@ export function useSelectedAppVersions(selectedAppId: string | null): UseSelecte
     appId: 'llama-cpp',
     trackAvailableVersions: selectedAppId === 'llama-cpp',
   });
+  const onnxRuntimeVersions = useVersions({
+    appId: 'onnx-runtime',
+    trackAvailableVersions: selectedAppId === 'onnx-runtime',
+  });
   const torchVersions = useVersions({
     appId: 'torch',
     trackAvailableVersions: selectedAppId === 'torch',
@@ -27,9 +32,10 @@ export function useSelectedAppVersions(selectedAppId: string | null): UseSelecte
   const activeVersions = useMemo(() => {
     if (selectedAppId === 'ollama') return ollamaVersions;
     if (selectedAppId === 'llama-cpp') return llamaCppVersions;
+    if (selectedAppId === 'onnx-runtime') return onnxRuntimeVersions;
     if (selectedAppId === 'torch') return torchVersions;
     return ollamaVersions;
-  }, [selectedAppId, llamaCppVersions, ollamaVersions, torchVersions]);
+  }, [selectedAppId, llamaCppVersions, ollamaVersions, onnxRuntimeVersions, torchVersions]);
 
   const appVersions = getAppVersionState(selectedAppId, activeVersions);
 
@@ -38,6 +44,7 @@ export function useSelectedAppVersions(selectedAppId: string | null): UseSelecte
     installationProgress: appVersions.installationProgress,
     llamaCppInstalledVersions: llamaCppVersions.installedVersions,
     ollamaInstalledVersions: ollamaVersions.installedVersions,
+    onnxRuntimeInstalledVersions: onnxRuntimeVersions.installedVersions,
     torchInstalledVersions: torchVersions.installedVersions,
   };
 }

@@ -60,6 +60,7 @@ function renderPanel(selectedAppId: string | null) {
         modelManagerProps,
       }}
       onnxRuntime={{
+        ...sharedVersionProps,
         modelManagerProps,
       }}
       torch={{

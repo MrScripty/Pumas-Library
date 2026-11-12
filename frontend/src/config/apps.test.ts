@@ -9,16 +9,20 @@ import { DEFAULT_APPS, getAppById } from './apps';
 
 const onnxPlugin = JSON.parse(
   readFileSync(resolve(process.cwd(), '../launcher-data/plugins/onnx-runtime.json'), 'utf8')
-) as { id: string; installationType: string };
+) as {
+  id: string;
+  installationType: string;
+  capabilities: { hasVersionManagement: boolean };
+};
 
 describe('DEFAULT_APPS', () => {
-  it('registers ONNX Runtime as an in-process app without a connection URL', () => {
+  it('registers ONNX Runtime as a downloaded in-process app without a connection URL', () => {
     const onnxRuntime = getAppById('onnx-runtime');
 
     expect(onnxRuntime).toBeDefined();
     expect(onnxRuntime?.displayName).toBe('ONNX Runtime');
     expect(onnxRuntime?.status).toBe('idle');
-    expect(onnxRuntime?.iconState).toBe('offline');
+    expect(onnxRuntime?.iconState).toBe('uninstalled');
     expect(onnxRuntime?.connectionUrl).toBeUndefined();
     expect(DEFAULT_APPS.some((app) => app.id === 'onnx-runtime')).toBe(true);
   });
@@ -34,16 +38,27 @@ describe('DEFAULT_APPS', () => {
     expect(onnxPlugin).toMatchObject({
       id: 'onnx-runtime',
       installationType: 'in-process',
+      capabilities: { hasVersionManagement: true },
     });
     expect(getAppById(onnxPlugin.id)).toBeDefined();
-    expect(isVersionSupportedAppId(onnxPlugin.id)).toBe(false);
+    expect(isVersionSupportedAppId(onnxPlugin.id)).toBe(
+      onnxPlugin.capabilities.hasVersionManagement
+    );
 
-    const decorated = decorateManagedApps(DEFAULT_APPS, {
+    const uninstalled = decorateManagedApps(DEFAULT_APPS, {
       llamaCpp: lifecycleState(),
       ollama: lifecycleState(),
+      onnxRuntime: lifecycleState(),
       torch: lifecycleState(),
     });
-    expect(decorated.find((app) => app.id === onnxPlugin.id)?.iconState).toBe('offline');
+    expect(uninstalled.find((app) => app.id === onnxPlugin.id)?.iconState).toBe('uninstalled');
+    const installed = decorateManagedApps(DEFAULT_APPS, {
+      llamaCpp: lifecycleState(),
+      ollama: lifecycleState(),
+      onnxRuntime: { ...lifecycleState(), installedVersions: ['v1.24.2+cpu'] },
+      torch: lifecycleState(),
+    });
+    expect(installed.find((app) => app.id === onnxPlugin.id)?.iconState).toBe('offline');
 
     const modelManagerProps: ModelManagerProps = {
       libraryLoadStatus: 'ready',
@@ -69,6 +84,8 @@ describe('DEFAULT_APPS', () => {
 
     expect(panels.selectedAppId).toBe(onnxPlugin.id);
     expect(panels.onnxRuntime.modelManagerProps).toBe(modelManagerProps);
+    expect(panels.onnxRuntime.versions).toBe(UNSUPPORTED_VERSION_STATE);
+    expect(panels.onnxRuntime.appDisplayName).toBe('ONNX Runtime');
   });
 
   it('does not register discontinued native applications', () => {

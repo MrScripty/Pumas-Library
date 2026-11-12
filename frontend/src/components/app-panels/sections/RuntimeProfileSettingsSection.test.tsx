@@ -6,18 +6,22 @@ import type {
   RuntimeProfileStatus,
   RuntimeProfilesSnapshot,
 } from '../../../types/api-runtime-profiles';
+import { resetRuntimeProvidersForTests } from '../../../hooks/useRuntimeProviders';
+import { TEST_RUNTIME_PROVIDERS, testRuntimeProvidersResponse } from '../../../test/runtimeProviders';
 import { RuntimeProfileSettingsSection } from './RuntimeProfileSettingsSection';
 
 const {
   getElectronAPIMock,
   getInstalledVersionsMock,
   getRuntimeProfilesSnapshotMock,
+  getRuntimeProvidersMock,
   launchRuntimeProfileMock,
   stopRuntimeProfileMock,
   upsertRuntimeProfileMock,
 } =
   vi.hoisted(() => ({
     getElectronAPIMock: vi.fn(),
+    getRuntimeProvidersMock: vi.fn(),
     getInstalledVersionsMock:
       vi.fn<(appId?: string) => Promise<{ success: true; versions: string[] }>>(),
     getRuntimeProfilesSnapshotMock: vi.fn(),
@@ -90,6 +94,8 @@ describe('RuntimeProfileSettingsSection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetRuntimeProvidersForTests();
+    getRuntimeProvidersMock.mockResolvedValue(testRuntimeProvidersResponse());
     getRuntimeProfilesSnapshotMock.mockResolvedValue({
       success: true,
       snapshot,
@@ -116,6 +122,7 @@ describe('RuntimeProfileSettingsSection', () => {
     getElectronAPIMock.mockReturnValue({
       get_installed_versions: getInstalledVersionsMock,
       get_runtime_profiles_snapshot: getRuntimeProfilesSnapshotMock,
+      get_runtime_providers: getRuntimeProvidersMock,
       launch_runtime_profile: launchRuntimeProfileMock,
       stop_runtime_profile: stopRuntimeProfileMock,
       upsert_runtime_profile: upsertRuntimeProfileMock,
@@ -250,6 +257,91 @@ describe('RuntimeProfileSettingsSection', () => {
         port: null,
       })
     );
+  });
+
+  it('offers the device modes the backend registers for the provider', async () => {
+    const user = userEvent.setup();
+
+    render(<RuntimeProfileSettingsSection provider="onnx_runtime" />);
+
+    expect(await screen.findByDisplayValue('ONNX Runtime Profile')).toBeInTheDocument();
+    const deviceOptions = () =>
+      Array.from(screen.getByLabelText<HTMLSelectElement>('Device').options).map(
+        (option) => option.value
+      );
+    expect(deviceOptions()).toEqual(['auto', 'cpu', 'gpu']);
+    expect(getInstalledVersionsMock).toHaveBeenCalledWith('onnx-runtime');
+
+    await user.selectOptions(screen.getByLabelText('Device'), 'gpu');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
+    });
+    expect(upsertRuntimeProfileMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provider: 'onnx_runtime',
+        device: expect.objectContaining({ mode: 'gpu' }) as RuntimeProfileConfig['device'],
+      })
+    );
+  });
+
+  it('follows the runtime app and modes the backend reports rather than a local copy', async () => {
+    getRuntimeProvidersMock.mockResolvedValue(
+      testRuntimeProvidersResponse(
+        TEST_RUNTIME_PROVIDERS.map((info) =>
+          info.provider === 'llama_cpp'
+            ? { ...info, app_id: 'llama-cpp-next', device_modes: ['cpu'] }
+            : info
+        )
+      )
+    );
+
+    render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+    expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getInstalledVersionsMock).toHaveBeenCalledWith('llama-cpp-next');
+    });
+    expect(getInstalledVersionsMock).not.toHaveBeenCalledWith('llama-cpp');
+    expect(
+      Array.from(screen.getByLabelText<HTMLSelectElement>('Device').options).map(
+        (option) => option.value
+      )
+    ).toEqual(['cpu']);
+  });
+
+  it('does not list installed versions for a runtime the backend does not version-manage', async () => {
+    getRuntimeProvidersMock.mockResolvedValue(
+      testRuntimeProvidersResponse(
+        TEST_RUNTIME_PROVIDERS.map((info) =>
+          info.provider === 'llama_cpp' ? { ...info, version_managed: false } : info
+        )
+      )
+    );
+
+    render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+    expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+    expect(getInstalledVersionsMock).not.toHaveBeenCalled();
+  });
+
+  it('waits for the provider registry and offers a retry when it is unavailable', async () => {
+    const user = userEvent.setup();
+    getRuntimeProvidersMock.mockRejectedValueOnce(new Error('backend restarting'));
+
+    render(<RuntimeProfileSettingsSection provider="ollama" />);
+
+    expect(screen.getByText('Loading runtime provider details...')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Runtime provider details unavailable: backend restarting')
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Device')).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Retry loading runtime provider details' })
+    );
+    expect(await screen.findByDisplayValue('Ollama Default')).toBeInTheDocument();
+    expect(getRuntimeProvidersMock).toHaveBeenCalledTimes(2);
   });
 
   it('defaults llama.cpp GPU profiles to full layer offload', async () => {

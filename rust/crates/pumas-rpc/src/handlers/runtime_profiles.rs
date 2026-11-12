@@ -49,6 +49,15 @@ struct StopRuntimeProfileParams {
     profile_id: RuntimeProfileId,
 }
 
+/// The registered runtime providers, each with the runtime app a managed
+/// profile launches and whether this server version-manages that app.
+pub async fn get_runtime_providers(state: &AppState) -> crate::contract::RuntimeProvidersOutcome {
+    let managers = state.version_managers.read().await;
+    crate::contract::RuntimeProvidersOutcome::from_registry(&state.provider_registry, |app_id| {
+        managers.contains_key(app_id)
+    })
+}
+
 pub async fn get_runtime_profiles_snapshot(
     state: &AppState,
     _params: &Value,
@@ -251,17 +260,141 @@ pub async fn launch_runtime_profile(
     if app_id == "torch" {
         version_manager.verify_torch_identity(&tag).await?;
     }
-    Ok(serde_json::to_value(
-        state
-            .api
-            .launch_runtime_profile_for_model(
-                command.profile_id,
-                &tag,
-                &version_dir,
-                command.model_id.as_deref(),
+    let response = state
+        .api
+        .launch_runtime_profile_for_model(
+            command.profile_id.clone(),
+            &tag,
+            &version_dir,
+            command.model_id.as_deref(),
+        )
+        .await?;
+    if profile.provider == RuntimeProviderId::OnnxRuntime && response.success {
+        if let Err(reason) = confirm_onnx_host_ready(state, &command.profile_id).await? {
+            // The host could not load its library or execution provider;
+            // stop it so a corrected profile can launch again.
+            state.api.stop_runtime_profile(command.profile_id).await?;
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": reason,
+                "ready": false
+            }));
+        }
+    }
+    Ok(serde_json::to_value(response)?)
+}
+
+/// The endpoint of an owned, running runtime profile process.
+fn running_profile_endpoint(
+    state: &AppState,
+    profile_id: &RuntimeProfileId,
+) -> pumas_library::Result<Option<String>> {
+    Ok(state
+        .api
+        .observe_owned_runtime_profile(profile_id)?
+        .filter(|owned| owned.state == pumas_library::models::RuntimeLifecycleState::Running)
+        .map(|owned| owned.endpoint_url.as_str().to_string()))
+}
+
+/// Ask a just-launched ONNX host whether it loaded its runtime library and
+/// execution provider. `Err` carries the host's reason.
+async fn confirm_onnx_host_ready(
+    state: &AppState,
+    profile_id: &RuntimeProfileId,
+) -> pumas_library::Result<Result<(), String>> {
+    use pumas_library::onnx_runtime::host_protocol::{OnnxHostHealth, HEALTH_PATH};
+    let Some(endpoint) = running_profile_endpoint(state, profile_id)? else {
+        return Ok(Err(format!(
+            "ONNX Runtime profile {} stopped right after launch; see its log",
+            profile_id.as_str()
+        )));
+    };
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .connect_timeout(ONNX_HOST_HEALTH_POLL)
+        .build()
+        .map_err(|error| PumasError::Other(format!("ONNX host health client: {error}")))?;
+    let url = format!("{}{HEALTH_PATH}", endpoint.trim_end_matches('/'));
+    // The host listens only after loading its library and execution provider,
+    // which can take a while for GPU builds; poll until it answers.
+    let deadline = tokio::time::Instant::now() + ONNX_HOST_HEALTH_TIMEOUT;
+    let health = loop {
+        let attempt = async {
+            client
+                .get(&url)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<OnnxHostHealth>()
+                .await
+        }
+        .await;
+        match attempt {
+            Ok(health) => break Ok(health),
+            Err(error) if tokio::time::Instant::now() >= deadline => break Err(error),
+            Err(_) => {
+                if running_profile_endpoint(state, profile_id)?.is_none() {
+                    return Ok(Err(format!(
+                        "ONNX Runtime profile {} exited while starting; see its log",
+                        profile_id.as_str()
+                    )));
+                }
+                tokio::time::sleep(ONNX_HOST_HEALTH_POLL).await;
+            }
+        }
+    };
+    Ok(match health {
+        Ok(health) if health.ready => Ok(()),
+        Ok(health) => Err(health
+            .error
+            .unwrap_or_else(|| "ONNX host is not ready".to_string())),
+        Err(error) => Err(format!(
+            "ONNX host for profile {} did not report its health: {error}",
+            profile_id.as_str()
+        )),
+    })
+}
+
+/// How long a just-launched ONNX host may take to start answering its health
+/// check. It answers only after its runtime initialized; this bounds startup,
+/// not model loads.
+const ONNX_HOST_HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+/// Interval between health polls of a starting ONNX host.
+const ONNX_HOST_HEALTH_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The running ONNX host of an ONNX Runtime profile, launching the profile
+/// (with its pinned or the active version) when it is not running. `Err`
+/// carries the reason it cannot run.
+pub(super) async fn running_onnx_host(
+    state: &AppState,
+    profile_id: &RuntimeProfileId,
+) -> pumas_library::Result<Result<pumas_library::OnnxHostEndpoint, String>> {
+    let endpoint = match running_profile_endpoint(state, profile_id)? {
+        Some(endpoint) => endpoint,
+        None => {
+            let launched = launch_runtime_profile(
+                state,
+                &serde_json::json!({ "profile_id": profile_id.as_str() }),
             )
-            .await?,
-    )?)
+            .await?;
+            if launched["success"] != true {
+                return Ok(Err(launched["error"]
+                    .as_str()
+                    .unwrap_or("ONNX Runtime profile did not start")
+                    .to_string()));
+            }
+            match running_profile_endpoint(state, profile_id)? {
+                Some(endpoint) => endpoint,
+                None => {
+                    return Ok(Err(format!(
+                        "ONNX Runtime profile {} stopped right after launch; see its log",
+                        profile_id.as_str()
+                    )))
+                }
+            }
+        }
+    };
+    Ok(pumas_library::OnnxHostEndpoint::parse(&endpoint).map_err(|error| error.message))
 }
 
 pub async fn stop_runtime_profile(
@@ -339,6 +472,56 @@ mod tests {
             .await
             .insert(AppId::LlamaCpp.as_str().to_owned(), manager.clone());
         manager
+    }
+
+    #[tokio::test]
+    async fn runtime_providers_report_registry_facts_and_held_version_managers() {
+        let temp_dir = TempDir::new().unwrap();
+        let state = crate::handlers::test_support::build_test_app_state(temp_dir.path()).await;
+
+        let before = serde_json::to_value(get_runtime_providers(&state).await).unwrap();
+        assert_eq!(before["success"], true);
+        let providers = before["providers"].as_array().unwrap();
+        let pairs: Vec<_> = providers
+            .iter()
+            .map(|provider| {
+                (
+                    provider["provider"].as_str().unwrap(),
+                    provider["app_id"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("ollama", "ollama"),
+                ("llama_cpp", "llama-cpp"),
+                ("onnx_runtime", "onnx-runtime"),
+                ("torch", "torch"),
+            ]
+        );
+        assert!(providers
+            .iter()
+            .all(|provider| provider["version_managed"] == false));
+        let onnx = &providers[2];
+        assert_eq!(
+            onnx["device_modes"],
+            serde_json::json!(["auto", "cpu", "gpu"])
+        );
+        assert_eq!(onnx["provider_modes"], serde_json::json!(["onnx_serve"]));
+        assert_eq!(onnx["supports_managed_profiles"], true);
+        assert_eq!(onnx["supports_external_profiles"], false);
+
+        llama_cpp_manager_with_installed(&state, temp_dir.path(), &[]).await;
+        let after = serde_json::to_value(get_runtime_providers(&state).await).unwrap();
+        let managed: Vec<_> = after["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|provider| provider["version_managed"] == true)
+            .map(|provider| provider["app_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(managed, ["llama-cpp"]);
     }
 
     #[tokio::test]
@@ -430,7 +613,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn launch_in_process_onnx_profile_does_not_require_version_manager() {
+    async fn launching_an_onnx_profile_without_an_installed_runtime_is_refused_with_the_reason() {
         let temp_dir = TempDir::new().unwrap();
         let state = crate::handlers::test_support::build_test_app_state(temp_dir.path()).await;
         let profile_id = RuntimeProfileId::parse("onnx-smoke").unwrap();
@@ -462,8 +645,36 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(response["success"], true);
-        assert_eq!(response["ready"], true);
+        // ONNX Runtime runs in a host process launched from an installed
+        // version, so without the version manager there is nothing to launch.
+        assert_eq!(response["success"], false);
+        assert_eq!(
+            response["error"],
+            "Version manager not initialized for ONNX Runtime"
+        );
+
+        // With a manager but no installed version, the refusal says how to
+        // install one.
+        state.version_managers.write().await.insert(
+            pumas_library::AppId::OnnxRuntime.as_str().to_owned(),
+            pumas_app_manager::VersionManager::new(
+                temp_dir.path(),
+                pumas_library::AppId::OnnxRuntime,
+            )
+            .await
+            .unwrap(),
+        );
+        let response = launch_runtime_profile(
+            &state,
+            &serde_json::json!({ "profile_id": profile_id.as_str() }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["success"], false);
+        assert!(response["error"]
+            .as_str()
+            .unwrap()
+            .contains("install one from the ONNX Runtime versions"));
 
         let snapshot = state.api.get_runtime_profiles_snapshot().await.unwrap();
         let status = snapshot
@@ -472,6 +683,6 @@ mod tests {
             .iter()
             .find(|status| status.profile_id == profile_id)
             .unwrap();
-        assert_eq!(status.state, RuntimeLifecycleState::Running);
+        assert_ne!(status.state, RuntimeLifecycleState::Running);
     }
 }

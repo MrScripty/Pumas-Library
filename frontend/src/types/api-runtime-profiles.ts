@@ -4,6 +4,8 @@ import type {
   RuntimeProfileEvent as DesktopRuntimeProfileEvent,
   RuntimeProfileEventKind as DesktopRuntimeProfileEventKind,
   RuntimeProfileUpdateFeed as DesktopRuntimeProfileUpdateFeed,
+  RuntimeProviderDescriptor as DesktopRuntimeProviderDescriptor,
+  RuntimeProvidersOutcome as DesktopRuntimeProvidersOutcome,
 } from '@pumas/desktop-contract';
 import type { BaseResponse } from './api-common';
 
@@ -21,6 +23,12 @@ export type RuntimeManagementMode = 'managed' | 'external';
 export type RuntimeDeviceMode = 'auto' | 'cpu' | 'gpu' | 'hybrid' | 'specific_device';
 
 export type LlamaCppProfileMode = 'router' | 'dedicated';
+
+// Declared once by the backend provider registry (`get_runtime_providers`) and
+// generated: each provider's runtime app id, whether that app is version
+// managed, and the modes its profiles may use.
+export type RuntimeProviderInfo = DesktopRuntimeProviderDescriptor;
+export type RuntimeProvidersResponse = DesktopRuntimeProvidersOutcome;
 
 export type RuntimeLifecycleState =
   | 'unknown'

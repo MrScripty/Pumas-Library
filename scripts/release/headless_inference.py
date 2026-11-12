@@ -1,8 +1,10 @@
 """Build/verify unreleased inference headless candidates from explicit local inputs.
 
 Checksums bind bytes, not authenticity. The caller supplies trusted record hashes.
-Compatibility smoke is not native runtime loading or real inference acceptance.
-No command builds Cargo, fetches a runtime/model, or publishes a release.
+Archives bundle no inference runtime: Pumas installs ONNX Runtime, llama.cpp and
+Torch through its version manager. Compatibility smoke is not runtime loading or
+real inference acceptance. No command builds Cargo, fetches a runtime/model, or
+publishes a release.
 """
 
 import argparse
@@ -57,7 +59,8 @@ BUILD_KEYS = {
     "command",
     "rustc",
 }
-RUNTIME_KEYS = {"target", "version", "loader_entry", "source_archive_sha256", "files"}
+# Schema 2 dropped the schema-1 `runtime` record: archives package no runtime.
+MANIFEST_SCHEMA_VERSION = 2
 MANIFEST_KEYS = {
     "schema_version",
     "variant",
@@ -65,10 +68,15 @@ MANIFEST_KEYS = {
     "version",
     "target",
     "build",
-    "runtime",
     "compatibility",
     "files",
 }
+PAYLOAD_NAMES = (
+    "LICENSE.txt",
+    "THIRD-PARTY-NOTICES.txt",
+    "protocol-schema.json",
+    "build-record.json",
+)
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}\Z")
 RUSTC_VERSION = re.compile(
     r"rustc [0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)? "
@@ -172,34 +180,6 @@ def validate_build_record(build, target, expected):
         "reviewed offline locked production command required",
     )
     require(matches(build["rustc"], RUSTC_VERSION, 160), "bounded rustc version required")
-
-
-def validate_runtime_record(runtime, target):
-    exact_fields(runtime, RUNTIME_KEYS, "runtime record")
-    require(
-        runtime["target"] == target["rust_target"]
-        and runtime["version"] == PLAN["runtime_version"]
-        and runtime["loader_entry"] == target["runtime_entry"],
-        "exact runtime target/version/entry required",
-    )
-    require(
-        matches(runtime["source_archive_sha256"], HEX64, 64), "runtime source archive hash required"
-    )
-    files = runtime["files"]
-    require(
-        type(files) is dict and 0 < len(files) <= 123 and target["runtime_entry"] in files,
-        "runtime closure missing exact loader basename",
-    )
-    for name, item in files.items():
-        flat_name(name)
-        require(
-            re.fullmatch(r"[A-Za-z0-9_.-]+(?:\.dll|\.dylib|\.so(?:\.[0-9]+)*)", name),
-            "runtime closure must contain native libraries only",
-        )
-        validate_file_item(item)
-    require(
-        sum(item["bytes"] for item in files.values()) <= MAX_PACKAGE, "runtime exceeds bounded size"
-    )
 
 
 def sha256(path):
@@ -320,13 +300,15 @@ def validate_contract(contract):
 
 
 def check_manifest(manifest):
-    exact_fields(manifest, MANIFEST_KEYS, "manifest")
     require(
-        type(manifest.get("schema_version")) is int
-        and manifest["schema_version"] == 1
+        type(manifest) is dict
+        and type(manifest.get("schema_version")) is int
+        and manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
         and manifest.get("variant") == "headless-inference",
-        "wrong manifest variant",
+        f"headless-inference manifest schema {MANIFEST_SCHEMA_VERSION} required; "
+        "schema 1 archives packaged ONNX Runtime and are not accepted",
     )
+    exact_fields(manifest, MANIFEST_KEYS, "manifest")
     require(
         manifest.get("qualification") == "unverified_candidate",
         "package metadata cannot grant qualification",
@@ -338,11 +320,11 @@ def check_manifest(manifest):
     build = manifest["build"]
     validate_build_record(build, target, expected)
     discovery.validate_pins(expected, target["rust_target"])
-    runtime = manifest["runtime"]
-    validate_runtime_record(runtime, target)
     files = manifest["files"]
     require(
-        isinstance(files, dict) and 6 <= len(files) <= 128, "bounded complete inventory required"
+        isinstance(files, dict) and set(files) == {target["binary"], *PAYLOAD_NAMES},
+        "archive payload must be exactly the RPC, license, notices, schema and build record; "
+        "runtimes are installed by Pumas, never packaged",
     )
     require(len({name.casefold() for name in files}) == len(files), "case-colliding inventory")
     for name, item in files.items():
@@ -353,59 +335,26 @@ def check_manifest(manifest):
         sum(item["bytes"] for item in files.values()) <= MAX_PACKAGE, "package exceeds bounded size"
     )
     require(
-        {
-            target["binary"],
-            target["runtime_entry"],
-            "LICENSE.txt",
-            "THIRD-PARTY-NOTICES.txt",
-            "protocol-schema.json",
-            "build-record.json",
-        }
-        <= set(files),
-        "required payload missing",
-    )
-    require(
         files[target["binary"]]["sha256"] == build["binary_sha256"], "binary/build binding mismatch"
     )
     require(
         files["protocol-schema.json"]["sha256"] == expected["schema_sha256"],
         "schema/cohort mismatch",
     )
-    runtime_files = runtime.get("files", {})
-    require(
-        all(
-            name in files and canonical(files[name]) == canonical(item)
-            for name, item in runtime_files.items()
-        ),
-        "runtime closure differs from payload",
-    )
-    require(
-        set(files)
-        == {
-            target["binary"],
-            "LICENSE.txt",
-            "THIRD-PARTY-NOTICES.txt",
-            "protocol-schema.json",
-            "build-record.json",
-            *runtime_files,
-        },
-        "unexpected payload member",
-    )
     return target
 
 
-def admitted_metadata(build, runtime, contract, target):
+def admitted_metadata(build, contract, target):
     """Detach the declared public fields before staging; never export input objects.
 
     Validation rejects undeclared fields rather than silently dropping them. A
     pinned digest establishes byte identity, not whether an identifier is public:
-    the caller must review the public build/compatibility/runtime records before
+    the caller must review the public build/compatibility records before
     supplying their pins. Preserve admitted identity and actual command spelling.
     """
     expected = validate_contract(contract)
     validate_build_record(build, target, expected)
     discovery.validate_pins(expected, target["rust_target"])
-    validate_runtime_record(runtime, target)
     public_build = {
         "version": build["version"],
         "target": target["rust_target"],
@@ -423,26 +372,15 @@ def admitted_metadata(build, runtime, contract, target):
         ),
         "rustc": build["rustc"],
     }
-    public_runtime = {
-        "target": target["rust_target"],
-        "version": PLAN["runtime_version"],
-        "loader_entry": target["runtime_entry"],
-        "source_archive_sha256": runtime["source_archive_sha256"],
-        "files": {
-            name: {"sha256": item["sha256"], "bytes": item["bytes"]}
-            for name, item in runtime["files"].items()
-        },
-    }
     public_contract = copy.deepcopy(contract)
     # Validate the detached snapshot too; caller-owned containers are no longer
     # consulted while copying payloads or serializing either metadata member.
     expected = validate_contract(public_contract)
     validate_build_record(public_build, target, expected)
-    validate_runtime_record(public_runtime, target)
-    return public_build, public_runtime, public_contract
+    return public_build, public_contract
 
 
-def assemble(inputs, build_record, runtime_record, contract, schema, output):
+def assemble(inputs, build_record, contract, schema, output):
     """Records must already have been checked against caller-trusted digests."""
     output = Path(output)
     require(not output.exists(), "refusing to overwrite archive")
@@ -460,18 +398,15 @@ def assemble(inputs, build_record, runtime_record, contract, schema, output):
         (item for item in TARGETS.values() if item["rust_target"] == build_record["target"]), None
     )
     require(target is not None, "unsupported build target")
-    build_record, runtime_record, contract = admitted_metadata(
-        build_record, runtime_record, contract, target
-    )
+    build_record, contract = admitted_metadata(build_record, contract, target)
     expected = contract["expected"]
     manifest = {
-        "schema_version": 1,
+        "schema_version": MANIFEST_SCHEMA_VERSION,
         "variant": "headless-inference",
         "qualification": "unverified_candidate",
         "version": expected["version"],
         "target": target["id"],
         "build": build_record,
-        "runtime": runtime_record,
         "compatibility": contract,
         "files": {},
     }
@@ -730,7 +665,6 @@ def smoke(destination, manifest, expected_contract, timeout=45):
                 "APPDATA": str(root / "config"),
                 "LOCALAPPDATA": str(root / "data"),
                 "PUMAS_REGISTRY_DB_PATH": str(root / "registry.db"),
-                "ORT_SKIP_DOWNLOAD": "1",
             }
         )
         log_path = root / "rpc.log"
@@ -841,9 +775,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     build = commands.add_parser("assemble")
-    for name in ("inputs", "build-record", "runtime-record", "contract", "schema", "output"):
+    for name in ("inputs", "build-record", "contract", "schema", "output"):
         build.add_argument("--" + name, type=Path, required=True)
-    for name in ("build-record-sha256", "runtime-record-sha256", "contract-sha256"):
+    for name in ("build-record-sha256", "contract-sha256"):
         build.add_argument("--" + name, required=True)
     verify = commands.add_parser("verify")
     verify.add_argument("--archive", type=Path, required=True)
@@ -862,10 +796,9 @@ def main():
     validate_contract(contract)
     if args.command == "assemble":
         build_record = read_pinned_json(args.build_record, args.build_record_sha256)
-        runtime = read_pinned_json(args.runtime_record, args.runtime_record_sha256)
         inputs = decode(metadata_bytes(args.inputs))
         manifest, digest = assemble(
-            inputs, build_record, runtime, contract, metadata_bytes(args.schema), args.output
+            inputs, build_record, contract, metadata_bytes(args.schema), args.output
         )
         print(json.dumps({"archive_sha256": digest, "qualification": manifest["qualification"]}))
     else:

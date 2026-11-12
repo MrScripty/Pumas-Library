@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 d2a0f817cc215064033f00e2feb3c88d25f23926b12e0d6f37c7895c229c7e1e. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 205e050c80a9dae6311893cd6cf8b85acd5ae6e2d1baf70f26add9432b10035e. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -150,8 +150,10 @@ export type RuntimeProfilesSnapshot = { "cursor": string; "default_profile_id"?:
 export type RuntimeProfilesSnapshotResponse = { "error"?: string | null; "snapshot": RuntimeProfilesSnapshot; "success": boolean };
 export type RuntimeProfileStatus = { "endpoint_url"?: string | null; "last_error"?: string | null; "log_path"?: string | null; "pid"?: number | null; "profile_id": string; "runtime_version"?: string | null; "state": RuntimeLifecycleState };
 export type RuntimeProfileUpdateFeed = { "cursor": string; "events": ReadonlyArray<RuntimeProfileEvent>; "snapshot_required": boolean; "stale_cursor": boolean };
+export type RuntimeProviderDescriptor = { "app_id": string; "device_modes": ReadonlyArray<RuntimeDeviceMode>; "provider": RuntimeProviderId; "provider_modes": ReadonlyArray<RuntimeProviderMode>; "supports_external_profiles": boolean; "supports_managed_profiles": boolean; "version_managed": boolean };
 export type RuntimeProviderId = "torch" | "ollama" | "llama_cpp" | "onnx_runtime";
 export type RuntimeProviderMode = "torch_serve" | "ollama_serve" | "llama_cpp_router" | "llama_cpp_dedicated" | "onnx_serve";
+export type RuntimeProvidersOutcome = { "providers": ReadonlyArray<RuntimeProviderDescriptor>; "success": true };
 export type RuntimeRunningOutcome = boolean;
 export type RuntimeSchedulerSettings = { "auto_load": boolean; "keep_alive_seconds"?: number | null; "max_concurrent_models"?: number | null };
 export type RuntimeStopOutcome = { "skipped"?: ReadonlyArray<RuntimeStopSkipped>; "success": boolean };
@@ -332,6 +334,7 @@ export declare function decodeRuntimeLaunchOutcome(input: unknown): DecodeOutcom
 export declare function decodeRuntimeLaunchParams(input: unknown): DecodeOutcome<RuntimeLaunchParams>;
 export declare function decodeRuntimeProfileUpdateFeed(input: unknown): DecodeOutcome<RuntimeProfileUpdateFeed>;
 export declare function decodeRuntimeProfilesSnapshotResponse(input: unknown): DecodeOutcome<RuntimeProfilesSnapshotResponse>;
+export declare function decodeRuntimeProvidersOutcome(input: unknown): DecodeOutcome<RuntimeProvidersOutcome>;
 export declare function decodeRuntimeRunningOutcome(input: unknown): DecodeOutcome<RuntimeRunningOutcome>;
 export declare function decodeRuntimeStopOutcome(input: unknown): DecodeOutcome<RuntimeStopOutcome>;
 export declare function decodeS3AuthenticatedBundleImportParams(input: unknown): DecodeOutcome<S3AuthenticatedBundleImportParams>;

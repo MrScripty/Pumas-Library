@@ -205,10 +205,17 @@ impl RuntimeProfileProcessOwner {
         {
             #[cfg(target_os = "linux")]
             crate::platform::linux_group::ensure_supported().map_err(|e| failure(e.to_string()))?;
+            // Torch sidecars and ONNX hosts are Pumas-owned processes whose
+            // lifecycle (listener custody, parent watch) is qualified on every
+            // platform; the other binary runtimes are qualified on Linux only.
             #[cfg(not(target_os = "linux"))]
-            if spec.provider != crate::models::RuntimeProviderId::Torch {
+            if !matches!(
+                spec.provider,
+                crate::models::RuntimeProviderId::Torch
+                    | crate::models::RuntimeProviderId::OnnxRuntime
+            ) {
                 return Err(failure(
-                    "Only Torch binary profiles are supported on this platform",
+                    "Only Torch and ONNX Runtime binary profiles are supported on this platform",
                 ));
             }
             #[cfg(target_os = "linux")]

@@ -72,6 +72,9 @@ with tempfile.TemporaryDirectory(prefix="pumas-installer-smoke-") as temporary:
         for library in (root / "electron/resources/bin").iterdir():
             if digest(resources / library.name) != digest(library):
                 raise RuntimeError(f"Packaged native dependency differs: {library.name}")
+        # ONNX Runtime is downloaded by the desktop at runtime, never packaged.
+        if any(resources.glob("libonnxruntime*")):
+            raise RuntimeError("Desktop package must not bundle ONNX Runtime")
         if not (resources / "app.asar").is_file():
             raise RuntimeError("Packaged Electron application is missing")
         command = [sys.executable, str(root / "scripts/release/smoke-rpc.py"), str(resources)]

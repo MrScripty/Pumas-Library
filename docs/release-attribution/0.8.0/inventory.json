@@ -7777,7 +7777,7 @@
       "version": "1.24.2",
       "license_declared": "MIT",
       "source": "https://github.com/microsoft/onnxruntime/tree/v1.24.2",
-      "scope": "Native runtime; upstream notice superset, downstream archive provenance tracked separately",
+      "scope": "Native runtime downloaded by Pumas into its version manager from official microsoft/onnxruntime releases; not bundled in any Pumas package. Upstream notice text reviewed at this version",
       "texts": [
         {
           "path": "onnxruntime-LICENSE",
@@ -8589,7 +8589,7 @@
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json": "d8b9826efc0aa5fedd0353f5227b1001cfe6bda96287ff3136b81b513c71e104",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json": "a280a955f040983398474af0c34f92e9172fc3c69ef22f7422ac990ed0554e26",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json": "3e2f6e67e3a4492c01232778191871e9f39543f02996349f055272f2d19fbb89",
-    "electron/package.json": "252c3b590a3f3fe03b313e590bb483ae45f95e680b59b98b87f3664072228d9a",
+    "electron/package.json": "3e902205adafb729cd89d4aaf4d30d47e1230d2a314f3e2419dcb0db5347d155",
     "frontend/package.json": "40efa0eda6eb46b604188b751f0b9c4045ce00d3a101329ea33098c2193f20b7",
     "pnpm-lock.yaml": "32aceb7112faace4a0beb1783fc7ed3c42a86015f86711fbe5f7672f242e8435",
     "rust/Cargo.lock": "098bce7d6b6820ebbccd24817105d41e9aab184fc4735cde039eb8a9a7d7cba3",
@@ -8598,7 +8598,7 @@
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "f39cc48ba0350d63a65521adf5a53bd91e084ac1f6741b68a7a87b1142bfbdc4",
     "rust/crates/pumas-core/Cargo.toml": "b488c9be2ce38b4ad41a4422c41a1625e774ac5510fd7cf9f8384ab02e5da7b9",
     "rust/crates/pumas-rpc/Cargo.toml": "2a5c01cc72dcd3fc4d58e650430cb8f0d6c63771eaf06f8064c6611fd23e8fd1",
-    "scripts/release/artifact-plan.json": "66348a507f00ffdc74741fc7d70eab02f4a0eed4d3655354784cea2971662064",
+    "scripts/release/artifact-plan.json": "91350564febd7f8a5181eb2befb5f324773b57431b22b8b2cfbb1decf9a564ed",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
     "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
     "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md.provenance.json": "3abbd4c93221c44bd33aa7012b5cd12bd1bce0a569768d076e820ee24959c10d",
@@ -8606,5 +8606,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "35e706771de620c2bfefe5770b2832c0086bd827012b2b1e464a005dd01b1551"
+  "notices_sha256": "670a3eb93a067519ffcd768bbb796a429e8c3ad794c4cb6276beb8c336e99e1b"
 }

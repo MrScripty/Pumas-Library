@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelManagerProps } from '../ModelManager';
+import { UNSUPPORTED_VERSION_STATE, type AppVersionState } from '../../utils/appVersionState';
 import { OnnxRuntimePanel } from './OnnxRuntimePanel';
 
 const onnxRuntimeModelLibrarySectionMock = vi.hoisted(() => vi.fn());
@@ -10,6 +11,13 @@ vi.mock('./sections/OnnxRuntimeModelLibrarySection', () => ({
     onnxRuntimeModelLibrarySectionMock(props);
     return <div>onnx-runtime-library</div>;
   },
+}));
+
+vi.mock('./VersionManagementPanel', () => ({
+  VersionManagementPanel: ({ appDisplayName, showManager }: {
+    appDisplayName: string;
+    showManager: boolean;
+  }) => <div>{`versions-${appDisplayName}-${showManager ? 'open' : 'closed'}`}</div>,
 }));
 
 vi.mock('./sections/RuntimeProfileSettingsSection', () => ({
@@ -54,8 +62,18 @@ describe('OnnxRuntimePanel', () => {
       starredModels: new Set(),
     };
 
-    render(<OnnxRuntimePanel modelManagerProps={modelManagerProps} />);
+    render(
+      <OnnxRuntimePanel
+        appDisplayName="ONNX Runtime"
+        versions={onnxRuntimeVersions}
+        showVersionManager={false}
+        onShowVersionManager={vi.fn()}
+        diskSpacePercent={0}
+        modelManagerProps={modelManagerProps}
+      />
+    );
 
+    expect(screen.getByText('versions-ONNX Runtime-closed')).toBeInTheDocument();
     expect(screen.getByText('profiles-onnx_runtime')).toBeInTheDocument();
     expect(screen.getByText('onnx-runtime-library')).toBeInTheDocument();
     expect(onnxRuntimeModelLibrarySectionMock).toHaveBeenCalledWith(
@@ -69,5 +87,40 @@ describe('OnnxRuntimePanel', () => {
         onToggleStar: modelManagerProps.onToggleStar,
       })
     );
+  });
+});
+
+const onnxRuntimeVersions: AppVersionState = {
+  ...UNSUPPORTED_VERSION_STATE,
+  appId: 'onnx-runtime',
+  isSupported: true,
+  installedVersions: ['v1.24.2+cpu'],
+  activeVersion: 'v1.24.2+cpu',
+};
+
+describe('OnnxRuntimePanel version manager', () => {
+  it('shows only the version manager while it is open, like llama.cpp', () => {
+    render(
+      <OnnxRuntimePanel
+        appDisplayName="ONNX Runtime"
+        versions={onnxRuntimeVersions}
+        showVersionManager
+        onShowVersionManager={vi.fn()}
+        diskSpacePercent={0}
+        modelManagerProps={{
+          libraryLoadStatus: 'ready',
+          excludedModels: new Set(),
+          modelGroups: [],
+          onToggleLink: vi.fn(),
+          onToggleStar: vi.fn(),
+          selectedAppId: 'onnx-runtime',
+          starredModels: new Set(),
+        }}
+      />
+    );
+
+    expect(screen.getByText('versions-ONNX Runtime-open')).toBeInTheDocument();
+    expect(screen.queryByText('profiles-onnx_runtime')).not.toBeInTheDocument();
+    expect(screen.queryByText('onnx-runtime-library')).not.toBeInTheDocument();
   });
 });

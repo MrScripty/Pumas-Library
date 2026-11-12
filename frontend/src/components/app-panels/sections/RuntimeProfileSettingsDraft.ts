@@ -1,6 +1,7 @@
+import { runtimeProviderManagementModes } from '../../../hooks/useRuntimeProviders';
 import type {
   RuntimeProfileConfig,
-  RuntimeProviderId,
+  RuntimeProviderInfo,
 } from '../../../types/api-runtime-profiles';
 import { getRuntimeProviderDescriptor } from '../../../utils/runtimeProviderDescriptors';
 import {
@@ -25,19 +26,20 @@ export function profileToDraft(profile: RuntimeProfileConfig): RuntimeProfileDra
   };
 }
 
-export function newProfileDraft(provider: RuntimeProviderId): RuntimeProfileDraft {
-  const descriptor = getRuntimeProviderDescriptor(provider);
+/** A new profile's defaults: the first mode of each kind the backend offers. */
+export function newProfileDraft(providerInfo: RuntimeProviderInfo): RuntimeProfileDraft {
+  const { provider } = providerInfo;
 
   return {
     profile_id: `runtime-${Date.now()}`,
     provider,
-    provider_mode: descriptor.profileModes[0] ?? 'ollama_serve',
-    management_mode: 'managed',
+    provider_mode: providerInfo.provider_modes[0] ?? 'ollama_serve',
+    management_mode: runtimeProviderManagementModes(providerInfo)[0] ?? 'managed',
     name: `New ${providerLabel(provider)} Profile`,
     enabled: true,
     endpoint_url: '',
     port: '',
-    device_mode: descriptor.deviceModes[0] ?? 'auto',
+    device_mode: providerInfo.device_modes[0] ?? 'auto',
     device_id: '',
     gpu_layers: '',
     runtime_version: '',

@@ -1126,6 +1126,10 @@ async fn dispatch_admitted_command(
             .await
             .map(RpcOutcome::InstallVersion),
         #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetRuntimeProviders => Ok(RpcOutcome::RuntimeProviders(
+            runtime_profiles::get_runtime_providers(state).await,
+        )),
+        #[cfg(feature = "inference-plugins")]
         RpcCommand::GetTorchRuntimeOptions => {
             let vm = require_version_manager(state, "torch").await?;
             let options = vm.torch_runtime_options().await?;
@@ -2667,6 +2671,44 @@ mod tests {
                 "code":-32601,"message":"The requested method is not supported.","data":{"class":"not_found"},
             }})
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_providers_rpc_is_typed_parameterless_and_feature_gated() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let call = |params: Value| {
+            let state = state.clone();
+            async move {
+                let request = Bytes::from(
+                    serde_json::to_vec(&json!({
+                        "jsonrpc":"2.0","id":"runtime-providers","method":"get_runtime_providers",
+                        "params":params,
+                    }))
+                    .unwrap(),
+                );
+                let response = handle_rpc(State(state), request).await.into_response();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = axum::body::to_bytes(response.into_body(), 65_536)
+                    .await
+                    .unwrap();
+                serde_json::from_slice::<Value>(&body).unwrap()
+            }
+        };
+
+        let wire = call(json!({})).await;
+        #[cfg(feature = "inference-plugins")]
+        {
+            assert_eq!(wire["result"]["success"], true);
+            let providers = wire["result"]["providers"].as_array().unwrap();
+            assert_eq!(providers.len(), 4);
+            assert_eq!(providers[2]["provider"], "onnx_runtime");
+            assert_eq!(providers[2]["app_id"], "onnx-runtime");
+            let rejected = call(json!({"app_id":"ollama"})).await;
+            assert_eq!(rejected["error"]["code"], -32602);
+        }
+        #[cfg(not(feature = "inference-plugins"))]
+        assert_eq!(wire["error"]["code"], -32601);
     }
 
     #[tokio::test]

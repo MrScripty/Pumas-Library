@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
+import { testRuntimeProvider } from '../../../test/runtimeProviders';
 import { draftToProfile, newProfileDraft, profileToDraft } from './RuntimeProfileSettingsDraft';
 
 const pinnedProfile: RuntimeProfileConfig = {
@@ -31,7 +32,23 @@ describe('runtime profile draft runtime_version', () => {
     expect(draftToProfile(cleared).runtime_version).toBeNull();
     expect(unpinned.runtime_version).toBe('');
     expect(draftToProfile(unpinned).runtime_version).toBeNull();
-    expect(newProfileDraft('torch').runtime_version).toBe('');
+    expect(newProfileDraft(testRuntimeProvider('torch')).runtime_version).toBe('');
+  });
+
+  it('defaults a new draft to the first modes the backend offers', () => {
+    expect(newProfileDraft(testRuntimeProvider('torch'))).toMatchObject({
+      provider: 'torch',
+      provider_mode: 'torch_serve',
+      management_mode: 'managed',
+      device_mode: 'gpu',
+    });
+    expect(
+      newProfileDraft({
+        ...testRuntimeProvider('ollama'),
+        supports_managed_profiles: false,
+        device_modes: ['cpu'],
+      })
+    ).toMatchObject({ management_mode: 'external', device_mode: 'cpu' });
   });
 
   it('never sends a pin for an external profile', () => {

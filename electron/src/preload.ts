@@ -92,6 +92,7 @@ import {
   decodeRuntimeLaunchParams,
   decodeRuntimeStopOutcome,
   decodeRuntimeProfilesSnapshotResponse,
+  decodeRuntimeProvidersOutcome,
   decodeServingStatusResponse,
   decodeHfModelSearchOutcome,
   decodeSetDefaultVersionOutcome,
@@ -476,6 +477,8 @@ const electronAPI = {
     'stop_ollama', decodeRuntimeStopOutcome,
     requireDecoded(decodeRuntimeLaunchParams({}), 'stop_ollama request')
   ),
+  get_runtime_providers: () =>
+    validatedApiCall('get_runtime_providers', decodeRuntimeProvidersOutcome),
   get_runtime_profiles_snapshot: () =>
     validatedApiCall('get_runtime_profiles_snapshot', decodeRuntimeProfilesSnapshotResponse),
   list_runtime_profile_updates_since: (cursor?: string | null, limit?: number) =>

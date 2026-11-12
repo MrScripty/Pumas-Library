@@ -10,8 +10,9 @@ capabilities, connection details, model compatibility, and panel layout.
 
 - `binary`: managed external executable;
 - `python-venv`: managed Python environment and sidecar; and
-- `in-process`: compiled into the Pumas Rust process, with no install/version
-  workflow.
+- `in-process`: executed inside the Pumas Rust process (no built-in runtime
+  uses it any more; ONNX Runtime runs in a per-profile host process and is a
+  `binary` runtime).
 
 These files are source defaults. A launcher root may contain copied or migrated
 runtime state; changing the source descriptor does not by itself migrate every

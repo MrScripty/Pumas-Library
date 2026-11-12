@@ -44,7 +44,12 @@ use crate::{PumasError, Result};
 use tokio::sync::broadcast;
 
 use launch_specs::derive_managed_profile_launch_specs;
-pub use launch_specs::{torch_api_token, TORCH_API_TOKEN_HEADER};
+#[cfg(feature = "onnx-runtime")]
+pub(crate) use launch_specs::onnx_host_executable;
+pub use launch_specs::{
+    onnx_device_mode_arg, parse_onnx_device_mode, register_onnx_host_executable, torch_api_token,
+    TORCH_API_TOKEN_HEADER,
+};
 pub(crate) use launch_specs::{torch_model_roots, TORCH_MODEL_ROOTS_ENV};
 pub use launch_strategy::{
     RuntimeProfileBinaryLaunchKind, RuntimeProfileInProcessRuntimeKind,

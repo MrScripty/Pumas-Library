@@ -218,6 +218,20 @@ fn profile_runtime_env_vars(
                 runtime_host_port(endpoint_url, port)?,
             );
         }
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost) => {
+            #[cfg(feature = "onnx-runtime")]
+            {
+                use crate::onnx_runtime::host_protocol;
+                env_vars.insert(
+                    host_protocol::TOKEN_ENV.into(),
+                    host_protocol::host_api_token().into(),
+                );
+                env_vars.insert(
+                    host_protocol::PARENT_PID_ENV.into(),
+                    std::process::id().to_string(),
+                );
+            }
+        }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::LlamaCppRouter
             | RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
@@ -270,9 +284,68 @@ fn profile_runtime_extra_args(
             apply_llama_cpp_device_args(&mut args, profile);
             Ok(args)
         }
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost) => {
+            // The host derives its execution provider from the installed
+            // build it loads and this device mode.
+            let mut args = runtime_listener_args(endpoint_url, port)?;
+            args.extend([
+                "--onnx-device-mode".to_string(),
+                onnx_device_mode_arg(profile.device.mode).to_string(),
+            ]);
+            Ok(args)
+        }
         RuntimeProfileLaunchStrategy::InProcessRuntime(_) => Ok(Vec::new()),
         RuntimeProfileLaunchStrategy::ExternalOnly => Ok(Vec::new()),
     }
+}
+
+/// The `--onnx-device-mode` spelling of a profile's device mode.
+pub fn onnx_device_mode_arg(mode: RuntimeDeviceMode) -> &'static str {
+    match mode {
+        RuntimeDeviceMode::Auto => "auto",
+        RuntimeDeviceMode::Cpu => "cpu",
+        RuntimeDeviceMode::Gpu => "gpu",
+        RuntimeDeviceMode::Hybrid => "hybrid",
+        RuntimeDeviceMode::SpecificDevice => "specific_device",
+    }
+}
+
+/// Parse an `--onnx-device-mode` value.
+pub fn parse_onnx_device_mode(value: &str) -> Option<RuntimeDeviceMode> {
+    [
+        RuntimeDeviceMode::Auto,
+        RuntimeDeviceMode::Cpu,
+        RuntimeDeviceMode::Gpu,
+        RuntimeDeviceMode::Hybrid,
+        RuntimeDeviceMode::SpecificDevice,
+    ]
+    .into_iter()
+    .find(|mode| onnx_device_mode_arg(*mode) == value)
+}
+
+static ONNX_HOST_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Register the executable that runs ONNX hosts (`pumas-rpc --onnx-host`).
+///
+/// The RPC server registers its own executable at startup. An embedding
+/// application that registers none cannot launch ONNX Runtime profiles, and
+/// such a launch is refused with that reason.
+pub fn register_onnx_host_executable(executable: PathBuf) -> Result<()> {
+    let registered = ONNX_HOST_EXECUTABLE.get_or_init(|| executable.clone());
+    if registered != &executable {
+        return Err(PumasError::InvalidParams {
+            message: format!(
+                "an ONNX host executable is already registered: {}",
+                registered.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "onnx-runtime")]
+pub(crate) fn onnx_host_executable() -> Option<&'static Path> {
+    ONNX_HOST_EXECUTABLE.get().map(PathBuf::as_path)
 }
 
 fn runtime_listener_args(
@@ -610,5 +683,86 @@ else:\n    raise SystemExit('outside path was accepted')\n";
             std::env::split_paths(&joined).collect::<Vec<_>>(),
             vec![PathBuf::from("/external/a"), PathBuf::from("/library")]
         );
+    }
+}
+
+#[cfg(all(test, feature = "onnx-runtime"))]
+mod onnx_host_tests {
+    use super::*;
+    use crate::models::{RuntimeProviderId, RuntimeProviderMode};
+    use crate::onnx_runtime::host_protocol;
+
+    #[test]
+    fn onnx_profile_launches_its_host_with_device_mode_token_and_parent_watch() {
+        let mut config = RuntimeProfilesConfigFile::default_seed();
+        let profile = &mut config.profiles[0];
+        profile.provider = RuntimeProviderId::OnnxRuntime;
+        profile.provider_mode = RuntimeProviderMode::OnnxServe;
+        profile.device.mode = RuntimeDeviceMode::Gpu;
+        profile.endpoint_url = None;
+        profile.port = None;
+        let specs = derive_managed_profile_launch_specs(
+            Path::new("/fixture"),
+            &config,
+            &ProviderRegistry::builtin(),
+        )
+        .unwrap();
+        let [spec] = specs.as_slice() else {
+            panic!("expected one managed profile")
+        };
+        assert_eq!(
+            spec.launch_strategy,
+            RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost)
+        );
+        let args = &spec.extra_args;
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--onnx-device-mode", "gpu"]));
+        assert!(args.contains(&"--port".into()));
+        assert!(spec
+            .pid_file
+            .starts_with("/fixture/launcher-data/runtime-profiles/onnx-runtime"));
+        let token = spec.env_vars.get(host_protocol::TOKEN_ENV).expect("token");
+        assert_eq!(token, host_protocol::host_api_token());
+        assert!(!args.iter().any(|arg| arg.contains(token.as_str())));
+        assert_eq!(
+            spec.env_vars.get(host_protocol::PARENT_PID_ENV),
+            Some(&std::process::id().to_string())
+        );
+
+        // The launch config adds the installed version the host loads.
+        let config = crate::process::BinaryLaunchConfig::onnx_host(
+            "v1.31.1+cuda12",
+            "/fixture/onnx-runtime-versions/v1.31.1+cuda12",
+            "/fixture/bin/pumas-rpc",
+        );
+        assert_eq!(config.command.as_deref(), Some(host_protocol::HOST_FLAG));
+        assert_eq!(
+            config
+                .env_vars
+                .get(host_protocol::RUNTIME_VERSION_ENV)
+                .map(String::as_str),
+            Some("v1.31.1+cuda12")
+        );
+        assert!(config.env_vars.contains_key(host_protocol::RUNTIME_DIR_ENV));
+        assert_eq!(
+            config
+                .env_vars
+                .get(host_protocol::ORT_DISABLE_TELEMETRY_ENV)
+                .map(String::as_str),
+            Some("1")
+        );
+        for mode in [
+            RuntimeDeviceMode::Auto,
+            RuntimeDeviceMode::Cpu,
+            RuntimeDeviceMode::Gpu,
+            RuntimeDeviceMode::Hybrid,
+            RuntimeDeviceMode::SpecificDevice,
+        ] {
+            assert_eq!(
+                parse_onnx_device_mode(onnx_device_mode_arg(mode)),
+                Some(mode)
+            );
+        }
     }
 }

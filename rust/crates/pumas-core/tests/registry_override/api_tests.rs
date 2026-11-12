@@ -405,6 +405,7 @@ async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
         port: RuntimePort::parse(18080).ok(),
         device: Default::default(),
         scheduler: Default::default(),
+        runtime_version: None,
     };
     api.upsert_runtime_profile(profile).await.unwrap();
 
@@ -469,6 +470,7 @@ async fn test_launch_llama_cpp_dedicated_profile_requires_model_binding() {
         port: RuntimePort::parse(18081).ok(),
         device: Default::default(),
         scheduler: Default::default(),
+        runtime_version: None,
     };
     api.upsert_runtime_profile(profile).await.unwrap();
 
@@ -560,6 +562,7 @@ async fn test_shutdown_managed_runtime_profiles_clears_served_models() {
         port: None,
         device: Default::default(),
         scheduler: Default::default(),
+        runtime_version: None,
     };
     api.upsert_runtime_profile(profile).await.unwrap();
     assert!(

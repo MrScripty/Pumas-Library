@@ -232,6 +232,12 @@ pub struct RuntimeProfileConfig {
     pub device: RuntimeDeviceSettings,
     #[serde(default)]
     pub scheduler: RuntimeSchedulerSettings,
+    /// Installed runtime version this managed profile launches, such as
+    /// `v1.24.2+cuda12` for ONNX Runtime. `None` launches the provider's
+    /// active version. Profiles that pin different versions run as separate
+    /// processes at the same time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
 }
 
 impl RuntimeProfileConfig {
@@ -247,6 +253,7 @@ impl RuntimeProfileConfig {
             port: RuntimePort::parse(11434).ok(),
             device: RuntimeDeviceSettings::default(),
             scheduler: RuntimeSchedulerSettings::default(),
+            runtime_version: None,
         }
     }
 }

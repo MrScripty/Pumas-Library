@@ -1471,6 +1471,7 @@ mod tests {
             port: RuntimePort::parse(18080).ok(),
             device: RuntimeDeviceSettings::default(),
             scheduler: RuntimeSchedulerSettings::default(),
+            runtime_version: None,
         }
     }
 
@@ -1489,6 +1490,7 @@ mod tests {
                 ..RuntimeDeviceSettings::default()
             },
             scheduler: RuntimeSchedulerSettings::default(),
+            runtime_version: None,
         }
     }
 

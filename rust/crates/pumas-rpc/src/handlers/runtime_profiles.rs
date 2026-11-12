@@ -282,6 +282,7 @@ mod tests {
                 port: None,
                 device: RuntimeDeviceSettings::default(),
                 scheduler: Default::default(),
+                runtime_version: None,
             })
             .await
             .unwrap();

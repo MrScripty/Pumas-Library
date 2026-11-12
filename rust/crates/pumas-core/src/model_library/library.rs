@@ -1108,6 +1108,30 @@ impl ModelLibrary {
             .await
     }
 
+    /// Change one model's metadata in place: read the current record and
+    /// save `change`'s edit of it under the library's write lock, so fields
+    /// written concurrently through [`Self::save_metadata`] are kept.
+    pub async fn update_metadata(
+        &self,
+        model_dir: &Path,
+        change: impl FnOnce(&mut ModelMetadata) + Send + 'static,
+    ) -> Result<()> {
+        let _lock = self.write_lock.lock().await;
+        match tokio::fs::metadata(model_dir).await {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Err(PumasError::NotADirectory(model_dir.to_path_buf())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(PumasError::NotADirectory(model_dir.to_path_buf()));
+            }
+            Err(err) => return Err(PumasError::io_with_path(err, model_dir)),
+        }
+        let mut metadata = load_model_metadata_async(self.clone(), model_dir.to_path_buf())
+            .await?
+            .unwrap_or_default();
+        change(&mut metadata);
+        save_metadata_projection_async(self.clone(), model_dir.to_path_buf(), metadata).await
+    }
+
     /// Load user overrides from a model directory.
     pub fn load_overrides(&self, model_dir: &Path) -> Result<Option<ModelOverrides>> {
         let path = model_dir.join(OVERRIDES_FILENAME);

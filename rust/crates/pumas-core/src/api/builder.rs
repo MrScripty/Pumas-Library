@@ -736,7 +736,7 @@ impl PumasApiBuilder {
             runtime_tasks.spawn(super::declarations::react_to_library_updates(
                 model_library.clone(),
                 client,
-                self.launcher_root.join("launcher-data").join("tmp"),
+                super::declarations::scratch_under(&self.launcher_root),
             ));
         }
         let conversion_manager = Arc::new(conversion::ConversionManager::new(

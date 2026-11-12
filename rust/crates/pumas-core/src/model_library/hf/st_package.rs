@@ -6,7 +6,8 @@
 //! [`crate::model_library::declarations`].
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
@@ -19,6 +20,11 @@ use crate::{PumasError, Result};
 /// Hugging Face stores any file over 10 MiB through LFS, so a regular (Git)
 /// file is never larger. LFS files are bounded by their recorded size.
 const MAX_REGULAR_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// How long a file transfer may go without receiving data before it is
+/// abandoned as stalled. Activity-based: a slow transfer that keeps
+/// delivering bytes is never cut off.
+const STALL_AFTER: Duration = Duration::from_secs(60);
 
 const MODULES: &str = "modules.json";
 /// Package-level files a sentence-transformers cross-encoder may declare.
@@ -34,14 +40,36 @@ impl HuggingFaceClient {
     /// Write the declaration files of `repo_id`'s sentence-transformers
     /// package into `destination` (existing and empty) and return the
     /// immutable revision read, or `None` when the repository publishes no
-    /// `modules.json`. Checks `cancel` between files.
+    /// `modules.json`. `revision` selects the commit (the one the model's
+    /// weights were downloaded at); without one the current `main` is read.
+    /// Checks `cancel` between files and while receiving, and abandons a
+    /// transfer that delivers no data for [`STALL_AFTER`].
     pub(crate) async fn fetch_sentence_transformers_package(
         &self,
         repo_id: &str,
+        revision: Option<&str>,
         destination: &Path,
         cancel: &CancellationToken,
     ) -> Result<Option<String>> {
-        let revision = self.resolve_download_revision(repo_id, None).await?;
+        self.fetch_sentence_transformers_package_within(
+            repo_id,
+            revision,
+            destination,
+            cancel,
+            STALL_AFTER,
+        )
+        .await
+    }
+
+    async fn fetch_sentence_transformers_package_within(
+        &self,
+        repo_id: &str,
+        revision: Option<&str>,
+        destination: &Path,
+        cancel: &CancellationToken,
+        stall_after: Duration,
+    ) -> Result<Option<String>> {
+        let revision = self.resolve_download_revision(repo_id, revision).await?;
         let tree = self.get_repo_files_at_revision(repo_id, &revision).await?;
         let lfs: HashMap<&str, (u64, &str)> = tree
             .lfs_files
@@ -54,7 +82,14 @@ impl HuggingFaceClient {
             return Ok(None);
         }
         let modules = self
-            .copy_contract_file(repo_id, &revision, MODULES, &lfs, destination, cancel)
+            .copy_contract_file(
+                repo_id,
+                &revision,
+                MODULES,
+                (&lfs, destination),
+                cancel,
+                stall_after,
+            )
             .await?;
         let mut paths: Vec<String> = module_config_paths(&modules)?
             .into_iter()
@@ -67,8 +102,15 @@ impl HuggingFaceClient {
                 .map(|path| path.to_string()),
         );
         for path in paths {
-            self.copy_contract_file(repo_id, &revision, &path, &lfs, destination, cancel)
-                .await?;
+            self.copy_contract_file(
+                repo_id,
+                &revision,
+                &path,
+                (&lfs, destination),
+                cancel,
+                stall_after,
+            )
+            .await?;
         }
         Ok(Some(revision.as_str().to_string()))
     }
@@ -80,16 +122,45 @@ impl HuggingFaceClient {
         repo_id: &str,
         revision: &DownloadRevision,
         path: &str,
-        lfs: &HashMap<&str, (u64, &str)>,
-        destination: &Path,
+        (lfs, destination): (&HashMap<&str, (u64, &str)>, &Path),
         cancel: &CancellationToken,
+        stall_after: Duration,
     ) -> Result<Vec<u8>> {
         cancel_check(cancel)?;
         let bytes = self
-            .fetch_contract_file(repo_id, revision, path, lfs.get(path).copied(), cancel)
+            .fetch_contract_file(
+                repo_id,
+                revision,
+                path,
+                lfs.get(path).copied(),
+                cancel,
+                stall_after,
+            )
             .await?;
         write_contained(destination, path, &bytes).await?;
         Ok(bytes)
+    }
+}
+
+/// Resolves once `cancel` is cancelled; the token has no waker, so it is
+/// observed at a short interval.
+async fn until_cancelled(cancel: &CancellationToken) {
+    while !cancel.is_cancelled() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// `step`'s output, `None` when it delivers nothing within `stall_after`,
+/// or the cancellation when `cancel` fires first.
+async fn within<T>(
+    step: impl std::future::Future<Output = T>,
+    cancel: &CancellationToken,
+    stall_after: Duration,
+) -> Result<Option<T>> {
+    tokio::select! {
+        biased;
+        () = until_cancelled(cancel) => Err(PumasError::ConversionCancelled),
+        outcome = tokio::time::timeout(stall_after, step) => Ok(outcome.ok()),
     }
 }
 
@@ -130,18 +201,12 @@ fn module_config_paths(modules: &[u8]) -> Result<Vec<String>> {
 
 /// A repository path made only of normal components.
 fn relative_path(path: &str) -> Result<PathBuf> {
-    let parsed = Path::new(path);
-    if path.is_empty()
-        || path.contains('\\')
-        || !parsed
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-    {
+    if !crate::model_library::declarations::is_package_relative(path) {
         return Err(PumasError::InvalidParams {
             message: format!("Scoring contract path {path:?} is not a plain repository path"),
         });
     }
-    Ok(parsed.to_path_buf())
+    Ok(PathBuf::from(path))
 }
 
 async fn write_contained(destination: &Path, path: &str, bytes: &[u8]) -> Result<()> {
@@ -175,6 +240,7 @@ impl HuggingFaceClient {
         path: &str,
         lfs: Option<(u64, &str)>,
         cancel: &CancellationToken,
+        stall_after: Duration,
     ) -> Result<Vec<u8>> {
         relative_path(path)?;
         let encoded = path
@@ -203,9 +269,16 @@ impl HuggingFaceClient {
             message,
             cause: None,
         };
-        let mut response = request
-            .send()
-            .await
+        let stalled = || {
+            network(format!(
+                "{repo_id}/{path} sent no data for {} seconds; the transfer stalled",
+                stall_after.as_secs_f32()
+            ))
+        };
+        // Each wait is bounded by inactivity and ends early on cancellation.
+        let mut response = within(request.send(), cancel, stall_after)
+            .await?
+            .ok_or_else(stalled)?
             .map_err(|error| network(format!("Failed to fetch {path} from {repo_id}: {error}")))?;
         if !response.status().is_success() {
             return Err(network(format!(
@@ -215,9 +288,9 @@ impl HuggingFaceClient {
         }
         let limit = lfs.map_or(MAX_REGULAR_FILE_BYTES, |(size, _)| size);
         let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
+        while let Some(chunk) = within(response.chunk(), cancel, stall_after)
+            .await?
+            .ok_or_else(stalled)?
             .map_err(|error| network(format!("Failed to read {path} from {repo_id}: {error}")))?
         {
             cancel_check(cancel)?;
@@ -344,6 +417,7 @@ mod tests {
         let revision = client
             .fetch_sentence_transformers_package(
                 "acme/reranker",
+                None,
                 destination.path(),
                 &CancellationToken::new(),
             )
@@ -374,6 +448,7 @@ mod tests {
         let fetched = client
             .fetch_sentence_transformers_package(
                 "acme/plain",
+                None,
                 destination.path(),
                 &CancellationToken::new(),
             )
@@ -394,6 +469,7 @@ mod tests {
         let error = client
             .fetch_sentence_transformers_package(
                 "acme/lfs",
+                None,
                 destination.path(),
                 &CancellationToken::new(),
             )
@@ -403,6 +479,108 @@ mod tests {
             matches!(error, PumasError::InvalidParams { message } if message.contains("listed size and digest"))
         );
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_recorded_revision_is_read_instead_of_main() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (client, _cache) = client(&listener).await;
+        let mut pinned = routes("acme/pinned", tree(&["config.json"], &[]), &[]);
+        pinned[0].0 = format!("GET /api/models/acme/pinned/revision/{COMMIT} ");
+        let server = tokio::spawn(serve(listener, pinned));
+        let destination = TempDir::new().unwrap();
+        client
+            .fetch_sentence_transformers_package(
+                "acme/pinned",
+                Some(COMMIT),
+                destination.path(),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let seen = server.await.unwrap();
+        assert!(
+            seen[0].contains(&format!("/revision/{COMMIT} ")),
+            "{seen:?}"
+        );
+    }
+
+    /// Serves the revision and tree, then starts `modules.json` and stops
+    /// sending without closing the connection.
+    async fn serve_then_stall(listener: TcpListener, repo: &str) {
+        let replies = [
+            serde_json::json!({"id": repo, "modelId": repo, "sha": COMMIT}).to_string(),
+            tree(&["modules.json"], &[]),
+        ];
+        for body in replies {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = vec![0_u8; 8192];
+            let _ = socket.read(&mut buffer).await.unwrap();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = vec![0_u8; 8192];
+        let _ = socket.read(&mut buffer).await.unwrap();
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\n[{\"path\"")
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
+
+    #[tokio::test]
+    async fn a_transfer_that_stops_sending_data_is_abandoned_as_stalled() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (client, _cache) = client(&listener).await;
+        let server = tokio::spawn(serve_then_stall(listener, "acme/stall"));
+        let destination = TempDir::new().unwrap();
+        let started = std::time::Instant::now();
+        let error = client
+            .fetch_sentence_transformers_package_within(
+                "acme/stall",
+                None,
+                destination.path(),
+                &CancellationToken::new(),
+                Duration::from_millis(300),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("stalled"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_a_transfer_waiting_for_data() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (client, _cache) = client(&listener).await;
+        let server = tokio::spawn(serve_then_stall(listener, "acme/stop"));
+        let destination = TempDir::new().unwrap();
+        let cancel = CancellationToken::new();
+        let stopper = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            stopper.cancel();
+        });
+        let error = client
+            .fetch_sentence_transformers_package_within(
+                "acme/stop",
+                None,
+                destination.path(),
+                &cancel,
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, PumasError::ConversionCancelled),
+            "{error:?}"
+        );
+        server.abort();
     }
 
     #[test]
@@ -432,7 +610,7 @@ mod tests {
         cancel.cancel();
         let destination = TempDir::new().unwrap();
         let error = client
-            .fetch_sentence_transformers_package("acme/cancel", destination.path(), &cancel)
+            .fetch_sentence_transformers_package("acme/cancel", None, destination.path(), &cancel)
             .await
             .unwrap_err();
         assert!(matches!(error, PumasError::ConversionCancelled));

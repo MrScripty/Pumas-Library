@@ -590,6 +590,247 @@ class ResolverTests(unittest.TestCase):
                 2 * len(fixture["install"]),
             )
 
+    def test_selection_mode_publishes_only_the_official_torch_wheel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--select-torch-wheel",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(
+                    resolver,
+                    "select_official_torch_wheel",
+                    return_value={**selected_wheel(), "sha256": "A" * 64},
+                ),
+                patch.object(resolver.subprocess, "run") as run,
+            ):
+                resolver.main()
+            run.assert_not_called()
+            self.assertEqual(
+                json.loads((output / "torch-wheel.json").read_text()),
+                {"url": native_wheel(), "sha256": "a" * 64},
+            )
+            self.assertFalse((output / "requirements.txt").exists())
+
+    def test_selection_mode_classifies_an_unreachable_index_as_inconclusive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            argv = ["resolve_runtime.py", "--select-torch-wheel", "--version", "2.10.0"]
+            with (
+                patch.object(
+                    resolver.sys, "argv", [*argv, "--build", "cpu", "--output", str(output)]
+                ),
+                patch.object(resolver, "select_official_torch_wheel", side_effect=OSError("dns")),
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 75)
+            self.assertFalse((output / "torch-wheel.json").exists())
+
+    def test_lock_phase_resolves_against_the_acquired_torch_wheel_and_keeps_its_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            acquired = pathlib.Path(directory) / "acquired wheels"
+            acquired.mkdir()
+            local = acquired / resolver.wheel_filename(native_wheel())
+            local.write_bytes(b"verified torch wheel")
+            output = pathlib.Path(directory) / "manifest"
+            commands = []
+
+            def fake_run(command, local_url=local.as_uri(), **_kwargs):
+                commands.append(command)
+                fixture = report(url=local_url)
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(fixture), encoding="utf-8"
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            argv = [
+                "resolve_runtime.py",
+                "--version",
+                "2.10.0",
+                "--build",
+                "cpu",
+                "--torch-wheel",
+                native_wheel(),
+                "--torch-sha256",
+                "a" * 64,
+                "--torch-local-wheel",
+                str(local),
+                "--output",
+                str(output),
+            ]
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver, "select_official_torch_wheel") as select,
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            select.assert_not_called()
+            # pip reads the verified local copy instead of downloading Torch.
+            self.assertIn(f"torch @ {local.as_uri()}#sha256={'a' * 64}", commands[0])
+            self.assertNotIn(f"torch @ {native_wheel()}#sha256={'a' * 64}", commands[0])
+            artifacts = json.loads((output / "resolution.json").read_text())["artifacts"]
+            self.assertEqual(artifacts[0]["url"], native_wheel())
+            self.assertIn(
+                f"torch @ {native_wheel()} --hash=sha256:{'a' * 64}",
+                (output / "requirements.txt").read_text(),
+            )
+
+            # A report naming another file is not the acquired wheel.
+            other = acquired / "other.whl"
+            other.write_bytes(b"other")
+            fresh = pathlib.Path(directory) / "fresh"
+            argv[argv.index(str(output))] = str(fresh)
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(
+                    resolver.subprocess,
+                    "run",
+                    side_effect=lambda command, **kw: fake_run(command, other.as_uri()),
+                ),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("not the acquired local wheel", stderr.getvalue())
+            self.assertFalse((fresh / "requirements.txt").exists())
+
+    def test_local_torch_wheel_must_be_the_named_acquired_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wrong = pathlib.Path(directory) / "renamed.whl"
+            wrong.write_bytes(b"wheel")
+            argv = [
+                "resolve_runtime.py",
+                "--version",
+                "2.10.0",
+                "--build",
+                "cpu",
+                "--torch-wheel",
+                native_wheel(),
+                "--torch-sha256",
+                "a" * 64,
+                "--torch-local-wheel",
+                str(wrong),
+                "--output",
+                str(pathlib.Path(directory) / "manifest"),
+            ]
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver.subprocess, "run") as run,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 2)
+            run.assert_not_called()
+
+    def test_install_phase_installs_acquired_wheels_offline_from_local_files(self):
+        fixture = report()
+        with tempfile.TemporaryDirectory() as directory:
+            torch_dir = pathlib.Path(directory) / "torch wheels"
+            rest_dir = pathlib.Path(directory) / "dependency wheels"
+            torch_dir.mkdir()
+            rest_dir.mkdir()
+            local = {}
+            for item in fixture["install"]:
+                name = item["metadata"]["name"]
+                folder = torch_dir if name == "torch" else rest_dir
+                local[name] = folder / resolver.wheel_filename(item["download_info"]["url"])
+                local[name].write_bytes(name.encode())
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            write_lock(output, fixture)
+            installed = json.loads(json.dumps(fixture))
+            for item in installed["install"]:
+                item["download_info"]["url"] = local[item["metadata"]["name"]].as_uri()
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                self.assertIn("--no-index", command)
+                self.assertIn("--require-hashes", command)
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(installed), encoding="utf-8"
+                )
+                stage_dist_info(fixture, pathlib.Path(command[command.index("--target") + 1]))
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            argv = [
+                *install_argv(target, output),
+                "--wheel-dir",
+                str(torch_dir),
+                "--wheel-dir",
+                str(rest_dir),
+            ]
+            with (
+                patch.object(resolver.sys, "argv", argv),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            local_lock = output / "requirements-local.txt"
+            self.assertEqual(commands[0][commands[0].index("--requirement") + 1], str(local_lock))
+            lines = local_lock.read_text().splitlines()
+            self.assertEqual(len(lines), len(fixture["install"]))
+            self.assertTrue(all("file:" in line and "https:" not in line for line in lines))
+            self.assertIn(f"torch @ {local['torch'].as_uri()} --hash=sha256:{'a' * 64}", lines)
+            self.assertTrue((output / "installed-files.json").exists())
+
+    def test_install_phase_refuses_a_remote_install_of_an_acquired_wheel(self):
+        fixture = report()
+        with tempfile.TemporaryDirectory() as directory:
+            torch_dir = pathlib.Path(directory) / "torch wheels"
+            torch_dir.mkdir()
+            (torch_dir / resolver.wheel_filename(native_wheel())).write_bytes(b"torch")
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            write_lock(output, fixture)
+
+            def fake_run(command, **_kwargs):
+                # pip claims it installed Torch from the network URL.
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(fixture), encoding="utf-8"
+                )
+                stage_dist_info(fixture, pathlib.Path(command[command.index("--target") + 1]))
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [*install_argv(target, output), "--wheel-dir", str(torch_dir)],
+                ),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("differ from the hash lock", stderr.getvalue())
+            # Unacquired dependencies keep their locked network URL.
+            self.assertIn(
+                resolver.lock_line(
+                    json.loads((output / "resolution.json").read_text())["artifacts"][1]
+                ),
+                (output / "requirements-local.txt").read_text(),
+            )
+
     def test_install_phase_refuses_a_lock_that_differs_from_its_resolution(self):
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / "manifest"

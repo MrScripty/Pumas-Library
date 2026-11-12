@@ -118,7 +118,9 @@ pub(crate) async fn start(
     let mut managers = HashMap::new();
     #[cfg(feature = "inference-plugins")]
     for app in crate::VERSION_MANAGED_APPS {
-        let initialized = if *app == AppId::LlamaCpp {
+        // Native archives and Torch wheels download through the one shared
+        // acquisition owner, so they resume after network loss.
+        let initialized = if matches!(*app, AppId::LlamaCpp | AppId::Torch) {
             VersionManager::new_with_acquisition(&root, *app, api.acquisition().clone()).await
         } else {
             VersionManager::new(&root, *app).await

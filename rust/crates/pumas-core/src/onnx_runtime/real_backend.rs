@@ -10,14 +10,17 @@ use async_trait::async_trait;
 
 use super::{
     FakeOnnxEmbeddingBackend, OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxEmbeddingResponse,
-    OnnxLoadRequest, OnnxModelId, OnnxOperationLease, OnnxRuntimeError, OnnxRuntimeLibrary,
-    OnnxRuntimeSession, OnnxSessionStatus,
+    OnnxExecutionProvider, OnnxHostEndpoint, OnnxLoadRequest, OnnxModelId, OnnxOperationLease,
+    OnnxRuntimeError, OnnxRuntimeLibrary, OnnxRuntimeSession, OnnxSessionStatus,
+    RemoteOnnxEmbeddingBackend,
 };
 
 #[derive(Debug)]
 pub enum OnnxEmbeddingBackendKind {
     Fake(FakeOnnxEmbeddingBackend),
     Real(RealOnnxEmbeddingBackend),
+    /// Sessions held by runtime-profile ONNX hosts (the Pumas backend).
+    Remote(RemoteOnnxEmbeddingBackend),
 }
 
 impl OnnxEmbeddingBackendKind {
@@ -28,32 +31,37 @@ impl OnnxEmbeddingBackendKind {
     pub fn real() -> Self {
         Self::Real(RealOnnxEmbeddingBackend::new())
     }
+
+    pub fn remote() -> Result<Self, OnnxRuntimeError> {
+        Ok(Self::Remote(RemoteOnnxEmbeddingBackend::new()?))
+    }
+}
+
+macro_rules! dispatch {
+    ($self:ident, $backend:ident => $call:expr) => {
+        match $self {
+            Self::Fake($backend) => $call,
+            Self::Real($backend) => $call,
+            Self::Remote($backend) => $call,
+        }
+    };
 }
 
 #[async_trait]
 impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
     async fn load(&self, request: OnnxLoadRequest) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        match self {
-            Self::Fake(backend) => backend.load(request).await,
-            Self::Real(backend) => backend.load(request).await,
-        }
+        dispatch!(self, backend => backend.load(request).await)
     }
 
     async fn unload(
         &self,
         model_id: &OnnxModelId,
     ) -> Result<Option<OnnxSessionStatus>, OnnxRuntimeError> {
-        match self {
-            Self::Fake(backend) => backend.unload(model_id).await,
-            Self::Real(backend) => backend.unload(model_id).await,
-        }
+        dispatch!(self, backend => backend.unload(model_id).await)
     }
 
     async fn list(&self) -> Result<Vec<OnnxSessionStatus>, OnnxRuntimeError> {
-        match self {
-            Self::Fake(backend) => backend.list().await,
-            Self::Real(backend) => backend.list().await,
-        }
+        dispatch!(self, backend => backend.list().await)
     }
 
     async fn embed(
@@ -68,10 +76,7 @@ impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
         request: OnnxEmbeddingRequest,
         admission: Option<&AtomicBool>,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
-        match self {
-            Self::Fake(backend) => backend.embed_with_admission(request, admission).await,
-            Self::Real(backend) => backend.embed_with_admission(request, admission).await,
-        }
+        dispatch!(self, backend => backend.embed_with_admission(request, admission).await)
     }
 
     async fn load_leased(
@@ -79,30 +84,16 @@ impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
         request: OnnxLoadRequest,
         lease: OnnxOperationLease,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        match self {
-            Self::Fake(backend) => backend.load_leased(request, lease).await,
-            Self::Real(backend) => backend.load_leased(request, lease).await,
-        }
+        dispatch!(self, backend => backend.load_leased(request, lease).await)
     }
 
-    async fn load_leased_with_runtime_library(
+    async fn load_leased_on_host(
         &self,
         request: OnnxLoadRequest,
-        runtime_library: Option<OnnxRuntimeLibrary>,
+        host: OnnxHostEndpoint,
         lease: OnnxOperationLease,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        match self {
-            Self::Fake(backend) => {
-                backend
-                    .load_leased_with_runtime_library(request, runtime_library, lease)
-                    .await
-            }
-            Self::Real(backend) => {
-                backend
-                    .load_leased_with_runtime_library(request, runtime_library, lease)
-                    .await
-            }
-        }
+        dispatch!(self, backend => backend.load_leased_on_host(request, host, lease).await)
     }
 
     async fn embed_leased(
@@ -111,10 +102,7 @@ impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
         admission: Option<&AtomicBool>,
         lease: OnnxOperationLease,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
-        match self {
-            Self::Fake(backend) => backend.embed_leased(request, admission, lease).await,
-            Self::Real(backend) => backend.embed_leased(request, admission, lease).await,
-        }
+        dispatch!(self, backend => backend.embed_leased(request, admission, lease).await)
     }
 }
 
@@ -124,9 +112,14 @@ impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
 /// Tokio's blocking pool, never on an async worker. The map lock is held only
 /// to look up or replace an entry; each session has its own lock, so one
 /// model's inference never blocks listing, unloading or another model.
+///
+/// An ONNX host builds it [`Self::for_runtime`]: every session then uses that
+/// installed version's library and the profile's execution provider.
 #[derive(Debug, Default)]
 pub struct RealOnnxEmbeddingBackend {
     sessions: Mutex<HashMap<OnnxModelId, LoadedSession>>,
+    runtime_library: Option<OnnxRuntimeLibrary>,
+    execution_provider: Option<OnnxExecutionProvider>,
 }
 
 #[derive(Debug)]
@@ -140,6 +133,19 @@ impl RealOnnxEmbeddingBackend {
         Self::default()
     }
 
+    /// Sessions that load `runtime_library` and run on `execution_provider`,
+    /// whatever a load request names.
+    pub fn for_runtime(
+        runtime_library: OnnxRuntimeLibrary,
+        execution_provider: OnnxExecutionProvider,
+    ) -> Self {
+        Self {
+            sessions: Mutex::default(),
+            runtime_library: Some(runtime_library),
+            execution_provider: Some(execution_provider),
+        }
+    }
+
     fn sessions(
         &self,
     ) -> Result<std::sync::MutexGuard<'_, HashMap<OnnxModelId, LoadedSession>>, OnnxRuntimeError>
@@ -151,10 +157,13 @@ impl RealOnnxEmbeddingBackend {
 
     async fn load_holding(
         &self,
-        request: OnnxLoadRequest,
-        runtime_library: Option<OnnxRuntimeLibrary>,
+        mut request: OnnxLoadRequest,
         lease: Option<OnnxOperationLease>,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        if let Some(provider) = self.execution_provider {
+            request.options.execution_provider = provider;
+        }
+        let runtime_library = self.runtime_library.clone();
         let session = run_blocking(lease, move || {
             OnnxRuntimeSession::load_with_runtime_library(request, runtime_library.as_ref())
         })
@@ -223,7 +232,7 @@ where
 #[async_trait]
 impl OnnxEmbeddingBackend for RealOnnxEmbeddingBackend {
     async fn load(&self, request: OnnxLoadRequest) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        self.load_holding(request, None, None).await
+        self.load_holding(request, None).await
     }
 
     async fn load_leased(
@@ -231,17 +240,7 @@ impl OnnxEmbeddingBackend for RealOnnxEmbeddingBackend {
         request: OnnxLoadRequest,
         lease: OnnxOperationLease,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        self.load_holding(request, None, Some(lease)).await
-    }
-
-    async fn load_leased_with_runtime_library(
-        &self,
-        request: OnnxLoadRequest,
-        runtime_library: Option<OnnxRuntimeLibrary>,
-        lease: OnnxOperationLease,
-    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
-        self.load_holding(request, runtime_library, Some(lease))
-            .await
+        self.load_holding(request, Some(lease)).await
     }
 
     async fn unload(

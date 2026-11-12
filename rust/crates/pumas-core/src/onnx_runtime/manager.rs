@@ -13,8 +13,8 @@ use tokio::{
 };
 
 use super::{
-    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    OnnxRuntimeLibrary, OnnxSessionStatus,
+    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxHostEndpoint, OnnxLoadRequest, OnnxModelId,
+    OnnxRuntimeError, OnnxSessionStatus,
 };
 
 /// One admitted operation's share of [`OnnxSessionManager`]'s concurrency limit.
@@ -73,12 +73,12 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
         result
     }
 
-    /// [`Self::load_leased`] using the host-selected ONNX Runtime library.
-    /// Backends that do not execute ONNX Runtime ignore the selection.
-    async fn load_leased_with_runtime_library(
+    /// [`Self::load_leased`] into the ONNX host of a runtime profile. Backends
+    /// that hold their sessions themselves load locally and ignore the host.
+    async fn load_leased_on_host(
         &self,
         request: OnnxLoadRequest,
-        _runtime_library: Option<OnnxRuntimeLibrary>,
+        _host: OnnxHostEndpoint,
         lease: OnnxOperationLease,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
         self.load_leased(request, lease).await
@@ -140,18 +140,14 @@ where
         self.backend.load_leased(request, lease).await
     }
 
-    /// Load with the ONNX Runtime library of the host-selected installed
-    /// version. `None` means no version is selected; the real backend then
-    /// refuses with how to install one, unless a developer override is set.
-    pub async fn load_with_runtime_library(
+    /// Load into the ONNX host of the runtime profile at `host`.
+    pub async fn load_on_host(
         &self,
         request: OnnxLoadRequest,
-        runtime_library: Option<OnnxRuntimeLibrary>,
+        host: OnnxHostEndpoint,
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
         let lease = OnnxOperationLease::new(self.operation_permit().await?);
-        self.backend
-            .load_leased_with_runtime_library(request, runtime_library, lease)
-            .await
+        self.backend.load_leased_on_host(request, host, lease).await
     }
 
     pub async fn unload(

@@ -1,8 +1,10 @@
 //! Rust ONNX Runtime provider/session contracts.
 //!
-//! This module intentionally starts with a fake backend so serving and gateway
-//! slices can validate the public contract before real ONNX Runtime packages are
-//! added.
+//! ONNX Runtime executes in an ONNX host process per runtime profile (see
+//! [`host_protocol`]). The host runs [`RealOnnxEmbeddingBackend`] against the
+//! library of the installed version its profile pins; Pumas reaches it through
+//! [`RemoteOnnxEmbeddingBackend`]. The fake backend validates serving and
+//! gateway contracts without a native runtime.
 
 use std::{
     fmt,
@@ -13,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 mod config;
 mod fake;
+pub mod host_protocol;
 mod manager;
 mod native_library;
 mod output;
@@ -20,6 +23,7 @@ mod package;
 mod postprocess;
 mod real;
 mod real_backend;
+mod remote;
 mod tensors;
 mod tokenizer;
 
@@ -30,17 +34,9 @@ pub use postprocess::{
     OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
     OnnxOutputTensorSelection,
 };
-pub use real::OnnxRuntimeSession;
-
-/// Check, without loading it, that an ONNX Runtime library is available for
-/// the host-selected installed version (or a developer override). The error
-/// says what is missing and how to install a compatible version.
-pub fn ensure_runtime_library_available(
-    selected: Option<&OnnxRuntimeLibrary>,
-) -> Result<(), OnnxRuntimeError> {
-    native_library::runtime_library_available(selected)
-}
+pub use real::{probe_execution_provider, OnnxRuntimeSession};
 pub use real_backend::{OnnxEmbeddingBackendKind, RealOnnxEmbeddingBackend};
+pub use remote::{OnnxHostEndpoint, RemoteOnnxEmbeddingBackend};
 pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 
 const MAX_MODEL_ID_LEN: usize = 128;
@@ -193,12 +189,32 @@ impl OnnxRuntimeLibrary {
 #[serde(rename_all = "snake_case")]
 pub enum OnnxExecutionProvider {
     Cpu,
+    /// NVIDIA CUDA, from an installed `+cuda12` or `+cuda13` build.
+    Cuda,
+    /// Apple CoreML, part of the macOS build.
+    #[serde(rename = "coreml")]
+    CoreMl,
 }
 
 impl OnnxExecutionProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Cpu => "cpu",
+            Self::Cuda => "cuda",
+            Self::CoreMl => "coreml",
+        }
+    }
+}
+
+impl From<crate::onnx_runtime_distribution::OnnxRuntimeExecutionProvider>
+    for OnnxExecutionProvider
+{
+    fn from(provider: crate::onnx_runtime_distribution::OnnxRuntimeExecutionProvider) -> Self {
+        use crate::onnx_runtime_distribution::OnnxRuntimeExecutionProvider as Distribution;
+        match provider {
+            Distribution::Cpu => Self::Cpu,
+            Distribution::Cuda => Self::Cuda,
+            Distribution::CoreMl => Self::CoreMl,
         }
     }
 }

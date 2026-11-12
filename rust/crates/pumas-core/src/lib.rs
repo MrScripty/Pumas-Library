@@ -85,10 +85,11 @@ pub use onnx_runtime::{
     FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingBackendKind,
     OnnxEmbeddingLimits, OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig,
     OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxEmbeddingUsage,
-    OnnxExecutionProvider, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxModelPath,
-    OnnxOutputTensorSelection, OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeLibrary,
-    OnnxRuntimeSession, OnnxSessionManager, OnnxSessionState, OnnxSessionStatus,
-    OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer, RealOnnxEmbeddingBackend,
+    OnnxExecutionProvider, OnnxHostEndpoint, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId,
+    OnnxModelPath, OnnxOutputTensorSelection, OnnxRuntimeError, OnnxRuntimeErrorCode,
+    OnnxRuntimeLibrary, OnnxRuntimeSession, OnnxSessionManager, OnnxSessionState,
+    OnnxSessionStatus, OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer,
+    RealOnnxEmbeddingBackend, RemoteOnnxEmbeddingBackend,
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::ProcessManager;

@@ -1,17 +1,18 @@
-//! Loads the ONNX Runtime library of the host-selected installed runtime
-//! version (downloaded by the version manager), a developer's explicit
-//! `ORT_DYLIB_PATH` override, or a library packaged beside the executable by
-//! a headless distribution. This executes trusted dependency code; it cannot
-//! validate arbitrary foreign pointers from an untrusted shared library.
-//! The SDK owns its immutable C API tables and version string. A held loader
-//! handle keeps them live through preflight and ORT's process-wide adoption.
-//! Failure drops the local handle; successful adoption leaves ORT owning it.
+//! Loads the ONNX Runtime library of an installed runtime version (downloaded
+//! by the version manager) into an ONNX host process, or a developer's
+//! explicit `ORT_DYLIB_PATH` override. This executes trusted dependency code;
+//! it cannot validate arbitrary foreign pointers from an untrusted shared
+//! library. The SDK owns its immutable C API tables and version string. A held
+//! loader handle keeps them live through preflight and ORT's process-wide
+//! adoption. Failure drops the local handle; successful adoption leaves ORT
+//! owning it.
 //!
 //! ORT reopens the library by path and keeps the first library a process
-//! adopts. After adoption Pumas therefore compares ORT's API table with the
-//! one the preflighted handle exports: a file swapped after preflight, or a
-//! different library adopted earlier in the process (for example after the
-//! active ONNX Runtime version changed), is refused with a reason.
+//! adopts. That is why each runtime profile runs its own ONNX host: one host
+//! loads one installed version for its whole life. After adoption Pumas
+//! compares ORT's API table with the one the preflighted handle exports, so a
+//! file swapped after preflight, or a different library adopted earlier in the
+//! same process, is refused with a reason.
 #![allow(unsafe_code)]
 
 use super::{OnnxRuntimeError, OnnxRuntimeLibrary};
@@ -21,13 +22,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Resolve the library to load, in order of authority: the developer override,
-/// the selected installed version, then a library packaged beside the
-/// executable. Without any of them the refusal says how to install a version.
+/// Resolve the library to load: the developer override, else the selected
+/// installed version. Without either the refusal says how to install one.
 fn runtime_library_path(
     explicit: Option<OsString>,
     selected: Option<&OnnxRuntimeLibrary>,
-    executable: std::io::Result<PathBuf>,
 ) -> Result<PathBuf, OnnxRuntimeError> {
     let library = if let Some(path) = explicit {
         let path = PathBuf::from(path);
@@ -53,18 +52,9 @@ fn runtime_library_path(
         }
         selected.path().to_path_buf()
     } else {
-        let adjacent = executable.ok().and_then(|executable| {
-            let name = Path::new(library_relative_path()).file_name()?.to_owned();
-            Some(executable.parent()?.join(name))
-        });
-        match adjacent {
-            Some(adjacent) if adjacent.is_file() => adjacent,
-            _ => {
-                return Err(runtime_library_error(
-                    "no ONNX Runtime version is installed and active",
-                ))
-            }
-        }
+        return Err(runtime_library_error(
+            "no ONNX Runtime version is selected for this ONNX host",
+        ));
     };
     library
         .canonicalize()
@@ -77,31 +67,17 @@ fn runtime_library_error(reason: &str) -> OnnxRuntimeError {
         field: Some("runtime_library".into()),
         message: format!(
             "{reason}; install a compatible ONNX Runtime version (1.{C_API_VERSION} or newer, \
-             C API {C_API_VERSION}) from the ONNX Runtime versions in Pumas and make it active. \
-             Developers may instead set ORT_DYLIB_PATH to an absolute library file"
+             C API {C_API_VERSION}) from the ONNX Runtime versions in Pumas and launch an ONNX \
+             Runtime profile with it. Developers may instead set ORT_DYLIB_PATH to an absolute \
+             library file"
         ),
     }
-}
-
-pub(super) fn runtime_library_available(
-    selected: Option<&OnnxRuntimeLibrary>,
-) -> Result<(), OnnxRuntimeError> {
-    runtime_library_path(
-        std::env::var_os("ORT_DYLIB_PATH"),
-        selected,
-        std::env::current_exe(),
-    )
-    .map(|_| ())
 }
 
 pub(super) fn ensure_runtime_library(
     selected: Option<&OnnxRuntimeLibrary>,
 ) -> Result<(), OnnxRuntimeError> {
-    let path = runtime_library_path(
-        std::env::var_os("ORT_DYLIB_PATH"),
-        selected,
-        std::env::current_exe(),
-    )?;
+    let path = runtime_library_path(std::env::var_os("ORT_DYLIB_PATH"), selected)?;
     // Pinned ORT constructs native errors while handling loader failures, which
     // re-enters initialization. Reject those failures before entering ORT.
     let (_held_library, preflighted_api) = preflight_library(&path)?;
@@ -117,10 +93,9 @@ pub(super) fn ensure_runtime_library(
     let adopted_api: *const ort::sys::OrtApi = ort::api();
     if !std::ptr::eq(adopted_api, preflighted_api) {
         return Err(runtime_library_error(
-            "ONNX Runtime adopted a different library than the one Pumas verified \
-             (ONNX Runtime keeps the first library a process loads, so a newly selected \
-             version takes effect after a restart, or the file changed after \
-             verification); restart Pumas to use the selected library",
+            "ONNX Runtime adopted a different library than the one Pumas verified (another \
+             library was loaded earlier in this ONNX host, or the file changed after \
+             verification); restart the ONNX Runtime profile",
         ));
     }
     Ok(())
@@ -187,10 +162,6 @@ fn preflight_library(
 mod runtime_library_tests {
     use super::*;
 
-    fn unavailable_executable() -> std::io::Result<PathBuf> {
-        Err(std::io::Error::other("unavailable executable"))
-    }
-
     fn installed_version(root: &Path, tag: &str, with_library: bool) -> OnnxRuntimeLibrary {
         let version_dir = root.join(tag);
         let library = version_dir.join(library_relative_path());
@@ -208,26 +179,19 @@ mod runtime_library_tests {
         std::fs::write(&selected, b"selection fixture").unwrap();
         let installed = installed_version(fixture.path(), "v1.24.2+cpu", true);
         assert_eq!(
-            runtime_library_path(
-                Some(selected.clone().into_os_string()),
-                Some(&installed),
-                unavailable_executable()
-            )
-            .unwrap(),
+            runtime_library_path(Some(selected.clone().into_os_string()), Some(&installed))
+                .unwrap(),
             selected.canonicalize().unwrap(),
             "the developer override wins over the installed version"
         );
         for path in [OsString::new(), OsString::from("libonnxruntime.so")] {
-            let error =
-                runtime_library_path(Some(path), Some(&installed), unavailable_executable())
-                    .unwrap_err();
+            let error = runtime_library_path(Some(path), Some(&installed)).unwrap_err();
             assert_eq!(error.field.as_deref(), Some("runtime_library"));
             assert!(error.message.contains("absolute file path"));
         }
         let error = runtime_library_path(
             Some(fixture.path().join("missing-library").into_os_string()),
             Some(&installed),
-            Ok(fixture.path().join("pumas-rpc")),
         )
         .unwrap_err();
         assert!(error.message.contains("ORT_DYLIB_PATH is missing"));
@@ -238,13 +202,12 @@ mod runtime_library_tests {
         let fixture = tempfile::tempdir().unwrap();
         let installed = installed_version(fixture.path(), "v1.24.2+cpu", true);
         assert_eq!(
-            runtime_library_path(None, Some(&installed), unavailable_executable()).unwrap(),
+            runtime_library_path(None, Some(&installed)).unwrap(),
             installed.path().canonicalize().unwrap()
         );
 
         let broken = installed_version(fixture.path(), "v1.25.0+cpu", false);
-        let error =
-            runtime_library_path(None, Some(&broken), unavailable_executable()).unwrap_err();
+        let error = runtime_library_path(None, Some(&broken)).unwrap_err();
         assert!(error.message.contains("v1.25.0+cpu"), "{}", error.message);
         assert!(error.message.contains("reinstall"), "{}", error.message);
     }
@@ -252,37 +215,20 @@ mod runtime_library_tests {
     #[test]
     fn without_a_selected_version_the_refusal_says_how_to_install_one() {
         let fixture = tempfile::tempdir().unwrap();
-        let error =
-            runtime_library_path(None, None, Ok(fixture.path().join("pumas-rpc"))).unwrap_err();
-        assert_eq!(error.field.as_deref(), Some("runtime_library"));
-        assert!(
-            error
-                .message
-                .contains("no ONNX Runtime version is installed and active"),
-            "{}",
-            error.message
-        );
-        assert!(
-            error
-                .message
-                .contains("install a compatible ONNX Runtime version"),
-            "{}",
-            error.message
-        );
-        assert!(error.message.contains("1.24 or newer"), "{}", error.message);
-        assert!(
-            error.message.contains("ORT_DYLIB_PATH"),
-            "{}",
-            error.message
-        );
-
-        // A headless distribution may still package the library beside RPC.
+        // A library beside the executable is never picked up: no package ships one.
         let name = Path::new(library_relative_path()).file_name().unwrap();
-        std::fs::write(fixture.path().join(name), b"packaged library fixture").unwrap();
-        assert_eq!(
-            runtime_library_path(None, None, Ok(fixture.path().join("pumas-rpc"))).unwrap(),
-            fixture.path().join(name).canonicalize().unwrap()
-        );
+        std::fs::write(fixture.path().join(name), b"planted library").unwrap();
+
+        let error = runtime_library_path(None, None).unwrap_err();
+        assert_eq!(error.field.as_deref(), Some("runtime_library"));
+        for expected in [
+            "no ONNX Runtime version is selected",
+            "install a compatible ONNX Runtime version",
+            "1.24 or newer",
+            "ORT_DYLIB_PATH",
+        ] {
+            assert!(error.message.contains(expected), "{}", error.message);
+        }
     }
 
     #[cfg(unix)]
@@ -298,12 +244,7 @@ mod runtime_library_tests {
         let selected = alias.join("selected-library");
         std::fs::write(&selected, b"selection fixture").unwrap();
 
-        let resolved = runtime_library_path(
-            Some(selected.clone().into_os_string()),
-            None,
-            unavailable_executable(),
-        )
-        .unwrap();
+        let resolved = runtime_library_path(Some(selected.clone().into_os_string()), None).unwrap();
         assert_eq!(resolved, selected.canonicalize().unwrap());
         assert_eq!(
             resolved,

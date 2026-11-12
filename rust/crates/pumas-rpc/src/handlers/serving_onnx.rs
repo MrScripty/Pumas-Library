@@ -11,8 +11,8 @@ use pumas_library::models::{
     UnserveModelResponse,
 };
 use pumas_library::{
-    AppId, ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId,
-    OnnxRuntimeError, OnnxRuntimeLibrary, ProviderRegistry,
+    ExecutableArtifactFormat, OnnxHostEndpoint, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId,
+    OnnxRuntimeError, ProviderRegistry,
 };
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -38,6 +38,18 @@ pub(super) async fn serve_onnx_model(
     state: &AppState,
     request: ServeModelRequest,
     operation: &pumas_library::serving::ServingLoadOperation,
+) -> pumas_library::Result<Value> {
+    serve_onnx_model_inner(state, request, operation, None).await
+}
+
+/// Serve on the profile's ONNX host, launching the profile if needed.
+/// `known_host` names an already running host instead (tests use it to serve
+/// against an in-process fake host).
+async fn serve_onnx_model_inner(
+    state: &AppState,
+    request: ServeModelRequest,
+    operation: &pumas_library::serving::ServingLoadOperation,
+    known_host: Option<OnnxHostEndpoint>,
 ) -> pumas_library::Result<Value> {
     let validated = match validate_onnx_serve_request(state, &request).await? {
         Ok(validated) => validated,
@@ -90,13 +102,47 @@ pub(super) async fn serve_onnx_model(
         return Ok(serde_json::to_value(response)?);
     }
 
+    let host = match match known_host {
+        Some(host) => Ok(host),
+        None => {
+            super::runtime_profiles::running_onnx_host(state, &request.config.profile_id).await?
+        }
+    } {
+        Ok(host) => host,
+        Err(reason) => {
+            warn!(
+                provider = "onnx_runtime",
+                model_id = %request.model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                %reason,
+                "ONNX Runtime profile host is not available"
+            );
+            return non_critical_failure_response(
+                state,
+                serving_error(ModelServeErrorCode::MissingRuntime, reason, &request),
+            )
+            .await;
+        }
+    };
+    serve_onnx_model_on_host(state, &request, validated, host, operation).await
+}
+
+/// Load a validated model into the ONNX host of its running profile and
+/// record it as served.
+async fn serve_onnx_model_on_host(
+    state: &AppState,
+    request: &ServeModelRequest,
+    validated: ValidatedOnnxServeRequest<'_>,
+    host: OnnxHostEndpoint,
+    operation: &pumas_library::serving::ServingLoadOperation,
+) -> pumas_library::Result<Value> {
+    let request = request.clone();
     let onnx_model_id = validated.load_request.model_id.clone();
     let provider_model_id = onnx_model_id.as_str().to_string();
     let gateway_alias = validated.gateway_alias.clone();
-    let runtime_library = active_onnx_runtime_library(state).await?;
     let session = match state
         .onnx_session_manager
-        .load_with_runtime_library(validated.load_request, runtime_library)
+        .load_on_host(validated.load_request, host)
         .await
     {
         Ok(session) => session,
@@ -353,32 +399,15 @@ pub(super) async fn unserve_onnx_model(
     })?)
 }
 
-/// The ONNX Runtime library of the active installed version, if one is set.
-pub(super) async fn active_onnx_runtime_library(
-    state: &AppState,
-) -> pumas_library::Result<Option<OnnxRuntimeLibrary>> {
-    let Some(version_manager) =
-        super::get_version_manager(state, AppId::OnnxRuntime.as_str()).await
-    else {
-        return Ok(None);
-    };
-    let Some(tag) = version_manager.get_active_version().await? else {
-        return Ok(None);
-    };
-    let version_dir = version_manager.version_path(&tag)?;
-    Ok(Some(OnnxRuntimeLibrary::installed_version(
-        tag,
-        &version_dir,
-    )))
-}
-
-/// A missing or unusable runtime library is an installation problem the user
-/// can fix, so its reason is returned. Other load failures stay generic.
+/// A missing runtime library or an execution provider that cannot initialize
+/// is a setup problem the user can fix, so its reason is returned. Other load
+/// failures stay generic.
 fn onnx_load_failure_message(error: &OnnxRuntimeError) -> String {
-    if error.field.as_deref() == Some("runtime_library") {
-        format!("ONNX Runtime is not available: {}", error.message)
-    } else {
-        "ONNX Runtime could not load the selected model".to_string()
+    match error.field.as_deref() {
+        Some("runtime_library" | "execution_provider" | "profile") => {
+            format!("ONNX Runtime is not available: {}", error.message)
+        }
+        _ => "ONNX Runtime could not load the selected model".to_string(),
     }
 }
 

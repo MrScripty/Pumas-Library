@@ -157,6 +157,40 @@ impl BinaryLaunchConfig {
         }
     }
 
+    /// Create a launch config for the ONNX host of an ONNX Runtime profile:
+    /// `host_executable --onnx-host`, loading the installed version at
+    /// `version_dir`. The listener and device-mode arguments come from the
+    /// profile's launch spec.
+    #[cfg(feature = "onnx-runtime")]
+    pub fn onnx_host(
+        tag: impl Into<String>,
+        version_dir: impl AsRef<Path>,
+        host_executable: impl AsRef<Path>,
+    ) -> Self {
+        use crate::onnx_runtime::host_protocol;
+        let tag = tag.into();
+        let version_dir = version_dir.as_ref().to_path_buf();
+        let env_vars = HashMap::from([
+            (
+                host_protocol::RUNTIME_DIR_ENV.to_string(),
+                version_dir.to_string_lossy().into_owned(),
+            ),
+            (host_protocol::RUNTIME_VERSION_ENV.to_string(), tag.clone()),
+        ]);
+        Self {
+            tag,
+            pid_file: version_dir.join("onnx-host.pid"),
+            version_dir,
+            binary_path: host_executable.as_ref().to_path_buf(),
+            command: Some(host_protocol::HOST_FLAG.to_string()),
+            extra_args: vec![],
+            env_vars,
+            log_file: None,
+            ready_timeout: Duration::from_secs(60),
+            health_check_url: None,
+        }
+    }
+
     /// Set extra arguments.
     pub fn with_extra_args(mut self, args: Vec<String>) -> Self {
         self.extra_args = args;

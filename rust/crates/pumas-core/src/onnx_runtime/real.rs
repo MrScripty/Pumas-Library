@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
 use ort::{
-    ep::CPU,
+    ep::{CoreML, CPU, CUDA},
     inputs,
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{
+        builder::{GraphOptimizationLevel, SessionBuilder},
+        Session,
+    },
     value::TensorRef,
 };
 use tracing::info;
@@ -16,10 +19,58 @@ use super::{
     OnnxSessionState, OnnxSessionStatus, OnnxTokenizer,
 };
 
-const ORT_NATIVE_LIBRARY_STRATEGY: &str = "installed-runtime-library-cpu";
+const ORT_NATIVE_LIBRARY_STRATEGY: &str = "installed-runtime-library";
 const ONNX_RUNTIME_GRAPH_OPTIMIZATION: GraphOptimizationLevel = GraphOptimizationLevel::Level3;
 const ONNX_RUNTIME_INTRA_THREADS: usize = 1;
 const ONNX_RUNTIME_INTER_THREADS: usize = 1;
+
+/// Register exactly the requested execution provider. A GPU provider that
+/// cannot initialize (its provider library or the CUDA/cuDNN libraries it
+/// needs are missing) is an error with the reason, never a silent CPU fallback.
+fn register_execution_provider(
+    builder: SessionBuilder,
+    provider: OnnxExecutionProvider,
+) -> Result<SessionBuilder, OnnxRuntimeError> {
+    let dispatch = match provider {
+        OnnxExecutionProvider::Cpu => CPU::default().build(),
+        OnnxExecutionProvider::Cuda => CUDA::default().build(),
+        OnnxExecutionProvider::CoreMl => CoreML::default().build(),
+    }
+    .error_on_failure();
+    builder
+        .with_execution_providers([dispatch])
+        .map_err(|error| {
+            let hint = match provider {
+                OnnxExecutionProvider::Cpu => "",
+                OnnxExecutionProvider::Cuda => {
+                    "; the CUDA build needs an NVIDIA driver plus the CUDA runtime and cuDNN \
+                     libraries of its CUDA major version on the library path"
+                }
+                OnnxExecutionProvider::CoreMl => "; CoreML needs macOS on Apple hardware",
+            };
+            OnnxRuntimeError {
+                code: super::OnnxRuntimeErrorCode::Backend,
+                field: Some("execution_provider".into()),
+                message: format!(
+                    "ONNX Runtime {} execution provider could not initialize: {error}{hint}",
+                    provider.as_str()
+                ),
+            }
+        })
+}
+
+/// Load `runtime_library` and initialize `provider` without a model, so an
+/// ONNX host can report at startup why it cannot run instead of failing on
+/// the first model load.
+pub fn probe_execution_provider(
+    runtime_library: &OnnxRuntimeLibrary,
+    provider: OnnxExecutionProvider,
+) -> Result<(), OnnxRuntimeError> {
+    super::native_library::ensure_runtime_library(Some(runtime_library))?;
+    let builder = Session::builder()
+        .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
+    register_execution_provider(builder, provider).map(|_| ())
+}
 
 #[derive(Debug)]
 pub struct OnnxRuntimeSession {
@@ -35,8 +86,8 @@ pub struct OnnxRuntimeSession {
 }
 
 impl OnnxRuntimeSession {
-    /// Load without a host-selected installed version. Only the developer
-    /// override `ORT_DYLIB_PATH` or a library beside the executable can serve.
+    /// Load without a selected installed version. Only the developer
+    /// override `ORT_DYLIB_PATH` can serve.
     pub fn load(request: OnnxLoadRequest) -> Result<Self, OnnxRuntimeError> {
         Self::load_with_runtime_library(request, None)
     }
@@ -61,16 +112,10 @@ impl OnnxRuntimeSession {
             inter_threads = ONNX_RUNTIME_INTER_THREADS,
             "initializing ONNX Runtime embedding session"
         );
-        let mut builder = Session::builder()
+        let builder = Session::builder()
             .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
-        builder = match request.options.execution_provider {
-            OnnxExecutionProvider::Cpu => builder
-                .with_execution_providers([CPU::default().build()])
-                .map_err(|_| {
-                    OnnxRuntimeError::backend("ONNX Runtime CPU execution provider setup failed")
-                })?,
-        };
-        builder = apply_session_options(builder, &request.options)?;
+        let builder = register_execution_provider(builder, request.options.execution_provider)?;
+        let mut builder = apply_session_options(builder, &request.options)?;
 
         let session = builder
             .commit_from_file(request.model_path.path())

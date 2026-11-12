@@ -12,6 +12,8 @@ mod http_rejection;
 mod http_transport;
 mod launch;
 mod local_enumeration;
+#[cfg(feature = "inference-plugins")]
+mod onnx_host;
 mod owner_retention;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
@@ -102,6 +104,15 @@ struct Args {
     #[cfg(feature = "export-contract")]
     #[arg(long)]
     export_desktop_fixtures: bool,
+    /// Run as the ONNX host of one ONNX Runtime profile. Pumas launches this
+    /// itself; it is not a user command.
+    #[cfg(feature = "inference-plugins")]
+    #[arg(long, conflicts_with_all = ["build_info", "discover_local", "describe_local_http", "attach_or_start_local_http", "retain_local_http_owner", "migrate_download_store_offline", "launcher_root"])]
+    onnx_host: bool,
+    /// The ONNX host profile's device mode (auto, cpu, gpu).
+    #[cfg(feature = "inference-plugins")]
+    #[arg(long, requires = "onnx_host")]
+    onnx_device_mode: Option<String>,
     /// Port to listen on (0 = auto-assign)
     #[arg(short, long, default_value = "0")]
     port: u16,
@@ -133,6 +144,10 @@ fn main() -> Result<()> {
     // Before any thread or child process can observe the environment.
     launch::take_from_env()?;
     let args = Args::parse();
+    #[cfg(feature = "inference-plugins")]
+    if args.onnx_host {
+        return onnx_host::run(&args.host, args.port, args.onnx_device_mode.as_deref());
+    }
     if args.migrate_download_store_offline {
         let backup = pumas_library::model_library::DownloadPersistence::migrate_library_offline(
             args.launcher_root

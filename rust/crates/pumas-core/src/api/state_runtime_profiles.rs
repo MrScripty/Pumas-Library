@@ -121,6 +121,31 @@ async fn launch_in_process_runtime_profile(
     })
 }
 
+#[cfg(feature = "onnx-runtime")]
+fn onnx_host_launch_config(
+    tag: &str,
+    version_dir: &Path,
+) -> std::result::Result<BinaryLaunchConfig, PumasError> {
+    let executable = crate::runtime_profiles::onnx_host_executable().ok_or_else(|| {
+        PumasError::InvalidParams {
+            message: "this Pumas host cannot run ONNX Runtime profiles: it registered no ONNX \
+                      host executable"
+                .to_string(),
+        }
+    })?;
+    Ok(BinaryLaunchConfig::onnx_host(tag, version_dir, executable))
+}
+
+#[cfg(not(feature = "onnx-runtime"))]
+fn onnx_host_launch_config(
+    _tag: &str,
+    _version_dir: &Path,
+) -> std::result::Result<BinaryLaunchConfig, PumasError> {
+    Err(PumasError::InvalidParams {
+        message: "this Pumas build has no ONNX Runtime support".to_string(),
+    })
+}
+
 fn runtime_profile_binary_launch_config(
     tag: &str,
     version_dir: &Path,
@@ -151,6 +176,9 @@ fn runtime_profile_binary_launch_config(
             launch_spec.port.value(),
             version_dir,
         ),
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost) => {
+            onnx_host_launch_config(tag, version_dir)?
+        }
         RuntimeProfileLaunchStrategy::InProcessRuntime(_) => {
             return Err(PumasError::InvalidParams {
                 message: "in-process runtime profiles are not launched as binary processes"
@@ -251,7 +279,7 @@ async fn prepare_runtime_profile_launch_spec(
             );
         }
         RuntimeProfileLaunchStrategy::BinaryProcess(
-            RuntimeProfileBinaryLaunchKind::OllamaServe,
+            RuntimeProfileBinaryLaunchKind::OllamaServe | RuntimeProfileBinaryLaunchKind::OnnxHost,
         )
         | RuntimeProfileLaunchStrategy::InProcessRuntime(_)
         | RuntimeProfileLaunchStrategy::ExternalOnly => {}

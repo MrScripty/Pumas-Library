@@ -13,6 +13,7 @@ import type {
 } from './launcher-root-recovery';
 import type { LauncherRootCommittedPresentation } from './window-presentation';
 import type { LibraryUpgradeConfirmation, LibraryUpgradeResult } from './library-upgrade-contract';
+import type { StaleInstanceReleaseConfirmation, StaleInstanceReleaseResult } from './desktop-contract';
 import {
   decodeS3TransferRetryParams, decodeS3TransferRetryState, type S3TransferRetryParams,
   decodeS3PersistedImportsWire,
@@ -126,6 +127,8 @@ import {
   decodeLauncherRootSelectionResult as decodeGeneratedLauncherRootSelectionResult,
   decodeLauncherRootStartupState as decodeGeneratedLauncherRootStartupState,
   decodeLibraryUpgradeResult as decodeGeneratedLibraryUpgradeResult,
+  decodeStaleInstanceReleaseConfirmation,
+  decodeStaleInstanceReleaseResult as decodeGeneratedStaleInstanceReleaseResult,
   type DecodeOutcome,
   type ModelDownloadUpdateOutcome,
   type ModelLibraryUpdateNotification,
@@ -166,6 +169,10 @@ function decodeLauncherRootStartupState(value: unknown): LauncherRootStartupStat
 
 function decodeLibraryUpgradeResult(value: unknown): LibraryUpgradeResult {
   return decodeOrThrow(decodeGeneratedLibraryUpgradeResult(value), 'Invalid library upgrade result.');
+}
+
+function decodeStaleInstanceReleaseResult(value: unknown): StaleInstanceReleaseResult {
+  return decodeOrThrow(decodeGeneratedStaleInstanceReleaseResult(value), 'Invalid stale instance release result.');
 }
 
 function decodeLauncherRootSelectionResult(value: unknown): LauncherRootSelectionResult {
@@ -952,6 +959,14 @@ const electronAPI = {
       'Library upgrade requires both confirmations.'
     );
     return decodeLibraryUpgradeResult(await ipcRenderer.invoke('launcher:upgradeLibrary', confirmed));
+  },
+
+  release_stale_launcher_instance: async (confirmation: StaleInstanceReleaseConfirmation) => {
+    const confirmed = decodeOrThrow(
+      decodeStaleInstanceReleaseConfirmation(confirmation),
+      'Releasing the library entry requires confirming that exact entry.'
+    );
+    return decodeStaleInstanceReleaseResult(await ipcRenderer.invoke('launcher:releaseStaleInstance', confirmed));
   },
 
   select_launcher_root: async () => {

@@ -449,9 +449,11 @@ impl PumasApiBuilder {
                 registry::InstanceClaimResult::Occupied(instance) => {
                     return Err(PumasError::InvalidParams {
                     message: format!(
-                        "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                        "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access. If that process is no longer running (Pumas was killed or crashed), Pumas Library offers to release its entry, or run `pumas-rpc --release-stale-instance --launcher-root <library> --expected-pid {} --expected-started-at {}`.",
                         crate::platform::platform_display_path(&self.launcher_root),
-                        instance.pid
+                        instance.pid,
+                        instance.pid,
+                        instance.started_at
                     ),
                 });
                 }

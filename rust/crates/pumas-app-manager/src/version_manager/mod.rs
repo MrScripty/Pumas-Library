@@ -4250,13 +4250,13 @@ mod tests {
             assert!(matches!(
                 result,
                 Err(PumasError::InvalidParams { message })
-                    if message == format!(
+                    if message.starts_with(&format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
                         pumas_library::platform::platform_display_path(
                             &root.path().canonicalize().unwrap()
                         ),
                         child_pid
-                    )
+                    ))
             ));
             assert_eq!(
                 serde_json::to_value(registry.get_instance(root.path()).unwrap().unwrap()).unwrap(),

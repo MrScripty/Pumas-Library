@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 da92e417741415da3ba3adeed516b1037d0ca8ceb0d1a188b18a9d1dab9a3d54. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 5030810a1915adaa4604696aa87d4d33e169ec26fd1a98712cfdf1a7b271fce4. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -90,10 +90,11 @@ export type InstallVersionStarted = { "message": string; "success": true };
 export type LauncherRootAuthorityState = "unchanged" | "replacement-visibility-unknown" | "published-durability-unavailable";
 export type LauncherRootReadyState = { "status": "ready"; "selectionAction": LauncherRootSelectionAction; "libraryScopeId": (null) | (string) };
 export type LauncherRootRecoveryDetail = string;
-export type LauncherRootRecoveryReason = "invalid" | "unavailable" | "migration-required" | "backend-unavailable";
+export type LauncherRootRecoveryReason = "invalid" | "unavailable" | "migration-required" | "backend-unavailable" | "stale-instance";
 export type LauncherRootSelectionAction = "select-library" | "correct-launch-input";
 export type LauncherRootSelectionResult = ({ "status": "cancelled" }) | ({ "status": "restarting" }) | ({ "status": "not-selectable"; "action": "correct-launch-input" }) | ({ "status": "recovery-required"; "reason": "invalid-selection" | "chooser-unavailable"; "authorityState": "unchanged" }) | ({ "status": "recovery-required"; "reason": "persistence-unavailable"; "authorityState": LauncherRootAuthorityState }) | ({ "status": "recovery-required"; "reason": "restart-unavailable"; "authorityState": "published" });
-export type LauncherRootStartupState = ({ "status": "initializing" }) | (LauncherRootReadyState) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "persisted" | "default"; "action": "select-library"; "detail"?: LauncherRootRecoveryDetail }) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "environment" | "argument"; "action": "correct-launch-input"; "detail"?: LauncherRootRecoveryDetail });
+export type LauncherRootStaleInstance = { "pid": number; "startedAt": string; "version"?: string; "leaseChecked": boolean };
+export type LauncherRootStartupState = ({ "status": "initializing" }) | (LauncherRootReadyState) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "persisted" | "default"; "action": "select-library"; "detail"?: LauncherRootRecoveryDetail; "staleInstance"?: LauncherRootStaleInstance }) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "environment" | "argument"; "action": "correct-launch-input"; "detail"?: LauncherRootRecoveryDetail; "staleInstance"?: LauncherRootStaleInstance });
 export type LibraryModelMetadataOutcome = { "component_manifest"?: ReadonlyArray<BundleComponentManifestEntry>; "effective_metadata"?: { readonly [key: string]: DesktopJsonValue }; "embedded_metadata"?: EmbeddedMetadataResponse; "model_id": string; "primary_file"?: string; "stored_metadata"?: { readonly [key: string]: DesktopJsonValue }; "success": true };
 export type LibraryStatusResponse = { "deep_scan_in_progress": boolean; "deep_scan_progress"?: (DeepScanProgress) | (null); "error"?: string | null; "indexing": boolean; "model_count": number; "pending_lookups"?: number | null; "success": boolean };
 export type LibraryUpgradeConfirmation = { "oldWritersStopped": true; "noDowngradeAccepted": true };
@@ -208,9 +209,12 @@ export type ServingStatusUpdateFeed = { "cursor": string; "events": ReadonlyArra
 export type SetDefaultVersionOutcome = { "success": boolean };
 export type SetDefaultVersionParams = ({ "app_id": string; "tag"?: string | null }) | ({ "appId": string; "tag"?: string | null });
 export type SetHfTokenParams = { "token": string };
+export type StaleInstanceFrame = { "lease_checked": boolean; "pid": number; "started_at": string; "version"?: string | null };
+export type StaleInstanceReleaseConfirmation = { "pid": number; "startedAt": string; "confirmed": true };
+export type StaleInstanceReleaseResult = ({ "status": "unavailable" }) | ({ "status": "failed"; "stage": "release" | "open"; "message"?: string }) | ({ "status": "ready"; "state": LauncherRootReadyState });
 export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previous_operation_id"?: string | null };
 export type StartConversionSetupParams = { "expected_previous_operation_id"?: string | null };
-export type StartupFailureFrame = { "detail"?: string | null; "reason": string; "version": number };
+export type StartupFailureFrame = { "detail"?: string | null; "reason": string; "stale_instance"?: (StaleInstanceFrame) | (null); "version": number };
 export type StatusResponse = { "app_resources"?: (AppResources) | (null); "error"?: string | null; "last_launch_error"?: string | null; "last_launch_log"?: string | null; "message": string; "notices"?: ReadonlyArray<string>; "ollama_running": boolean; "success": boolean; "torch_running": boolean; "version": string };
 export type StatusTelemetrySnapshot = { "cursor": string; "library": LibraryStatusResponse; "model_library_loaded": boolean; "network": NetworkStatusResponse; "resources": SystemResources; "revision": number; "sampled_at": string; "source_state": string; "status": StatusResponse };
 export type StatusTelemetryUpdateNotification = { "cursor": string; "snapshot": StatusTelemetrySnapshot; "snapshot_required": boolean; "stale_cursor": boolean };
@@ -364,6 +368,8 @@ export declare function decodeServingStatusUpdateFeed(input: unknown): DecodeOut
 export declare function decodeSetDefaultVersionOutcome(input: unknown): DecodeOutcome<SetDefaultVersionOutcome>;
 export declare function decodeSetDefaultVersionParams(input: unknown): DecodeOutcome<SetDefaultVersionParams>;
 export declare function decodeSetHfTokenParams(input: unknown): DecodeOutcome<SetHfTokenParams>;
+export declare function decodeStaleInstanceReleaseConfirmation(input: unknown): DecodeOutcome<StaleInstanceReleaseConfirmation>;
+export declare function decodeStaleInstanceReleaseResult(input: unknown): DecodeOutcome<StaleInstanceReleaseResult>;
 export declare function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<StartBackendSetupParams>;
 export declare function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams>;
 export declare function decodeStartupFailureFrame(input: unknown): DecodeOutcome<StartupFailureFrame>;

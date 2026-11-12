@@ -66,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ("instance is already running" with a dead pid). The failure was reported a
   second time at shutdown, which left the instance registered. Leftovers from
   a failed Torch install are durably marked and cleaned at the next start.
+- A library left registered as open by a Pumas process that was killed or
+  crashed no longer needs hand-editing the registry. Startup reports it as a
+  `stale-instance` failure with the entry's details, and the desktop offers
+  "Release Entry": after you confirm, Pumas re-checks that the library's lock
+  is free, the process is gone and the entry is unchanged, removes only that
+  entry and opens the library. Headless users can run `pumas-rpc
+  --release-stale-instance`. Pumas still never replaces such an entry on its
+  own.
 - On Linux, file identities recorded for downloads and copied imports name
   the filesystem by its UUID instead of its device number, which the kernel
   can reassign at boot (an NVMe partition moved from 259:6 to 259:8).

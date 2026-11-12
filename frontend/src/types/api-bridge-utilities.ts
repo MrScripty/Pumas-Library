@@ -1,6 +1,10 @@
 import type { LibraryUpgradeConfirmation, LibraryUpgradeResult } from '../../../electron/src/library-upgrade-contract';
 import type { BaseResponse } from './api-common';
-import type { ModelImportSelection } from '@pumas/desktop-contract';
+import type {
+  ModelImportSelection,
+  StaleInstanceReleaseConfirmation,
+  StaleInstanceReleaseResult,
+} from '@pumas/desktop-contract';
 import type {
   AppStatusResponse,
   GetPluginResponse,
@@ -64,6 +68,10 @@ export interface DesktopBridgeUtilityAPI {
   get_launcher_root_bootstrap: () => LauncherRootStartupState;
   select_launcher_root: () => Promise<LauncherRootSelectionResult>;
   upgrade_launcher_library: (confirmation: LibraryUpgradeConfirmation) => Promise<LibraryUpgradeResult>;
+  /** Release the selected library's instance entry left by a Pumas process that is no longer running. */
+  release_stale_launcher_instance: (
+    confirmation: StaleInstanceReleaseConfirmation
+  ) => Promise<StaleInstanceReleaseResult>;
   notify_launcher_root_presentation_committed: (
     presentation: LauncherRootCommittedPresentation
   ) => Promise<void>;

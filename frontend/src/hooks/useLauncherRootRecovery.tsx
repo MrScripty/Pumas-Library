@@ -94,6 +94,10 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
   const [noDowngradeAccepted, setNoDowngradeAccepted] = useState(false);
   const upgradeAttemptRef = useRef<Promise<void> | null>(null);
   const [upgradeFailureStage, setUpgradeFailureStage] = useState<'upgrade' | 'open' | 'unknown'>('unknown');
+  const [releasePhase, setReleasePhase] = useState<'idle' | 'confirm' | 'running' | 'failed'>('idle');
+  const [releaseConfirmed, setReleaseConfirmed] = useState(false);
+  const [releaseFailure, setReleaseFailure] = useState<{ stage: 'release' | 'open' | 'unknown'; message?: string }>({ stage: 'unknown' });
+  const releaseAttemptRef = useRef<Promise<void> | null>(null);
 
 
   useEffect(() => {
@@ -305,6 +309,43 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
     return attempt;
   }, [bridge, oldWritersStopped, noDowngradeAccepted, startupState]);
 
+  const releaseStaleInstance = useCallback((): Promise<void> => {
+    if (releaseAttemptRef.current) return releaseAttemptRef.current;
+    const stale = startupState?.status === 'recovery-required' && startupState.reason === 'stale-instance'
+      ? startupState.staleInstance : undefined;
+    if (!bridge || !releaseConfirmed || !stale) return Promise.resolve();
+    setReleasePhase('running');
+    const attempt = (async () => {
+      try {
+        const result = await bridge.release_stale_launcher_instance({
+          pid: stale.pid, startedAt: stale.startedAt, confirmed: true,
+        });
+        if (!mountedRef.current) return;
+        if (result.status === 'ready') {
+          setStartupState(result.state);
+          setPresentation({ kind: 'content' });
+          setReleasePhase('idle');
+          setReleaseConfirmed(false);
+        } else {
+          setReleaseFailure(result.status === 'failed'
+            ? { stage: result.stage, ...(result.message ? { message: result.message } : {}) }
+            : { stage: 'unknown' });
+          setReleasePhase('failed');
+        }
+      } catch {
+        if (mountedRef.current) {
+          setReleaseFailure({ stage: 'unknown' });
+          setReleasePhase('failed');
+        }
+      }
+    })();
+    releaseAttemptRef.current = attempt;
+    void attempt.finally(() => {
+      if (releaseAttemptRef.current === attempt) releaseAttemptRef.current = null;
+    });
+    return attempt;
+  }, [bridge, releaseConfirmed, startupState]);
+
   const actions = useMemo<LauncherRootRecoveryActions>(() => ({
     chooseLibraryRoot,
   }), [chooseLibraryRoot]);
@@ -404,11 +445,16 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
   } else if (presentation.kind === 'startup-recovery') {
     const canSelectLibrary = presentation.state.action === 'select-library';
     const reason = presentation.state.reason;
+    const stale = reason === 'stale-instance' ? presentation.state.staleInstance : undefined;
     const title = reason === 'migration-required' ? 'Library upgrade required'
+      : stale ? 'Library is still marked as open'
       : reason === 'backend-unavailable' ? 'Library could not start'
       : canSelectLibrary ? 'Library needs attention' : 'Correct launcher input';
     const message = reason === 'migration-required'
       ? 'This library uses an older download database. Choose Upgrade Library to back up and upgrade its metadata, then open it. Model files stay in place.'
+      : stale
+        ? `${presentation.state.detail ?? `Pumas process ${stale.pid} registered this library as open and is no longer running.`} ` +
+          'This happens when Pumas is closed forcefully or crashes. Pumas will not release it on its own, because it cannot be sure nothing else is still using the library.'
       : reason === 'backend-unavailable'
         ? presentation.state.detail
           // The backend reported why; show it instead of guessing.
@@ -426,7 +472,49 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
             : 'The saved Pumas library is unavailable. Restore access or select another library.'
           : `The ${presentation.state.authoritySource} launcher input controls this library. Correct that launch input and reopen Pumas Library.`,
         presentation.state.detail);
-    if (reason === 'migration-required' && upgradePhase !== 'idle') {
+    if (stale && releasePhase !== 'idle') {
+      const confirming = releasePhase === 'confirm';
+      const running = releasePhase === 'running';
+      content = (
+        <LauncherRootRecoveryView
+          title={confirming ? 'Release the library entry' : running ? 'Releasing the library entry'
+            : 'The library entry was not released'}
+          message={confirming
+            ? 'Only this entry in the Pumas registry is removed; no library files change. Pumas checks it again before removing it, and refuses if anything changed.'
+            : running ? 'Checking the entry again, releasing it, and opening the library.'
+              : releaseFailure.stage === 'open'
+                ? `The entry was released, but the library could not open${releaseFailure.message ? `: ${releaseFailure.message}` : '.'}`
+                : `Pumas did not release the entry${releaseFailure.message ? `: ${releaseFailure.message}` : '.'} Nothing was changed.`}
+          primaryAction={confirming ? {
+            label: 'Release Entry and Open Library',
+            disabled: !releaseConfirmed,
+            onAction: () => { void releaseStaleInstance(); },
+          } : undefined}
+          secondaryAction={confirming || releasePhase === 'failed' ? { label: confirming ? 'Cancel' : 'Back', onAction: () => {
+            setReleasePhase('idle'); setReleaseConfirmed(false);
+          } } : undefined}
+          onClose={close}
+          onMinimize={minimize}
+        >
+          {confirming && (
+            <div className="mt-5 flex flex-col gap-3 text-sm">
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                <dt>Process</dt><dd>{stale.pid}</dd>
+                <dt>Started</dt><dd>{stale.startedAt}</dd>
+                {stale.version && <><dt>Version</dt><dd>{stale.version}</dd></>}
+              </dl>
+              <p>{stale.leaseChecked
+                ? 'No process holds this library’s lock, and process ' + String(stale.pid) + ' is not running.'
+                : 'Process ' + String(stale.pid) + ' is not running. Pumas cannot check the library’s lock on this system, so make sure no Pumas window or backend is open.'}</p>
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={releaseConfirmed} onChange={(event) => setReleaseConfirmed(event.target.checked)} />
+                No Pumas window, backend, or other tool is still using this library.
+              </label>
+            </div>
+          )}
+        </LauncherRootRecoveryView>
+      );
+    } else if (reason === 'migration-required' && upgradePhase !== 'idle') {
       const confirming = upgradePhase === 'confirm';
       const running = upgradePhase === 'running';
       content = (
@@ -472,10 +560,12 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
         message={message}
         primaryAction={reason === 'migration-required'
           ? { label: 'Upgrade Library', onAction: () => { setUpgradePhase('confirm'); } }
+          : stale
+          ? { label: 'Release Entry', onAction: () => { setReleasePhase('confirm'); } }
           : canSelectLibrary
           ? { label: 'Select Library', onAction: () => { void chooseLibraryRoot(); } }
           : undefined}
-        secondaryAction={reason === 'migration-required' && canSelectLibrary
+        secondaryAction={(reason === 'migration-required' || stale) && canSelectLibrary
           ? { label: 'Select Library', onAction: () => { void chooseLibraryRoot(); } } : undefined}
         onClose={close}
         onMinimize={minimize}

@@ -395,6 +395,22 @@ inventory and remaining authority gates are:
    whether an old owner left a surviving external writer. No PID-based or
    lock-only registry replacement has been added.
 
+   **Operator-confirmed release (explicit administrative reconciliation).**
+   `LibraryRegistry::inspect_stale_instance` reports a primary row as stale
+   only when the store lease is free (Linux, macOS), the row's process does
+   not exist (a process owned by another user counts as existing), and it
+   changes nothing. `release_stale_instance` removes exactly the row an
+   operator confirmed (path, pid, start time, version). It re-checks every
+   condition while holding the store lease and inside one IMMEDIATE registry
+   transaction, refuses with the reason when anything changed, and logs the
+   removed pid, start time, version and root. The backend reports such a row
+   as the `stale-instance` startup failure. The desktop shows the entry and
+   offers "Release Entry" after an explicit confirmation, running the backend
+   once with `--release-stale-instance --expected-pid --expected-started-at`.
+   Headless refusals name that command. Windows has no qualified lease, so a
+   release there rests on the process check and the confirmation, and the
+   desktop says so. Automatic reclamation remains unavailable.
+
 Native primitive tests exercise same-process contention, alias/different-registry
 exclusion without row changes, final-share release, missing/non-directory/FIFO roots,
 rename/replacement, panic and blocking work surviving requester/runtime shutdown.

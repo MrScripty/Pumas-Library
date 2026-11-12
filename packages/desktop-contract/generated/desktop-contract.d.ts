@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 fcf7c51b5fb42225cb3b41014d8c43e38795a325e91abfcd1f87369f00f447f5. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 5614b82b01e62ed8fb3e133ca3a1e760affed69f2d5d09280ab092bfadd41cf4. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -143,12 +143,12 @@ export type RuntimeLaunchOutcome = { "error"?: string; "log_path"?: string; "rea
 export type RuntimeLaunchParams = Readonly<Record<string, never>>;
 export type RuntimeLifecycleState = "unknown" | "stopped" | "starting" | "running" | "stopping" | "failed" | "external";
 export type RuntimeManagementMode = "managed" | "external";
-export type RuntimeProfileConfig = { "device": (RuntimeDeviceSettings); "enabled": boolean; "endpoint_url"?: string | null; "management_mode": RuntimeManagementMode; "name": string; "port"?: number | null; "profile_id": string; "provider": RuntimeProviderId; "provider_mode": RuntimeProviderMode; "scheduler": (RuntimeSchedulerSettings) };
+export type RuntimeProfileConfig = { "device": (RuntimeDeviceSettings); "enabled": boolean; "endpoint_url"?: string | null; "management_mode": RuntimeManagementMode; "name": string; "port"?: number | null; "profile_id": string; "provider": RuntimeProviderId; "provider_mode": RuntimeProviderMode; "runtime_version"?: string | null; "scheduler": (RuntimeSchedulerSettings) };
 export type RuntimeProfileEvent = { "cursor": string; "event_kind": RuntimeProfileEventKind; "model_id"?: string | null; "producer_revision"?: string | null; "profile_id"?: string | null; "provider"?: (RuntimeProviderId) | (null) };
 export type RuntimeProfileEventKind = "profile_created" | "profile_updated" | "profile_deleted" | "route_updated" | "route_deleted" | "status_changed" | "snapshot_required";
 export type RuntimeProfilesSnapshot = { "cursor": string; "default_profile_id"?: string | null; "profiles": ReadonlyArray<RuntimeProfileConfig>; "routes": ReadonlyArray<ModelRuntimeRoute>; "schema_version": number; "statuses": ReadonlyArray<RuntimeProfileStatus> };
 export type RuntimeProfilesSnapshotResponse = { "error"?: string | null; "snapshot": RuntimeProfilesSnapshot; "success": boolean };
-export type RuntimeProfileStatus = { "endpoint_url"?: string | null; "last_error"?: string | null; "log_path"?: string | null; "pid"?: number | null; "profile_id": string; "state": RuntimeLifecycleState };
+export type RuntimeProfileStatus = { "endpoint_url"?: string | null; "last_error"?: string | null; "log_path"?: string | null; "pid"?: number | null; "profile_id": string; "runtime_version"?: string | null; "state": RuntimeLifecycleState };
 export type RuntimeProfileUpdateFeed = { "cursor": string; "events": ReadonlyArray<RuntimeProfileEvent>; "snapshot_required": boolean; "stale_cursor": boolean };
 export type RuntimeProviderId = "torch" | "ollama" | "llama_cpp" | "onnx_runtime";
 export type RuntimeProviderMode = "torch_serve" | "ollama_serve" | "llama_cpp_router" | "llama_cpp_dedicated" | "onnx_serve";

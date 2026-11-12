@@ -8,7 +8,7 @@ use super::serving_llama_cpp_router::{
     serve_llama_cpp_router_model, unserve_llama_cpp_router_model,
 };
 use super::serving_llama_cpp_shared::{
-    active_llama_cpp_runtime, llama_cpp_launch_overrides, llama_cpp_runtime_support_error,
+    llama_cpp_launch_overrides, llama_cpp_runtime_support_error, profile_llama_cpp_runtime,
 };
 use crate::server::AppState;
 use pumas_library::models::{
@@ -86,16 +86,15 @@ pub(super) async fn serve_llama_cpp_model(
         }
     };
 
-    let Some((tag, version_dir)) = active_llama_cpp_runtime(state, &request).await? else {
-        return non_critical_failure_response(
-            state,
-            serving_error(
-                ModelServeErrorCode::MissingRuntime,
-                "llama.cpp runtime versions are not available",
-                &request,
-            ),
-        )
-        .await;
+    let (tag, version_dir) = match profile_llama_cpp_runtime(state, &request).await? {
+        Ok(resolved) => resolved,
+        Err(reason) => {
+            return non_critical_failure_response(
+                state,
+                serving_error(ModelServeErrorCode::MissingRuntime, reason, &request),
+            )
+            .await;
+        }
     };
     if let Some(error) = llama_cpp_runtime_support_error(&version_dir, &request) {
         return non_critical_failure_response(state, error).await;

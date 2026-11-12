@@ -28,23 +28,40 @@ pub(super) fn provider_request_model_id(
         .unwrap_or_else(|| library_model_id.to_string())
 }
 
-pub(super) async fn active_llama_cpp_runtime(
+/// The llama.cpp version a serving request's profile launches: its pinned
+/// `runtime_version`, else the active version. `Err` carries the reason.
+pub(super) async fn profile_llama_cpp_runtime(
     state: &AppState,
     request: &ServeModelRequest,
-) -> pumas_library::Result<Option<(String, PathBuf)>> {
+) -> pumas_library::Result<Result<(String, PathBuf), String>> {
     let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
-        return Ok(None);
+        return Ok(Err(
+            "llama.cpp runtime versions are not available".to_string()
+        ));
     };
-    let Some(tag) = version_manager.get_active_version().await? else {
-        warn!(
-            model_id = %request.model_id,
-            profile_id = %request.config.profile_id.as_str(),
-            "No active llama.cpp runtime version is set"
-        );
-        return Ok(None);
-    };
-    let version_dir = version_manager.version_path(&tag)?;
-    Ok(Some((tag, version_dir)))
+    match super::resolve_profile_runtime_version(
+        state,
+        &version_manager,
+        &request.config.profile_id,
+        None,
+    )
+    .await?
+    {
+        Ok(resolved) => Ok(Ok(resolved)),
+        Err(super::ProfileRuntimeVersionRefusal::NoActiveVersion) => {
+            warn!(
+                model_id = %request.model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                "No active llama.cpp runtime version is set"
+            );
+            Ok(Err(
+                "No llama.cpp runtime version is active; install one and select it, or set the \
+                 profile's runtime version"
+                    .to_string(),
+            ))
+        }
+        Err(super::ProfileRuntimeVersionRefusal::NotInstalled(reason)) => Ok(Err(reason)),
+    }
 }
 
 pub(super) fn llama_cpp_launch_overrides(

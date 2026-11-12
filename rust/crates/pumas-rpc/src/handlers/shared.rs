@@ -259,6 +259,68 @@ pub(crate) async fn require_version_manager(
         })
 }
 
+/// Why a managed profile cannot be launched from an installed runtime version.
+#[cfg(feature = "inference-plugins")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProfileRuntimeVersionRefusal {
+    /// Nothing was requested or pinned, and the runtime has no active version.
+    NoActiveVersion,
+    /// The requested or pinned version is not installed; carries the reason.
+    NotInstalled(String),
+}
+
+/// The installed runtime version and its directory that a managed profile
+/// launches: an explicitly requested version, else the profile's pinned
+/// `runtime_version`, else the runtime's active version.
+///
+/// Pinned and requested versions must be installed. A running instance keeps
+/// the version it was launched from; this only decides new launches.
+#[cfg(feature = "inference-plugins")]
+pub(crate) async fn resolve_profile_runtime_version(
+    state: &AppState,
+    version_manager: &VersionManager,
+    profile_id: &pumas_library::models::RuntimeProfileId,
+    requested: Option<&str>,
+) -> pumas_library::Result<Result<(String, PathBuf), ProfileRuntimeVersionRefusal>> {
+    let pinned = if requested.is_some() {
+        None
+    } else {
+        state
+            .api
+            .get_runtime_profiles_snapshot()
+            .await?
+            .snapshot
+            .profiles
+            .into_iter()
+            .find(|profile| &profile.profile_id == profile_id)
+            .and_then(|profile| profile.runtime_version)
+    };
+    let tag = match requested.map(str::to_owned).or(pinned) {
+        Some(tag) => {
+            if !version_manager
+                .get_installed_versions()
+                .await?
+                .contains(&tag)
+            {
+                return Ok(Err(ProfileRuntimeVersionRefusal::NotInstalled(format!(
+                    "Runtime profile {} uses {} version {tag}, which is not installed; install \
+                     it from the {} versions or change the profile's runtime version",
+                    profile_id.as_str(),
+                    version_manager.app_id(),
+                    version_manager.app_id()
+                ))));
+            }
+            tag
+        }
+        None => match version_manager.get_active_version().await? {
+            Some(tag) => tag,
+            None => return Ok(Err(ProfileRuntimeVersionRefusal::NoActiveVersion)),
+        },
+    };
+    let version_dir = version_manager.version_path(&tag)?;
+    Ok(Ok((tag, version_dir)))
+}
+
 pub(crate) async fn path_exists(path: &Path) -> pumas_library::Result<bool> {
     tokio::fs::try_exists(path)
         .await

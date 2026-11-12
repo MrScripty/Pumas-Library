@@ -97,7 +97,10 @@ pub(crate) use shared::{
     validate_non_empty,
 };
 #[cfg(feature = "inference-plugins")]
-pub(crate) use shared::{get_version_manager, read_utf8_file, require_version_manager};
+pub(crate) use shared::{
+    get_version_manager, read_utf8_file, require_version_manager, resolve_profile_runtime_version,
+    ProfileRuntimeVersionRefusal,
+};
 
 // ============================================================================
 // JSON-RPC types

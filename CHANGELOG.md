@@ -24,16 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   change applies to new launches. Removing a version is refused only while an
   instance runs that version, and the refusal names the profiles to stop.
 - ONNX Runtime is a downloaded, version-managed runtime like llama.cpp and
-  Torch, and desktop packages no longer bundle it. The ONNX Runtime panel lists
-  official `microsoft/onnxruntime` releases that support the C API Pumas uses
-  (1.24 or newer, CPU archive for the host). It installs them through the shared,
-  resumable and verified download path and tracks installed, active and default
-  versions. The in-process provider loads the active version; `ORT_DYLIB_PATH`
-  remains a developer override. Without an installed version, serving and
-  runtime-profile launch refuse with the reason and how to install one. A newly
-  selected version takes effect after Pumas restarts, because ONNX Runtime keeps
-  the first library a process loads. See
+  Torch, and no Pumas package bundles it: desktop packages and headless
+  inference archives alike. The ONNX Runtime panel lists official
+  `microsoft/onnxruntime` releases that support the C API Pumas uses (1.24 or
+  newer) as CPU, CUDA 12 and CUDA 13 builds for the host, installs them through
+  the shared, resumable and verified download path, and tracks installed,
+  active and default versions.
+- Each ONNX Runtime profile runs its own ONNX host process (`pumas-rpc
+  --onnx-host`) that loads the version the profile launches, so profiles on
+  different versions serve at the same time and switching a profile's version
+  restarts only that host, never Pumas. A profile's device mode selects the
+  build's execution provider (CPU, CUDA, or CoreML on macOS); a provider that
+  cannot initialize, or a missing runtime, refuses the launch with the reason.
+  Serving launches the profile's host when needed. `ORT_DYLIB_PATH` remains a
+  developer override. See
   [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md).
+- Headless inference archives contain only `pumas-rpc`, its license and
+  notices, the protocol schema and build record; their manifest is schema 2
+  without the `runtime` record, and schema-1 manifests are refused with the
+  reason. Release SBOMs list no bundled runtime.
 
 ## [0.8.0] - 2026-11-08
 

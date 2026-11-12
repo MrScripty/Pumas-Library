@@ -47,11 +47,15 @@ needs no native SDK.
 ONNX Runtime is a downloaded, version-managed runtime like llama.cpp. The
 version manager (app id `onnx-runtime`) lists official `microsoft/onnxruntime`
 releases that export the C API the `ort` binding requests (C API 24, so 1.24 or
-newer) and publish a CPU archive for the host, installs them into
-`onnx-runtime-versions/<tag>` through the shared acquisition service (resumable,
-publisher SHA-256 verified), and tracks installed, active and default versions.
-The provider loads `lib/` of the active version. 1.24.2 is the combination that
-was verified end to end; it is evidence, not a required version.
+newer), one entry per build the host has an archive for (`+cpu`, `+cuda12`,
+`+cuda13`), installs them into `onnx-runtime-versions/<tag>` through the shared
+acquisition service (resumable, publisher SHA-256 verified), and tracks
+installed, active and default versions. Each ONNX Runtime profile runs its own
+ONNX host (`pumas-rpc --onnx-host`) that loads `lib/` of the version the
+profile launches, so profiles on different versions serve at once; see
+[ADR 0009](adr/0009-onnx-runtime-downloaded-runtime.md). 1.24.2 is the
+combination that was verified end to end; it is evidence, not a required
+version.
 
 `ORT_DYLIB_PATH` remains an explicit developer override: set it to an absolute
 `.so`/`.dylib`/`.dll` file before process startup and it wins over the installed
@@ -66,13 +70,12 @@ ORT_DYLIB_PATH=/absolute/onnxruntime-1.24.2/lib/libonnxruntime.so \
 If its dependent libraries require an OS loader path, supply that only to the
 invocation; do not change system loader configuration. `ORT_LIB_PATH` and
 `ORT_PREFER_DYNAMIC_LINK` belonged to build-time linking and are not runtime
-selectors in this mode. The binding retains its process-wide loaded library;
-runtime replacement requires restarting the process: after the active ONNX
-Runtime version changes, a load whose verified library differs from the one ORT
-already adopted (or whose file changed after verification) is refused with that
-reason until Pumas restarts. Applications embedding
-Pumas keep ownership of ORT environment settings and must select the same
-library before any other direct ORT calls.
+selectors in this mode. The binding retains its process-wide loaded library,
+which is why each profile has its own host: a load whose verified library
+differs from the one ORT already adopted in that process (or whose file changed
+after verification) is refused with that reason. Applications embedding
+`pumas-library` keep ownership of ORT environment settings and must select the
+same library before any other direct ORT calls.
 
 Consumers that only need model metadata can declare `pumas-library` with
 `default-features = false` to omit ONNX Runtime; add `s3` only when they call

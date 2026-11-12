@@ -1,10 +1,10 @@
 {
   "id": "onnx-runtime",
   "displayName": "ONNX Runtime",
-  "description": "Downloaded ONNX Runtime library executed in-process for embeddings",
+  "description": "Downloaded ONNX Runtime, hosted per profile, for ONNX embeddings",
   "icon": "cpu",
   "githubRepo": "microsoft/onnxruntime",
-  "installationType": "in-process",
+  "installationType": "binary",
 
   "capabilities": {
     "hasVersionManagement": true,

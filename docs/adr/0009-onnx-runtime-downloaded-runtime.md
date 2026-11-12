@@ -1,70 +1,122 @@
-# ADR 0009: ONNX Runtime is a downloaded, version-managed runtime
+# ADR 0009: ONNX Runtime is a downloaded runtime hosted per profile
 
 - Status: Accepted
 - Date: 2026-11-12
-- Supersedes: the packaging and provisioning parts of
-  [ADR 0001](0001-onnx-runtime-provider-model.md) ("ONNX Runtime packaging
-  remains part of the Rust native dependency closure" and "does not enter
-  app-manager's version installation flows").
+- Supersedes: [ADR 0001](0001-onnx-runtime-provider-model.md) on two points.
+  ADR 0001 executed ONNX in the Pumas Rust process and kept ONNX Runtime
+  packaging in the Rust native dependency closure; this ADR replaces both.
+  Its provider model otherwise stands.
 
 ## Context
 
-ADR 0001 kept ONNX Runtime execution in-process and provisioned its native
-library outside Pumas: desktop packages shipped `libonnxruntime.so`,
-`onnxruntime.dll` or `libonnxruntime.dylib` beside `pumas-rpc`, pinned to one
-release, and developers set `ORT_DYLIB_PATH`. llama.cpp and Torch, by contrast,
-are external runtimes the user downloads and selects through the version
-manager.
+Under ADR 0001, desktop packages and headless inference archives bundled one
+pinned ONNX Runtime library beside `pumas-rpc`, and the in-process provider
+loaded it. llama.cpp and Torch, by contrast, are external runtimes that Pumas
+downloads and runs one process per runtime profile.
 
-The owner decided that ONNX should not be shipped inside the app: it is an
-external runtime that is downloaded like llama.cpp and Torch.
+The owner decided:
+
+- ONNX Runtime is not shipped inside the app or the headless archives. Pumas
+  installs runtimes.
+- Pumas must not need a restart. llama.cpp, Torch and ONNX Runtime may run
+  several instances when different versions are wanted, for example for models
+  with different runtime requirements. Restarting one runtime instance is fine.
+- Pumas must support GPUs.
+
+ONNX Runtime keeps the first native library a process loads (`ort` stores it
+in a process-wide `OnceLock`, and Pumas already refused a different library
+after adoption). One process therefore cannot switch versions or run two at
+once. In-process execution with "restart Pumas to switch" is rejected.
 
 ## Decision
 
-- ONNX Runtime (app id `onnx-runtime`) is a version-managed app. Its releases
-  are the official `microsoft/onnxruntime` GitHub releases.
-- No release is pinned. The listing keeps stable releases whose version exports
-  the C API the `ort` binding requests (1.x with x at least the binding's C API
-  version, 24 today) and that publish a CPU archive for the host
-  (`linux-x64`, `linux-aarch64`, `osx-arm64`, `osx-x86_64` or `osx-universal2`,
-  `win-x64`, `win-arm64`). Each is offered as a `vX.Y.Z+cpu` variant. 1.24.2 is
-  the combination verified end to end: evidence, not a requirement.
-- Installation reuses the llama.cpp native-archive path: the shared acquisition
-  service (resumable transfer, publisher SHA-256), attempt custody, completion
-  receipts and restart reconciliation. ONNX Runtime has its own acquisition
-  consumer (`runtime.onnx-runtime`), versions directory
-  (`onnx-runtime-versions/`) and active-version marker. Extraction removes the
-  upstream wrapper directory and makes the loaded library a regular file at
-  `lib/<platform library name>`, which the receipt hashes.
-- The provider loads the library of the active installed version. The host
-  (pumas-rpc) resolves it from the version manager and passes it to the session
-  manager; it is never part of a request. Resolution order is `ORT_DYLIB_PATH`
-  (explicit developer override), the active installed version, then a library
-  beside the executable (headless inference archives).
-- Without a usable library the refusal says that no version is installed and
-  active and how to install a compatible one. Serving returns that reason, and
-  an ONNX runtime profile refuses to launch without it.
-- Desktop packages stage only `pumas-rpc`; package smoke checks refuse a
-  packaged ONNX Runtime library.
+**Version management.** ONNX Runtime (app id `onnx-runtime`) is a
+version-managed app. Its releases are the official `microsoft/onnxruntime`
+GitHub releases.
 
-Execution stays in-process, as ADR 0001 decided.
+- No release is pinned. The listing keeps stable releases whose version
+  exports the C API the `ort` binding requests: 1.x with x at least the
+  binding's C API version, which is 24 today.
+- Each build Microsoft publishes for the host is listed as a variant:
+  - `+cpu` on every supported platform. The macOS build also carries the
+    CoreML execution provider.
+  - `+cuda12` and `+cuda13` on Linux x64 and Windows x64. Upstream names the
+    CUDA 12 build `gpu` before 1.27 and `gpu_cuda12` after.
+- Installation reuses the llama.cpp native-archive path: shared acquisition
+  (resumable, publisher SHA-256), custody, receipts and restart reconciliation.
+  ONNX Runtime has its own acquisition consumer (`runtime.onnx-runtime`),
+  versions directory (`onnx-runtime-versions/`) and active-version marker.
+
+**One host process per profile.** Each managed ONNX Runtime profile runs its
+own ONNX host process, like the llama.cpp server and the Torch sidecar.
+
+- The host loads the library of the installed version the profile launches:
+  its pinned `runtime_version` (#145), else the active version.
+- Two profiles pinned to different versions serve at the same time.
+- Changing a profile's version restarts only that host, never Pumas.
+
+**Host form.** The host is the `pumas-rpc` executable started with
+`--onnx-host`. That is the existing `ort` code (`RealOnnxEmbeddingBackend`,
+`OnnxSessionManager`) running in another process. We chose this over a
+separate binary because a second executable would need its own staging,
+packaging, notarization, SBOM and smoke coverage on every platform, for no
+behavioural gain. The RPC server registers its own executable as the host at
+startup. An embedding application that registers none cannot launch ONNX
+profiles, and the launch is refused with that reason.
+
+**Lifecycle.** Hosts are launched and owned by the existing runtime-profile
+process owner, with no parallel lifecycle:
+
+- PID and identity records under `launcher-data/runtime-profiles/onnx-runtime/<profile>/`;
+- the `<pid file>.version` sidecar;
+- listener custody;
+- the stale-instance scans.
+
+The host exits when its launching backend exits. Every request except
+`/health` carries a per-backend token that reaches the host only through its
+environment.
+
+**Execution provider.** The host derives its execution provider from the
+installed build and the profile's device mode, and registers it with
+`error_on_failure`:
+
+| Device mode | Execution provider |
+| --- | --- |
+| CPU | CPU |
+| GPU | CUDA for `+cuda*` builds, CoreML on macOS. Refused with the reason on any other build. |
+| Auto | The build's GPU provider if it has one, otherwise CPU. |
+
+**Refusals.** The host initializes its library and execution provider before it
+listens, then reports readiness on `/health`. When a host cannot initialize,
+Pumas stops it and refuses the launch with the host's reason. For CUDA the
+reason names the NVIDIA driver plus the CUDA runtime and cuDNN libraries.
+
+**Serving.** Pumas reaches hosts through `RemoteOnnxEmbeddingBackend` behind
+the existing session manager, so the `/v1` gateway and model operations are
+unchanged. Serving launches the profile's host when it is not running.
+
+**Developer override.** `ORT_DYLIB_PATH` remains an explicit developer
+override inside a host. Nothing falls back to a library beside the
+executable.
+
+**Packaging.** Desktop packages and headless archives bundle no runtime. The
+headless archive manifest moves to schema 2, which has no runtime record. The
+archive verification installs ONNX Runtime through the extracted `pumas-rpc`.
 
 ## Consequences
 
-- ORT adopts one native library per process and Pumas refuses a different one
-  after adoption. Changing the active version therefore takes effect after
-  Pumas restarts; until then a load reports that a restart is needed. Switching
-  versions without a restart would require an out-of-process ONNX host.
-- A fresh desktop install cannot run ONNX embeddings until the user installs an
-  ONNX Runtime version. Consumers that require ONNX (for example embedding
-  models) must surface the refusal reason.
-- Only CPU archives are offered, because the provider registers only the CPU
-  execution provider. GPU builds would need a provider change first.
-- Headless inference archives still package the pinned runtime beside the
-  executable; their release pins, probes and notices are unchanged.
+- A fresh install cannot run ONNX embeddings until the user installs an ONNX
+  Runtime version. Every refusal says so.
+- GPU execution depends on the host's NVIDIA driver and CUDA/cuDNN libraries.
+  Pumas does not install those; the refusal names what is missing.
+- DirectML is not offered. Microsoft publishes it only as a NuGet package, last
+  updated at 1.24.x. Offering it would need a second download source and
+  SHA-512 evidence in the acquisition manifest, which is an owner decision.
+- One model id is loaded by at most one host at a time. Loading it on a second
+  profile is refused with the host that holds it.
 
 ## Revisit When
 
-- the provider gains a GPU execution provider (offer GPU archives as variants);
-- ONNX Runtime changes its archive layout or C API compatibility policy; or
-- version switching without a restart is required.
+- Pumas should install CUDA/cuDNN libraries for GPU builds;
+- a DirectML, ROCm or other execution provider is required; or
+- ONNX Runtime changes its archive layout or its C API compatibility policy.

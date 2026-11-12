@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn onnx_runtime_manifest_is_an_in_process_version_managed_runtime() {
+    fn onnx_runtime_manifest_is_a_version_managed_binary_runtime() {
         let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .join("launcher-data/plugins/onnx-runtime.json");
@@ -374,7 +374,7 @@ mod tests {
 
         assert_eq!(config.id, "onnx-runtime");
         assert_eq!(config.display_name, "ONNX Runtime");
-        assert_eq!(config.installation_type, InstallationType::InProcess);
+        assert_eq!(config.installation_type, InstallationType::Binary);
         assert!(config.capabilities.has_version_management);
         assert_eq!(
             config.github_repo.as_deref(),

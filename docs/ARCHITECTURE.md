@@ -153,8 +153,10 @@ Optional inference support distinguishes:
 - serving adapters and backend-owned served instances; and
 - gateway endpoint capabilities.
 
-Ollama and llama.cpp use external processes, ONNX Runtime is hosted in the Rust
-process, and Torch uses the Python sidecar.
+Ollama and llama.cpp use external processes, ONNX Runtime runs in an ONNX host
+process per profile (`pumas-rpc --onnx-host`, see
+[ADR 0009](adr/0009-onnx-runtime-downloaded-runtime.md)), and Torch uses the
+Python sidecar.
 
 A managed runtime profile may pin an installed runtime version
 (`RuntimeProfileConfig.runtime_version`); without one it follows the runtime's

@@ -1,7 +1,7 @@
 # ADR 0001: ONNX Runtime Provider Model
 
 - Status: Accepted and implemented; packaging and provisioning superseded by
-  [ADR 0006](0006-onnx-runtime-downloaded-runtime.md)
+  [ADR 0009](0009-onnx-runtime-downloaded-runtime.md)
 - Date: 2026-05-11
 
 ## Context
@@ -47,7 +47,7 @@ the old route shape is not retained as a parallel reader.
 | Frontend descriptors | `frontend/src/utils/runtimeProviderDescriptors.ts` |
 | Source plugin metadata | `launcher-data/plugins/*.json` |
 
-[ADR 0006](0006-onnx-runtime-downloaded-runtime.md) replaces the
+[ADR 0009](0009-onnx-runtime-downloaded-runtime.md) replaces the
 packaging and provisioning text below: ONNX Runtime is now a downloaded,
 version-managed runtime, and desktop packages no longer bundle it.
 

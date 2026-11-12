@@ -44,7 +44,12 @@ class ReleaseTests(unittest.TestCase):
             (source / binary).write_bytes(b"test RPC, not executable")
             # ONNX Runtime is downloaded by the desktop at runtime; libraries
             # beside the build output must never be staged into a package.
-            for name in ["onnxruntime.dll", "libonnxruntime.so", "libonnxruntime.dylib", "ONNX-LICENSE.txt"]:
+            for name in [
+                "onnxruntime.dll",
+                "libonnxruntime.so",
+                "libonnxruntime.dylib",
+                "ONNX-LICENSE.txt",
+            ]:
                 (source / name).write_bytes(b"must never copy")
             desktop.stage_rpc(source, target)
             self.assertEqual({p.name for p in target.iterdir()}, {binary})

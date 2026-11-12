@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   installed, or launching a profile whose pinned version was removed, is
   refused with the reason. Running instances report the version they started
   from in `RuntimeProfileStatus.runtime_version`.
+- `get_runtime_providers` reports each runtime provider's app id, whether it
+  is version-managed in this build, and its supported provider, device and
+  management modes. The desktop app derives its version panels and runtime
+  profile editor choices from it instead of hard-coded lists, so ONNX Runtime
+  profiles now offer GPU.
 
 ### Changed
 

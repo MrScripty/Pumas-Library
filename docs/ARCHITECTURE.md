@@ -154,7 +154,18 @@ Optional inference support distinguishes:
 - gateway endpoint capabilities.
 
 Ollama and llama.cpp use external processes, ONNX Runtime is hosted in the Rust
-process, and Torch uses the Python sidecar. The `/v1` gateway is the public
+process, and Torch uses the Python sidecar.
+
+A managed runtime profile may pin an installed runtime version
+(`RuntimeProfileConfig.runtime_version`); without one it follows the runtime's
+active version at each launch. Each profile instance is its own process, so
+profiles pinned to different versions of the same runtime run at once. A
+running instance keeps the version it started from: it is reported in
+`RuntimeProfileStatus.runtime_version` and recorded in a
+`<pid file>.version` sidecar. Selecting a different active or default
+version therefore affects new launches only. The version manager refuses to
+remove a version while an instance that recorded it (or recorded no version)
+is alive, and the refusal names those profiles. The `/v1` gateway is the public
 facade: external clients target it, never provider-internal endpoints.
 Provider processes expose private protocols (versioned handshakes,
 capability advertisements, and internal request shapes) that the gateway

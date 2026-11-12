@@ -105,6 +105,15 @@ the 2026-11-02 audit
   3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
   from the preset keep working. Torch install options replace
   `bundledPresetAvailable` and `preset` with `verified`.
+- Torch runtimes run the sidecar shipped with the running Pumas instead of a
+  copy written into the runtime at install time, so upgrading Pumas updates
+  the sidecar for every installed runtime without a reinstall. Pumas writes it
+  once to `launcher-data/torch-sidecar/<version>-<digest>/` and every runtime
+  version launches from there; a runtime holds only its Python environment,
+  packages and records. Before each launch Pumas checks the runtime's
+  interpreter and startup packages against the sidecar's floors (never pins)
+  and refuses an incompatible runtime with every reason. Sidecar copies in
+  runtimes installed earlier are no longer run and are left in place.
 - Desktop update streams (model library, downloads, runtime profiles, serving
   status and status telemetry) are validated against the backend's declaration.
   A rejected desktop payload says which field and rule failed.

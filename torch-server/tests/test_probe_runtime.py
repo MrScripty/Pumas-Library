@@ -64,7 +64,7 @@ class AdapterImportProbeTests(TestCase):
                     side_effect=ImportError("torch missing"),
                 ),
             ):
-                result = probe_runtime.probe(root)
+                result = probe_runtime.probe(root, root)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["capabilities"]["torch_import"]["status"], "failed")
         self.assertEqual(result["capabilities"]["sidecar_app"]["status"], "passed")
@@ -131,7 +131,7 @@ class AdapterImportProbeTests(TestCase):
                     ),
                 ),
             ):
-                result = probe_runtime.probe(root)
+                result = probe_runtime.probe(root, root)
         self.assertEqual(result["core_status"], "passed")
         self.assertEqual(result["adapter_status"], "unavailable")
         self.assertEqual(result["status"], "partial")
@@ -241,7 +241,7 @@ class AdapterImportProbeTests(TestCase):
                         return_value={"status": "inconclusive"},
                     ) as asr,
                 ):
-                    result = probe_runtime.probe(root)
+                    result = probe_runtime.probe(root, root)
                 self.assertEqual(asr.call_count, int(selected == "cohere-asr"))
                 self.assertEqual(result["core_status"], "passed")
                 self.assertEqual(
@@ -261,7 +261,7 @@ class AdapterImportProbeTests(TestCase):
         ):
             with (
                 tempfile.TemporaryDirectory() as directory,
-                patch.object(probe_runtime, "__file__", str(Path(directory) / "probe_runtime.py")),
+                patch.object(probe_runtime, "__file__", str(Path(directory) / "sidecar.py")),
                 patch.object(
                     probe_runtime,
                     "probe",
@@ -273,12 +273,16 @@ class AdapterImportProbeTests(TestCase):
                 ),
                 patch("builtins.print"),
             ):
+                runtime = Path(directory) / "runtime"
+                runtime.mkdir()
                 if fails:
                     with self.assertRaises(SystemExit):
-                        probe_runtime.main()
+                        probe_runtime.main(["--runtime", str(runtime)])
                 else:
-                    probe_runtime.main()
-                self.assertTrue((Path(directory) / "probe-results.json").is_file())
+                    probe_runtime.main(["--runtime", str(runtime)])
+                # Results belong to the runtime; the shared sidecar stays unwritten.
+                self.assertTrue((runtime / "probe-results.json").is_file())
+                self.assertEqual(sorted(Path(directory).iterdir()), [runtime])
 
     def test_device_failure_is_scoped(self):
         fake_torch = SimpleNamespace(

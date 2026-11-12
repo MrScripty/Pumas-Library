@@ -1,5 +1,12 @@
-"""Record installed Torch, sidecar, device, and selected adapter evidence."""
+"""Record installed Torch, sidecar, device, and selected adapter evidence.
 
+The probe runs from the sidecar shipped with Pumas, never from the runtime:
+`--runtime` names the installed runtime whose `resolution.json` it reads and
+where it writes `probe-results.json`. Nothing is written next to the sidecar,
+which every installed runtime shares.
+"""
+
+import argparse
 import asyncio
 import hashlib
 import importlib
@@ -25,7 +32,7 @@ ADAPTER_IMPORTS = {
 
 
 def runtime_file_hashes(root: Path) -> dict[str, str]:
-    """Hash shipped sidecar sources at the runtime root and in loaders/."""
+    """Hash the sidecar sources at its root and in loaders/."""
     hashes = {}
     paths = [*root.glob("*.py"), *(root / "loaders").glob("*.py")]
     for path in sorted(paths):
@@ -169,8 +176,8 @@ def device_probe(torch) -> tuple[dict, dict]:
     return hardware, capability
 
 
-def probe(root: Path) -> dict:
-    resolution_bytes = (root / "resolution.json").read_bytes()
+def probe(runtime: Path, sidecar: Path) -> dict:
+    resolution_bytes = (runtime / "resolution.json").read_bytes()
     resolution = json.loads(resolution_bytes)
     capabilities = {}
     installed = {}
@@ -210,7 +217,7 @@ def probe(root: Path) -> dict:
             capabilities["cpu_tensor"] = {"status": "failed", "error": str(error)}
         hardware, capabilities["cuda_tensor"] = device_probe(torch)
     try:
-        sys.path.insert(0, str(root))
+        sys.path.insert(0, str(sidecar))
         from serve import create_app
 
         app = create_app()
@@ -318,7 +325,7 @@ def probe(root: Path) -> dict:
             "hardware": hardware,
             "hardware_fingerprint": hardware_fingerprint,
             "driver_version": driver_versions(),
-            "runtime_files_sha256": runtime_file_hashes(root),
+            "runtime_files_sha256": runtime_file_hashes(sidecar),
             "interpreter_sha256": hashlib.sha256(
                 Path(sys.executable).resolve().read_bytes()
             ).hexdigest(),
@@ -326,16 +333,18 @@ def probe(root: Path) -> dict:
             "all_installed_distributions": all_installed,
             "distributions_sha256": distributions_sha256,
             "resolution_sha256": hashlib.sha256(resolution_bytes).hexdigest(),
-            "sidecar_sha256": hashlib.sha256((root / "serve.py").read_bytes()).hexdigest(),
+            "sidecar_sha256": hashlib.sha256((sidecar / "serve.py").read_bytes()).hexdigest(),
         },
         "capabilities": capabilities,
     }
 
 
-def main() -> None:
-    root = Path(__file__).resolve().parent
-    result = probe(root)
-    (root / "probe-results.json").write_text(json.dumps(result, indent=2) + "\n")
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--runtime", type=Path, required=True)
+    runtime = parser.parse_args(argv).runtime.resolve()
+    result = probe(runtime, Path(__file__).resolve().parent)
+    (runtime / "probe-results.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
     if result["core_status"] != "passed" or (
         result["environment"].get("adapter") == "cohere-asr"

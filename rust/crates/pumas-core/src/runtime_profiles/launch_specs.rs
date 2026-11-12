@@ -239,7 +239,10 @@ fn profile_runtime_extra_args(
     match launch_strategy {
         RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
             // Profile arguments replace the default Torch launch arguments.
-            let mut args = vec!["-B".to_string(), "serve.py".to_string()];
+            // The sidecar comes from this Pumas, never from the runtime, and
+            // `-B` keeps every instance from writing next to the shared scripts.
+            let entry = super::torch_sidecar::torch_sidecar_entry(launcher_root);
+            let mut args = vec!["-B".to_string(), entry.to_string_lossy().into_owned()];
             args.extend(runtime_listener_args(endpoint_url, port)?);
             Ok(args)
         }
@@ -447,7 +450,13 @@ mod torch_tests {
         let [spec] = specs.as_slice() else {
             panic!("expected one managed profile")
         };
-        assert_eq!(&spec.extra_args[..2], &["-B", "serve.py"]);
+        // The entry is this Pumas's sidecar, shared by every runtime version.
+        let entry = super::super::torch_sidecar::torch_sidecar_entry(Path::new("/fixture"));
+        assert!(entry.starts_with("/fixture/launcher-data/torch-sidecar"));
+        assert_eq!(
+            &spec.extra_args[..2],
+            &["-B".to_string(), entry.to_string_lossy().into_owned()]
+        );
         assert!(spec.extra_args.contains(&"--port".into()));
         assert!(spec.health_check_url.as_str().ends_with("/health"));
         assert_eq!(
@@ -474,24 +483,42 @@ mod torch_tests {
         );
 
         // Exercise both production argument builders against real Python imports.
-        // The fixture substitutes package code, not the launch arguments.
+        // The fixture substitutes the sidecar and package code, not the launch
+        // arguments: the entry runs from the shared sidecar directory while the
+        // working directory is the runtime's own.
         let mut changed_routes = Vec::new();
+        let launcher = tempfile::tempdir().unwrap();
+        let profile_spec = derive_managed_profile_launch_specs(
+            launcher.path(),
+            &config,
+            &ProviderRegistry::builtin(),
+        )
+        .unwrap()
+        .remove(0);
+        let entry = super::super::torch_sidecar::torch_sidecar_entry(launcher.path());
+        let sidecar = entry.parent().unwrap();
+        std::fs::create_dir_all(sidecar).unwrap();
+        std::fs::write(
+            sidecar.join("sidecar_dependency.py"),
+            "import launch_dependency\nVALUE = launch_dependency.VALUE\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &entry,
+            "import sidecar_dependency\nassert sidecar_dependency.VALUE == 42\n",
+        )
+        .unwrap();
         for (route, args) in [
             (
                 "version",
-                crate::process::BinaryLaunchConfig::torch("fixture", "/fixture").extra_args,
+                crate::process::BinaryLaunchConfig::torch("fixture", "/fixture", &entry).extra_args,
             ),
-            ("profile", spec.extra_args.clone()),
+            ("profile", profile_spec.extra_args.clone()),
         ] {
             let runtime = tempfile::tempdir().unwrap();
             let packages = runtime.path().join("site-packages");
             std::fs::create_dir(&packages).unwrap();
             std::fs::write(packages.join("launch_dependency.py"), "VALUE = 42\n").unwrap();
-            std::fs::write(
-                runtime.path().join("serve.py"),
-                "import launch_dependency\nassert launch_dependency.VALUE == 42\n",
-            )
-            .unwrap();
             let status =
                 std::process::Command::new(if cfg!(windows) { "python" } else { "python3" })
                     .args(args)
@@ -503,13 +530,13 @@ mod torch_tests {
                     .status()
                     .expect("Torch launch regression requires Python");
             assert!(status.success(), "{route} launch failed");
-            if packages.join("__pycache__").exists() {
+            if packages.join("__pycache__").exists() || sidecar.join("__pycache__").exists() {
                 changed_routes.push(route);
             }
         }
         assert!(
             changed_routes.is_empty(),
-            "Torch launches mutated installed package bytes: {changed_routes:?}"
+            "Torch launches wrote bytecode into packages or the shared sidecar: {changed_routes:?}"
         );
     }
 

@@ -14,7 +14,8 @@ use std::time::Duration;
 use tokio::process::Command;
 
 /// Installation checks may import sidecar code directly or in a child process.
-/// Keep their imports from changing the runtime's retained source-byte tree.
+/// Keep their imports from changing the runtime's retained source-byte tree or
+/// writing bytecode next to the sidecar every runtime shares.
 fn runtime_check_command(python: &Path, script: &Path) -> Command {
     let mut command = Command::new(python);
     command.arg(script).env("PYTHONDONTWRITEBYTECODE", "1");
@@ -720,7 +721,8 @@ mod cross_process_recovery_tests {
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let task = spawn_blocking_with_stage(stage.clone(), move || {
-            write_embedded_torch_sidecar(&runtime).unwrap();
+            std::fs::create_dir_all(&runtime).unwrap();
+            std::fs::write(runtime.join("runtime.json"), "{}").unwrap();
             started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
         });
@@ -730,7 +732,7 @@ mod cross_process_recovery_tests {
 
         let metadata = MetadataManager::new(versions);
         assert!(retry_pending_torch_cleanup(versions, &metadata).is_err());
-        assert!(stage_path.join("runtime/serve.py").exists());
+        assert!(stage_path.join("runtime/runtime.json").exists());
         release_tx.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
@@ -1100,102 +1102,6 @@ pub(super) fn schedule_torch_orphan_prune(
             warn!(%error, phase, "Torch orphan cleanup failed");
         }
     });
-}
-
-/// Materialize the sidecar code embedded in the app binary. The runtime's
-/// packages are resolved per installation, never from an embedded lock.
-pub(crate) fn write_embedded_torch_sidecar(destination: &Path) -> Result<()> {
-    std::fs::create_dir_all(destination).map_err(PumasError::from)?;
-    for (name, contents) in [
-        ("LICENSE", include_str!("../../../../../../LICENSE")),
-        (
-            "serve.py",
-            include_str!("../../../../../../torch-server/serve.py"),
-        ),
-        (
-            "resolve_runtime.py",
-            include_str!("../../../../../../torch-server/resolve_runtime.py"),
-        ),
-        (
-            "probe_runtime.py",
-            include_str!("../../../../../../torch-server/probe_runtime.py"),
-        ),
-        (
-            "nunchaku_compat.py",
-            include_str!("../../../../../../torch-server/nunchaku_compat.py"),
-        ),
-        (
-            "control_api.py",
-            include_str!("../../../../../../torch-server/control_api.py"),
-        ),
-        (
-            "device_manager.py",
-            include_str!("../../../../../../torch-server/device_manager.py"),
-        ),
-        (
-            "diffusion.py",
-            include_str!("../../../../../../torch-server/diffusion.py"),
-        ),
-        (
-            "flux2.py",
-            include_str!("../../../../../../torch-server/flux2.py"),
-        ),
-        (
-            "image_api.py",
-            include_str!("../../../../../../torch-server/image_api.py"),
-        ),
-        (
-            "audio_api.py",
-            include_str!("../../../../../../torch-server/audio_api.py"),
-        ),
-        (
-            "model_manager.py",
-            include_str!("../../../../../../torch-server/model_manager.py"),
-        ),
-        (
-            "audio_input.py",
-            include_str!("../../../../../../torch-server/audio_input.py"),
-        ),
-        (
-            "audio_contract.py",
-            include_str!("../../../../../../torch-server/audio_contract.py"),
-        ),
-        (
-            "loaders/cohere_asr_loader.py",
-            include_str!("../../../../../../torch-server/loaders/cohere_asr_loader.py"),
-        ),
-        (
-            "openai_api.py",
-            include_str!("../../../../../../torch-server/openai_api.py"),
-        ),
-        (
-            "validation.py",
-            include_str!("../../../../../../torch-server/validation.py"),
-        ),
-        (
-            "loaders/__init__.py",
-            include_str!("../../../../../../torch-server/loaders/__init__.py"),
-        ),
-        (
-            "loaders/dllm_loader.py",
-            include_str!("../../../../../../torch-server/loaders/dllm_loader.py"),
-        ),
-        (
-            "loaders/safetensors_loader.py",
-            include_str!("../../../../../../torch-server/loaders/safetensors_loader.py"),
-        ),
-        (
-            "loaders/sherry_loader.py",
-            include_str!("../../../../../../torch-server/loaders/sherry_loader.py"),
-        ),
-    ] {
-        let path = destination.join(name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(PumasError::from)?;
-        }
-        std::fs::write(path, contents).map_err(PumasError::from)?;
-    }
-    Ok(())
 }
 
 fn failed(message: impl Into<String>) -> PumasError {
@@ -2051,10 +1957,16 @@ impl VersionInstaller {
             Sha256::digest(std::fs::read(&managed_python.executable).map_err(PumasError::from)?)
         );
 
+        // The runtime holds only the interpreter environment, its packages and
+        // their records. The resolver and probe run from this Pumas's sidecar,
+        // the same code every installed runtime launches.
+        let sidecar =
+            pumas_library::runtime_profiles::materialize_torch_sidecar_async(&self.launcher_root)
+                .await?;
         let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
         spawn_blocking_with_stage(staging.clone(), move || {
-            write_embedded_torch_sidecar(&runtime_for_write)
+            std::fs::create_dir_all(&runtime_for_write).map_err(PumasError::from)
         })
         .await
         .map_err(|error| failed(format!("Runtime staging task failed: {error}")))??;
@@ -2085,7 +1997,7 @@ impl VersionInstaller {
             let mut command = Command::new(&python);
             command
                 .args(["-I", "-B"])
-                .arg(runtime.join("resolve_runtime.py"))
+                .arg(sidecar.join("resolve_runtime.py"))
                 .args(phase)
                 .args(["--version", version, "--build", build])
                 .args(["--adapter", &selection.adapter])
@@ -2238,7 +2150,8 @@ impl VersionInstaller {
             serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
         )
         .map_err(PumasError::from)?;
-        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
+        let mut probe = runtime_check_command(&python, &sidecar.join("probe_runtime.py"));
+        probe.arg("--runtime").arg(&runtime);
         self.run_runtime_command(
             probe,
             log_path,

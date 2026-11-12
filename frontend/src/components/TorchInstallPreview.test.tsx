@@ -24,23 +24,36 @@ vi.mock('../api/adapter', () => ({
 const options: TorchRuntimeOptions = {
   builds: ['cpu', 'cu130'], defaultBuild: 'auto',
   pythons: [], adapters: ['none'], defaultAdapter: 'none',
+  modalities: ['text', 'image', 'audio'], extras: [],
   verified: [], adapterRequirements: [],
   installed: [],
 };
 
+const withNunchaku: TorchRuntimeOptions = {
+  ...options, adapters: ['none', 'nunchaku'], extras: ['nunchaku'],
+};
+
 const nunchakuRequirement = { adapter: 'nunchaku', tag: 'v2.9.1', build: 'cu130', python: 'python3.12' };
 
-const verifiedRecord: TorchVerifiedRuntime = {
-  tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2', 'nunchaku'],
-  verifiedOn: '2026-09-23', scope: 'Adapter imports passed.', sourceCommit: '5d373bf8',
+const verifiedGeneral: TorchVerifiedRuntime = {
+  tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2'], extras: [],
+  verifiedOn: '2026-09-23', scope: 'Imports passed.', sourceCommit: '5d373bf8',
   packages: [{ name: 'diffusers', version: '0.37.0' }],
 };
 
+const verifiedNunchaku: TorchVerifiedRuntime = {
+  ...verifiedGeneral, adapters: ['nunchaku'], extras: ['nunchaku'],
+};
+
 function readySelection(request: TorchRuntimePreviewRequest): ReadySelection {
+  const { adapter, extras, verified_versions: _pinned, ...selection } = request;
   return {
     status: 'ready',
     preview: {
-      ...request, previewId: 'selection-token', expiresInSeconds: 300,
+      ...selection,
+      adapter: adapter ?? (extras?.[0] ?? 'none'),
+      extras: extras ?? [],
+      previewId: 'selection-token', expiresInSeconds: 300,
       qualification: 'unverified', artifacts: [],
     },
   };
@@ -64,12 +77,12 @@ beforeEach(() => {
 describe('TorchInstallPreview', () => {
   it('accepts the ready token through the generated desktop RPC decoder', () => {
     expect(decodeTorchRuntimePreviewOutcome(readySelection({
-      tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none',
+      tag: 'v2.14.0', build: 'auto', python: 'auto', extras: [],
     }))).toMatchObject({ status: 'valid', value: { status: 'ready' } });
   });
 
   it('rejects the removed resolved preview outcome at the generated decoder', () => {
-    const ready = readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
+    const ready = readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', extras: [] });
     expect(decodeTorchRuntimePreviewOutcome({ status: 'resolved', preview: ready.preview })).toMatchObject({ status: 'invalid' });
   });
 
@@ -96,8 +109,16 @@ describe('TorchInstallPreview', () => {
     expect(getSelection).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Check selected combination' })).not.toBeInTheDocument();
     expect(screen.getByText('Advanced setup').closest('details')).not.toHaveAttribute('open');
-    expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
+    // No adapter choice: every install carries the general modalities.
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Optional extras' })).not.toBeInTheDocument();
     expect(screen.queryByText(/exact artifacts resolved/i)).not.toBeInTheDocument();
+  });
+
+  it('describes the general modalities the backend reports', async () => {
+    getOptions.mockResolvedValue({ ...options, modalities: ['text', 'image', 'audio', 'video'] });
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+    expect(await screen.findByText(/Every install includes text, image, audio, video support/)).toBeInTheDocument();
   });
 
   it.each(['inconclusive', 'none'] as const)('allows installation when release discovery would be %s', async (status) => {
@@ -112,49 +133,35 @@ describe('TorchInstallPreview', () => {
     fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getReleaseOptions).not.toHaveBeenCalled();
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', extras: [] });
   });
 
-  it('offers FLUX.2 only when supported and keeps the current manager Core default', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
+  it('offers the Nunchaku extra only for the release its wheel was built for and applies its selection', async () => {
+    getOptions.mockResolvedValue({ ...withNunchaku, adapterRequirements: [nunchakuRequirement] });
+    const { unmount } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+    await readyInstallButton();
+    expect(screen.queryByRole('checkbox', { name: 'Nunchaku' })).not.toBeInTheDocument();
+    unmount();
     const onInstall = vi.fn();
-    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
-
-    expect(await screen.findByRole('radio', { name: 'Core Torch' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeChecked();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+    const extra = await screen.findByRole('checkbox', { name: 'Nunchaku' });
+    expect(extra).not.toBeChecked();
+    fireEvent.click(extra);
+    expect(screen.getByText(/installs only with the cu130 build and Python 3.12/)).toBeInTheDocument();
     fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', extras: ['nunchaku'] });
   });
 
-  it('honors a supported manager default adapter and falls back to Core if it is unsupported', async () => {
-    getOptions.mockResolvedValueOnce({ ...options, adapters: ['none', 'flux2'], defaultAdapter: 'flux2' });
+  it('rejects a ready token for other extras', async () => {
+    getOptions.mockResolvedValue(withNunchaku);
     const onInstall = vi.fn();
-    const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
-
-    expect(await screen.findByRole('radio', { name: 'FLUX.2 image generation' })).toBeChecked();
-    fireEvent.click(await readyInstallButton());
-    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' });
-
-    getOptions.mockResolvedValueOnce({ ...options, defaultAdapter: 'flux2' });
-    rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Install Torch' })).toBeEnabled());
-    expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
-    fireEvent.click(await readyInstallButton());
-    await waitFor(() => expect(onInstall).toHaveBeenCalledTimes(2));
-    expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.1', build: 'auto', python: 'auto', adapter: 'none' });
-  });
-
-  it('previews the selected FLUX.2 adapter and rejects a token for another adapter', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
-    const onInstall = vi.fn();
-    getSelection.mockResolvedValueOnce(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' }));
+    getSelection.mockResolvedValueOnce(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', extras: [] }));
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
-    fireEvent.click(await screen.findByRole('radio', { name: 'FLUX.2 image generation' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Nunchaku' }));
     fireEvent.click(await readyInstallButton());
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' });
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', extras: ['nunchaku'] });
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();
 
@@ -162,22 +169,22 @@ describe('TorchInstallPreview', () => {
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
   });
 
-  it('resets the adapter for another tag and ignores its stale preview response', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
+  it('resets extras for another tag and ignores its stale preview response', async () => {
+    getOptions.mockResolvedValue(withNunchaku);
     let resolveSelection!: (value: TorchRuntimePreviewOutcome) => void;
     getSelection.mockImplementationOnce(() => new Promise((resolve) => { resolveSelection = resolve; }));
     const onInstall = vi.fn();
     const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
-    fireEvent.click(await screen.findByRole('radio', { name: 'FLUX.2 image generation' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Nunchaku' }));
     fireEvent.click(await readyInstallButton());
     rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
-    expect(await screen.findByRole('radio', { name: 'Core Torch' })).toBeChecked();
-    await act(async () => { resolveSelection(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' })); });
+    expect(await screen.findByRole('checkbox', { name: 'Nunchaku' })).not.toBeChecked();
+    await act(async () => { resolveSelection(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', extras: ['nunchaku'] })); });
     expect(onInstall).not.toHaveBeenCalled();
     fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.1', build: 'auto', python: 'auto', adapter: 'none' });
+    expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.1', build: 'auto', python: 'auto', extras: [] });
   });
 
   it('ignores options returned for a previous tag', async () => {
@@ -187,8 +194,8 @@ describe('TorchInstallPreview', () => {
     rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={vi.fn()} />);
 
     expect(await readyInstallButton()).toBeEnabled();
-    await act(async () => { resolveOldOptions({ ...options, adapters: ['none', 'flux2'] }); });
-    expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
+    await act(async () => { resolveOldOptions(withNunchaku); });
+    expect(screen.queryByRole('checkbox', { name: 'Nunchaku' })).not.toBeInTheDocument();
   });
 
   it('waits for delayed choices before treating the existing button as installable', async () => {
@@ -217,87 +224,71 @@ describe('TorchInstallPreview', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Starting installation…');
     expect(screen.getByRole('button', { name: 'Starting installation…' })).toBeDisabled();
     expect(onInstall).not.toHaveBeenCalled();
-    await act(async () => { resolveSelection(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' })); });
+    await act(async () => { resolveSelection(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', extras: [] })); });
     expect(onInstall).toHaveBeenCalledOnce();
     expect(onInstall).toHaveBeenCalledWith('selection-token');
   });
 
-  it('preserves an explicit CUDA build and Linux image dependencies without pre-install discovery', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
+  it('preserves an explicit CUDA build without pre-install discovery', async () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
     fireEvent.click(await screen.findByText('Advanced setup'));
     fireEvent.change(screen.getByRole('combobox', { name: 'Torch build' }), { target: { value: 'cu130' } });
-    fireEvent.click(screen.getByRole('radio', { name: 'FLUX.2 image generation' }));
     fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'auto', adapter: 'flux2' });
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'auto', extras: [] });
     expect(getReleaseOptions).not.toHaveBeenCalled();
   });
 
-  it('offers a verified combination as a shortcut that still resolves current packages', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2', 'nunchaku'], verified: [verifiedRecord] });
+  it('offers a tested combination as a shortcut that still resolves current packages', async () => {
+    getOptions.mockResolvedValue({ ...withNunchaku, verified: [verifiedGeneral, verifiedNunchaku] });
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
-    const shortcut = await screen.findByRole('button', { name: 'cu130 · python3.12 · Nunchaku Z-Image generation' });
+    const shortcut = await screen.findByRole('button', { name: 'cu130 · python3.12 · Nunchaku' });
+    expect(screen.getByRole('button', { name: 'cu130 · python3.12 · general' })).toBeInTheDocument();
     expect(shortcut).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(shortcut);
     expect(shortcut).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText(/Verified on 2026-09-23 with diffusers 0.37.0/)).toHaveTextContent('Installing resolves current package versions');
-    expect(screen.getByRole('radio', { name: 'Nunchaku Z-Image generation' })).toBeChecked();
+    expect(screen.getByText(/Tested as working on 2026-09-23 with diffusers 0.37.0/)).toHaveTextContent('Installing resolves current package versions');
+    expect(screen.getByRole('checkbox', { name: 'Nunchaku' })).toBeChecked();
     fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'nunchaku' });
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', extras: ['nunchaku'] });
   });
 
-  it('pins the verified package versions only when asked and only for an exact verified selection', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2', 'nunchaku'], verified: [verifiedRecord] });
+  it('pins the tested package versions only when asked and only for an exact tested selection', async () => {
+    getOptions.mockResolvedValue({ ...options, verified: [verifiedGeneral] });
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'cu130 · python3.12 · FLUX.2 image generation' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'cu130 · python3.12 · general' }));
     const pin = screen.getByRole('checkbox', { name: 'Install the verified package versions' });
     expect(pin).not.toBeChecked();
     fireEvent.click(pin);
-    expect(screen.getByText(/Verified on 2026-09-23/)).toHaveTextContent('Installing uses exactly these package versions');
+    expect(screen.getByText(/Tested as working on 2026-09-23/)).toHaveTextContent('Installing uses exactly these package versions');
     fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenCalledWith({
-      tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'flux2', verified_versions: true,
+      tag: 'v2.9.1', build: 'cu130', python: 'python3.12', extras: [], verified_versions: true,
     });
   });
 
-  it('does not offer verified combinations for another release or an unavailable adapter', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'], verified: [verifiedRecord] });
+  it('does not offer tested combinations for another release or an unavailable extra', async () => {
+    getOptions.mockResolvedValue({ ...options, verified: [verifiedGeneral, verifiedNunchaku] });
     const { unmount } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
     await screen.findByText('Advanced setup');
     expect(screen.queryByRole('group', { name: 'Verified combinations' })).not.toBeInTheDocument();
     unmount();
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={vi.fn()} />);
-    expect(await screen.findByRole('button', { name: 'cu130 · python3.12 · FLUX.2 image generation' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'cu130 · python3.12 · general' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Nunchaku/ })).not.toBeInTheDocument();
   });
 
-  it('offers Nunchaku only for the release its wheel was built for and applies its selection', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2', 'nunchaku'], adapterRequirements: [nunchakuRequirement] });
-    const { unmount } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
-    expect(await screen.findByRole('radio', { name: 'FLUX.2 image generation' })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'Nunchaku Z-Image generation' })).not.toBeInTheDocument();
-    unmount();
-    const onInstall = vi.fn();
-    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await screen.findByRole('radio', { name: 'Nunchaku Z-Image generation' }));
-    expect(screen.getByText(/installs only with the cu130 build and Python 3.12/)).toBeInTheDocument();
-    fireEvent.click(await readyInstallButton());
-    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'nunchaku' });
-  });
-
-  it('rejects a ready token that changes the requested verified Python', async () => {
-    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'], verified: [verifiedRecord] });
+  it('rejects a ready token that changes the requested tested Python', async () => {
+    getOptions.mockResolvedValue({ ...options, verified: [verifiedGeneral] });
     const onInstall = vi.fn();
     getSelection.mockImplementation(async (request) => readySelection({ ...request, python: 'auto' }));
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'cu130 · python3.12 · FLUX.2 image generation' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'cu130 · python3.12 · general' }));
     fireEvent.click(await readyInstallButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();
@@ -311,7 +302,7 @@ describe('TorchInstallPreview', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Unsupported selection: Unavailable build');
     expect(onInstall).not.toHaveBeenCalled();
 
-    getSelection.mockResolvedValueOnce(readySelection({ tag: 'wrong-tag', build: 'auto', python: 'auto', adapter: 'none' }));
+    getSelection.mockResolvedValueOnce(readySelection({ tag: 'wrong-tag', build: 'auto', python: 'auto', extras: [] }));
     fireEvent.click(await readyInstallButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();

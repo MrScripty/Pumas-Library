@@ -2,6 +2,7 @@ import { ExternalLink, FileText } from 'lucide-react';
 import type { VersionRelease } from '../hooks/useVersions';
 import { formatVersionDate } from '../utils/installationFormatters';
 import { IconButton } from './ui';
+import { torchExtrasLabel, torchInstalledSummary } from '../types/torch-install';
 import type { TorchInstalledConfig, TorchVerifiedRuntime } from '../types/torch-install';
 
 interface VersionListItemInfoProps {
@@ -70,10 +71,10 @@ export function VersionListItemInfo({
             <div className="text-xs text-[hsl(var(--text-muted))]">
               {isInstalled ? (
                 torchInstalledConfig
-                  ? `Installed ${torchInstalledConfig.build ?? 'unknown build'} · ${torchInstalledConfig.python ?? 'unknown Python'} · ${torchInstalledConfig.adapter ?? 'unknown adapter'} · ${torchInstalledConfig.qualification}`
+                  ? `Installed ${torchInstalledSummary(torchInstalledConfig)}`
                   : 'Installed build details unavailable; inspect saved checks for this version.'
               ) : torchVerified.length > 0
-                ? `Verified combination: ${torchVerified.map((record) => `${record.build} · ${record.python} · ${record.adapters.join(', ')} (${record.verifiedOn})`).join('; ')} · packages are resolved when installed`
+                ? `Tested as working: ${torchVerified.map((record) => `${record.build} · ${record.python} · ${torchExtrasLabel(record.extras)} (${record.verifiedOn})`).join('; ')} · packages are resolved when installed`
                 : 'Unverified release · packages are resolved when installed'}
               {!isInstalled && <div>Managed binaries require Linux x86_64 and stable releases. This flow installs official binary wheels only; source compilation is a separate unsupported path. Installation does not select or start this version.</div>}
             </div>

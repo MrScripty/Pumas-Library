@@ -4336,6 +4336,49 @@ mod torch_release_options_contract_tests {
         assert!(preview(serde_json::json!({"verified_versions": "yes"})).is_err());
     }
 
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn preview_extras_select_the_install_and_adapter_stays_accepted() {
+        let adapter_of = |extra: serde_json::Value| {
+            let mut params =
+                serde_json::json!({"tag": "v2.9.1", "build": "cu130", "python": "python3.12"});
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            parse_command("preview_torch_runtime", Some(&params)).map(|command| match command {
+                RpcCommand::PreviewTorchRuntime { adapter, .. } => adapter,
+                _ => unreachable!(),
+            })
+        };
+        assert_eq!(adapter_of(serde_json::json!({})).unwrap(), "none");
+        assert_eq!(
+            adapter_of(serde_json::json!({"adapter": "flux2"})).unwrap(),
+            "flux2"
+        );
+        assert_eq!(
+            adapter_of(serde_json::json!({"extras": []})).unwrap(),
+            "none"
+        );
+        assert_eq!(
+            adapter_of(serde_json::json!({"extras": ["nunchaku"]})).unwrap(),
+            "nunchaku"
+        );
+        assert_eq!(
+            adapter_of(serde_json::json!({"adapter": "nunchaku", "extras": ["nunchaku"]})).unwrap(),
+            "nunchaku"
+        );
+        for refused in [
+            serde_json::json!({"extras": ["flux2"]}),
+            serde_json::json!({"extras": ["nunchaku", "nunchaku"]}),
+            serde_json::json!({"adapter": "nunchaku", "extras": []}),
+            // A misspelled adapter is refused, not mapped to the general install.
+            serde_json::json!({"adapter": "flux3", "extras": []}),
+        ] {
+            assert!(adapter_of(refused).is_err());
+        }
+    }
+
     #[test]
     fn typed_release_options_use_the_expected_wire_shape() {
         let outcome = TorchReleaseOptionsOutcome {
@@ -4446,12 +4489,55 @@ pub(crate) struct PreviewTorchRuntimeParams {
     tag: String,
     build: String,
     python: String,
-    #[serde(default = "default_torch_adapter")]
-    adapter: String,
+    /// Accepted for older callers. Every install now carries the general
+    /// modalities, so `none`, `flux2` and `cohere-asr` select the same
+    /// install; `nunchaku` selects that extra. Prefer `extras`.
+    #[serde(default)]
+    adapter: Option<String>,
+    /// Optional extras to add to the general modalities. When present it
+    /// decides the install; an `adapter` naming a different extra is refused.
+    #[serde(default)]
+    extras: Option<Vec<String>>,
     /// Constrain resolution to the package versions a verified combination
     /// recorded. The selection must then match that combination exactly.
     #[serde(default)]
     verified_versions: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", test))]
+impl PreviewTorchRuntimeParams {
+    /// The one adapter value the manager selects by: `none` for the general
+    /// install, or the name of its single extra.
+    fn selection_adapter(&self) -> Result<String, PublicError> {
+        let Some(extras) = &self.extras else {
+            return Ok(self.adapter.clone().unwrap_or_else(|| "none".to_owned()));
+        };
+        let from_extras = match extras.as_slice() {
+            [] => "none",
+            [extra] if extra == "nunchaku" => "nunchaku",
+            _ => {
+                return Err(PublicError::invalid_params_because(
+                    "extras may name at most one supported extra: nunchaku",
+                ))
+            }
+        };
+        let adapter_extra = match self.adapter.as_deref() {
+            None => from_extras,
+            Some("nunchaku") => "nunchaku",
+            Some("none" | "flux2" | "cohere-asr") => "none",
+            Some(_) => {
+                return Err(PublicError::invalid_params_because(
+                    "adapter must be none, flux2, cohere-asr or nunchaku; prefer extras",
+                ))
+            }
+        };
+        if adapter_extra != from_extras {
+            return Err(PublicError::invalid_params_because(
+                "adapter and extras select different installs; send extras only",
+            ));
+        }
+        Ok(from_extras.to_owned())
+    }
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -4502,7 +4588,10 @@ pub(crate) struct TorchRuntimePreview {
     tag: String,
     build: String,
     python: String,
+    /// The adapter value the selection was made with, for older callers.
     adapter: String,
+    /// Optional extras the install adds to the general modalities.
+    extras: Vec<String>,
     artifacts: Vec<TorchRuntimePreviewArtifact>,
     qualification: TorchRuntimePreviewQualification,
     expires_in_seconds: u64,
@@ -4549,6 +4638,7 @@ fn torch_runtime_preview_fixture() -> TorchRuntimePreview {
         build: "cu130".into(),
         python: "python3.12".into(),
         adapter: "bundled".into(),
+        extras: vec!["nunchaku".into()],
         artifacts: vec![TorchRuntimePreviewArtifact {
             name: "torch".into(),
             version: "2.9.1+cu130".into(),
@@ -4575,6 +4665,7 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreview> for TorchRuntimeP
             build: preview.build,
             python: preview.python,
             adapter: preview.adapter,
+            extras: preview.extras,
             artifacts: preview
                 .artifacts
                 .into_iter()
@@ -4716,6 +4807,7 @@ mod torch_preview_contract_tests {
             build: "auto".into(),
             python: "auto".into(),
             adapter: "none".into(),
+            extras: Vec::new(),
             artifacts: Vec::new(),
             qualification: "unverified".into(),
             expires_in_seconds: 1800,
@@ -4836,6 +4928,7 @@ mod torch_preview_contract_tests {
                 build: "cpu".into(),
                 python: "python3.12".into(),
                 adapter: "none".into(),
+                extras: Vec::new(),
                 artifacts: Vec::new(),
                 qualification: source.into(),
                 expires_in_seconds: 1800,
@@ -4854,6 +4947,7 @@ mod torch_preview_contract_tests {
             build: "cpu".into(),
             python: "python3.12".into(),
             adapter: "none".into(),
+            extras: Vec::new(),
             artifacts: Vec::new(),
             qualification: "unexpected qualification".into(),
             expires_in_seconds: 1800,
@@ -4882,11 +4976,6 @@ mod torch_preview_contract_tests {
             "validation_failed"
         );
     }
-}
-
-#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
-fn default_torch_adapter() -> String {
-    "none".into()
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -7083,14 +7172,14 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             .map(|params| RpcCommand::GetTorchReleaseOptions { tag: params.tag }),
         #[cfg(feature = "inference-plugins")]
         "preview_torch_runtime" => {
-            parse_params::<PreviewTorchRuntimeParams>(params).map(|params| {
-                RpcCommand::PreviewTorchRuntime {
+            parse_params::<PreviewTorchRuntimeParams>(params).and_then(|params| {
+                Ok(RpcCommand::PreviewTorchRuntime {
+                    adapter: params.selection_adapter()?,
                     tag: params.tag,
                     build: params.build,
                     python: params.python,
-                    adapter: params.adapter,
                     verified_versions: params.verified_versions,
-                }
+                })
             })
         }
         #[cfg(feature = "inference-plugins")]

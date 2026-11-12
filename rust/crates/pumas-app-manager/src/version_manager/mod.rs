@@ -42,7 +42,6 @@
 //! }
 //! ```
 
-mod cohere_asr_profile;
 mod constraints;
 mod dependencies;
 mod installer;
@@ -74,9 +73,10 @@ pub use torch_alternatives::{
     TorchReleaseOptionsStatus, TorchReleaseRecommendation,
 };
 pub use torch_inspection::{
-    TorchAdapterRequirement, TorchCapabilityProbe, TorchInstalledProbeReport,
-    TorchInstalledRuntime, TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus,
-    TorchPythonChoice, TorchRuntimeOptions,
+    TorchAdapterRequirement, TorchCapabilityProbe, TorchCapabilityStatus,
+    TorchInstalledProbeReport, TorchInstalledRuntime, TorchProbeAdapterStatus,
+    TorchProbeCoreStatus, TorchProbeStatus, TorchPythonChoice, TorchRuntimeCapability,
+    TorchRuntimeOptions,
 };
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
@@ -568,9 +568,13 @@ impl VersionManager {
         Ok(manager)
     }
 
-    /// Construct a native-archive manager (llama.cpp or ONNX Runtime) with the
-    /// application's existing shared acquisition owner. A second service/store
-    /// is never created here.
+    /// Construct a native-archive manager (llama.cpp or ONNX Runtime) or the
+    /// Torch manager with the application's existing shared acquisition owner.
+    /// A second service/store is never created here. Native archives and Torch
+    /// wheels then download through that owner, so they resume after a network
+    /// failure and are verified by SHA-256. A Torch manager built with
+    /// [`Self::new`] keeps pip's own downloads and records why in each
+    /// installation log.
     pub async fn new_with_acquisition(
         launcher_root: impl Into<PathBuf>,
         app_id: AppId,
@@ -585,12 +589,27 @@ impl VersionManager {
         acquisition: Arc<AcquisitionService>,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
-        let runtime =
-            installer::NativeRuntime::for_app(app_id).map_err(|_| PumasError::Config {
-                message: "Shared artifact acquisition is used by llama.cpp and ONNX Runtime".into(),
-            })?;
+        let runtime = if app_id == AppId::Torch {
+            None
+        } else {
+            Some(
+                installer::NativeRuntime::for_app(app_id).map_err(|_| PumasError::Config {
+                    message: format!(
+                        "Shared artifact acquisition serves llama.cpp, ONNX Runtime and Torch installs, not {app_id:?}"
+                    ),
+                })?,
+            )
+        };
         let mut manager =
             Self::new_with_github_client(launcher_root, app_id, configured_client).await?;
+        let Some(runtime) = runtime else {
+            // Torch wheel workspaces recover lazily: the next install releases
+            // a use left by an interrupted one, and settled sets are removed.
+            manager.acquisition_consumer = Some(Arc::new(
+                acquisition.open_consumer(installer::TORCH_WHEEL_CONSUMER)?,
+            ));
+            return Ok(manager);
+        };
         let consumer = Arc::new(acquisition.open_consumer(runtime.consumer_owner())?);
         manager.acquisition_consumer = Some(consumer.clone());
         let store = acquisition.store().clone();
@@ -1211,7 +1230,7 @@ impl VersionManager {
                         tag: tag.to_owned(),
                         build: "auto".to_owned(),
                         python: "auto".to_owned(),
-                        adapter: "none".to_owned(),
+                        extras: Vec::new(),
                         verified_constraints: None,
                         created: std::time::Instant::now(),
                     },
@@ -1224,7 +1243,7 @@ impl VersionManager {
                     tag: tag.to_owned(),
                     build: "auto".to_owned(),
                     python: "auto".to_owned(),
-                    adapter: "none".to_owned(),
+                    extras: Vec::new(),
                     verified_constraints: None,
                     created: std::time::Instant::now(),
                 },
@@ -1759,6 +1778,40 @@ mod tests {
     // Fixture startup includes real filesystem and HTTP work under parallel load.
     // Keep its bound separate from cancellation and shutdown assertions.
     const FIXTURE_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
+
+    #[tokio::test]
+    async fn torch_manager_downloads_wheels_through_the_shared_acquisition_owner() {
+        let root = TempDir::new().unwrap();
+        let acquisition = Arc::new(AcquisitionService::new(Arc::new(
+            pumas_library::acquisition::AcquisitionStore::new(root.path()),
+        )));
+        let manager =
+            VersionManager::new_with_acquisition(root.path(), AppId::Torch, acquisition.clone())
+                .await
+                .unwrap();
+        assert_eq!(
+            manager.acquisition_consumer.as_ref().unwrap().owner(),
+            installer::TORCH_WHEEL_CONSUMER
+        );
+        // The consumer scope belongs to the manager and drains with it.
+        manager.shutdown_installations().await.unwrap();
+
+        let refused = match VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::Ollama,
+            acquisition.clone(),
+        )
+        .await
+        {
+            Err(error) => error.to_string(),
+            Ok(_) => panic!("Ollama has no shared acquisition consumer"),
+        };
+        assert!(
+            refused.contains("serves llama.cpp, ONNX Runtime and Torch"),
+            "{refused}"
+        );
+        acquisition.shutdown().await.unwrap();
+    }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     async fn reopen_after_fork_release(
@@ -5952,7 +6005,7 @@ mod tests {
                 tag: "v2.14.0".into(),
                 build: "auto".into(),
                 python: "auto".into(),
-                adapter: "none".into(),
+                extras: Vec::new(),
                 verified_constraints: None,
                 created: std::time::Instant::now()
                     - torch_preview::PREVIEW_TTL

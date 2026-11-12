@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   runtime-profile launch refuse with the reason and how to install one. A newly
   selected version takes effect after Pumas restarts, because ONNX Runtime keeps
   the first library a process loads. See
-  [ADR 0006](docs/adr/0006-onnx-runtime-downloaded-runtime.md).
+  [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md).
 
 ## [0.8.0] - 2026-11-08
 

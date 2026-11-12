@@ -97,7 +97,9 @@ class MetadataTests(unittest.TestCase):
                     package["SPDXID"] == "SPDXRef-ORT" for package in document["packages"]
                 )
                 self.assertEqual(
-                    packages_ort, variants[document["name"]] == "headless-inference", document["name"]
+                    packages_ort,
+                    variants[document["name"]] == "headless-inference",
+                    document["name"],
                 )
                 self.assertEqual(
                     document["packages"][0]["checksums"][0]["checksumValue"],

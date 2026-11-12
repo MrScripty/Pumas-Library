@@ -1,4 +1,4 @@
-# ADR 0006: ONNX Runtime is a downloaded, version-managed runtime
+# ADR 0009: ONNX Runtime is a downloaded, version-managed runtime
 
 - Status: Accepted
 - Date: 2026-11-12

@@ -116,20 +116,23 @@ pub(super) async fn serve_llama_cpp_model(
             let message = receipt.response.error.unwrap_or_else(|| {
                 "llama.cpp runtime profile did not start for the selected model".to_string()
             });
-            warn!("llama.cpp model serve launch failed");
+            warn!(reason = %message, "llama.cpp model serve launch failed");
             return non_critical_failure_response(
                 state,
                 serving_error(ModelServeErrorCode::ProviderLoadFailed, message, &request),
             )
             .await;
         }
-        Err(_) => {
-            warn!("llama.cpp model serve launch failed");
+        Err(error) => {
+            warn!(%error, "llama.cpp model serve launch failed");
             return non_critical_failure_response(
                 state,
                 serving_error(
                     ModelServeErrorCode::MissingRuntime,
-                    "llama.cpp runtime could not be launched for the selected model",
+                    format!(
+                        "llama.cpp runtime could not be launched for the selected model: {}",
+                        crate::public_text::public_reason_within(&error.to_string(), 512)
+                    ),
                     &request,
                 ),
             )

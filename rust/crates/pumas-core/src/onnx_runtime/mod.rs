@@ -35,7 +35,10 @@ pub use real::OnnxRuntimeSession;
 pub use real_backend::{OnnxEmbeddingBackendKind, RealOnnxEmbeddingBackend};
 pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 
-const MAX_MODEL_ID_LEN: usize = 128;
+/// Pumas library model IDs are artifact-qualified paths (category, family,
+/// repository, file selection, revision) that routinely exceed 128 bytes;
+/// the bound matches Pumas's own identifier bound.
+const MAX_MODEL_ID_LEN: usize = 4096;
 const MAX_EMBEDDING_INPUTS: usize = 128;
 const MAX_EMBEDDING_INPUT_CHARS: usize = 65_536;
 const MAX_EMBEDDING_DIMENSIONS: usize = 8_192;

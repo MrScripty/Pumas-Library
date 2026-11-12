@@ -834,3 +834,16 @@ mod task_and_rerank_requests {
         .contains("once per document"));
     }
 }
+
+#[test]
+fn library_model_ids_longer_than_128_bytes_are_accepted() {
+    let library_id = "embedding/gemma3_text/onnx-community--harrier-oss-v1-270m-onnx__files_907ba86a0345__907ba86a0345__revision_d59c919d0159aea2c19ed7d04288fcdd048d0f9c";
+    assert!(library_id.len() > 128);
+    assert_eq!(OnnxModelId::parse(library_id).unwrap().as_str(), library_id);
+    let error = OnnxModelId::parse("a".repeat(4097)).unwrap_err();
+    assert!(
+        error.message.contains("at most 4096 bytes"),
+        "{}",
+        error.message
+    );
+}

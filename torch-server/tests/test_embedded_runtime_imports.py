@@ -10,10 +10,11 @@ import unittest
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-INSTALLER = REPOSITORY / "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs"
+EMBEDDED_SIDECAR = REPOSITORY / "rust/crates/pumas-core/src/runtime_profiles/torch_sidecar.rs"
 
 # Run in a fresh isolated interpreter. Only Torch is substituted: startup must
-# import every actual local module from the installer-derived temporary tree.
+# import every actual local module from the temporary tree built from the
+# sidecar table compiled into Pumas, the tree every Torch runtime launches.
 # No inference, listener, download, model load or repository import is permitted.
 IMPORT_PROBE = r"""
 import importlib
@@ -54,14 +55,17 @@ print("EMBEDDED_IMAGE_TEXT_IMPORT_CLOSURE_OK")
 
 class EmbeddedRuntimeImportTests(unittest.TestCase):
     def embedded_python_sources(self):
-        source = INSTALLER.read_text()
+        source = EMBEDDED_SIDECAR.read_text()
         # Read the actual embedded-file table, rather than maintaining a second
         # hand-picked runtime file list that could omit a transitive import.
-        table = source.split("for (name, contents) in [", 1)[1].split("    ] {", 1)[0]
+        table = source.split("const SIDECAR_FILES: &[(&str, &str)] = &[", 1)[1]
+        table = table.split("\n];", 1)[0]
         included = re.findall(
             r'\(\s*"([^"\n]+)"\s*,\s*include_str!\("([^"\n]+)"\)\s*,?\s*\)', table
         )
-        paths = {name: (INSTALLER.parent / relative).resolve() for name, relative in included}
+        paths = {
+            name: (EMBEDDED_SIDECAR.parent / relative).resolve() for name, relative in included
+        }
         expected_python = set(re.findall(r'\(\s*"([^"\n]+\.py)"\s*,', table))
         actual_python = {name: path for name, path in paths.items() if name.endswith(".py")}
         self.assertEqual(
@@ -76,8 +80,19 @@ class EmbeddedRuntimeImportTests(unittest.TestCase):
             "loaders/cohere_asr_loader.py",
             "text_api.py",
             "loaders/text_encoder_loader.py",
+            "runtime_compat.py",
+            "resolve_runtime.py",
+            "probe_runtime.py",
         ):
             self.assertIn(name, actual_python)
+        # Every sidecar source is embedded; none is left behind.
+        sidecar = REPOSITORY / "torch-server"
+        shipped = {
+            path.relative_to(sidecar).as_posix()
+            for path in [*sidecar.glob("*.py"), *(sidecar / "loaders").glob("*.py")]
+        }
+        self.assertEqual(set(actual_python), shipped)
+        self.assertEqual(paths["LICENSE"], REPOSITORY / "LICENSE")
         return actual_python
 
     def probe(self, root):

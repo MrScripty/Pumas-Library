@@ -28,9 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `text_embedding`, `rerank`, `/v1/embeddings` and `/v1/rerank`, computing what
   the model's recorded declarations say even when the package lacks its
   sentence-transformers files. A runtime advertises them when Transformers
-  and Jinja are installed. Each Torch install carries its own copy of the
-  sidecar, so a runtime installed before this release needs a new Torch
-  install to gain the routes.
+  and Jinja are installed, which every Torch install now includes; the routes
+  come from the sidecar shipped with Pumas, so installed runtimes gain them
+  without a reinstall.
 - Cross-encoder rerankers published as text classifiers (for example
   bge-reranker-v2-m3) are recorded as rerankers: a GGUF ranking head without
   a decision head, or a `*ForSequenceClassification` config with one label,
@@ -211,6 +211,15 @@ the 2026-11-02 audit
   3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
   from the preset keep working. Torch install options replace
   `bundledPresetAvailable` and `preset` with `verified`.
+- Torch runtimes run the sidecar shipped with the running Pumas instead of a
+  copy written into the runtime at install time, so upgrading Pumas updates
+  the sidecar for every installed runtime without a reinstall. Pumas writes it
+  once to `launcher-data/torch-sidecar/<version>-<digest>/` and every runtime
+  version launches from there; a runtime holds only its Python environment,
+  packages and records. Before each launch Pumas checks the runtime's
+  interpreter and startup packages against the sidecar's floors (never pins)
+  and refuses an incompatible runtime with every reason. Sidecar copies in
+  runtimes installed earlier are no longer run and are left in place.
 - Desktop update streams (model library, downloads, runtime profiles, serving
   status and status telemetry) are validated against the backend's declaration.
   A rejected desktop payload says which field and rule failed.

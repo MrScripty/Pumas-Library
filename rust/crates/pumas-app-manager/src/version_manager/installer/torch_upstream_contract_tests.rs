@@ -57,53 +57,6 @@ fn official_release_metadata_does_not_need_pumas_bundle_assets() {
     )));
 }
 
-#[test]
-fn embedded_sidecar_materializes_outside_the_checkout_without_a_package_lock() {
-    let destination = TempDir::new().unwrap();
-    let checkout = std::env::current_dir().unwrap();
-    assert!(destination.path().starts_with(std::env::temp_dir()));
-    assert!(!destination.path().starts_with(&checkout));
-
-    write_embedded_torch_sidecar(destination.path()).unwrap();
-
-    for required in [
-        "serve.py",
-        "resolve_runtime.py",
-        "probe_runtime.py",
-        "nunchaku_compat.py",
-        "control_api.py",
-        "device_manager.py",
-        "diffusion.py",
-        "flux2.py",
-        "image_api.py",
-        "model_manager.py",
-        "audio_api.py",
-        "audio_input.py",
-        "audio_contract.py",
-        "loaders/cohere_asr_loader.py",
-        "text_api.py",
-        "loaders/text_encoder_loader.py",
-        "openai_api.py",
-        "validation.py",
-        "loaders/__init__.py",
-        "loaders/dllm_loader.py",
-        "loaders/safetensors_loader.py",
-        "loaders/sherry_loader.py",
-    ] {
-        let path = destination.path().join(required);
-        assert!(path.is_file(), "missing embedded runtime file {required}");
-        assert!(
-            std::fs::metadata(&path).unwrap().len() > 0,
-            "embedded runtime file is empty: {required}"
-        );
-    }
-    // Packages are resolved per installation; the sidecar carries no lock,
-    // preset validator or preset recipe.
-    for absent in ["requirements.txt", "validate_runtime.py", "runtime.json"] {
-        assert!(!destination.path().join(absent).exists(), "{absent}");
-    }
-}
-
 #[tokio::test]
 async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() {
     let root = TempDir::new().unwrap();
@@ -261,8 +214,6 @@ fn mock_runtime_for_publication(
         r#"{"recipe_id":"upstream-install-v2.9.1-cu130-3.12-none"}"#,
     )
     .map_err(PumasError::from)?;
-    std::fs::write(runtime.join("serve.py"), "# isolated publication fixture\n")
-        .map_err(PumasError::from)?;
     std::fs::write(runtime.join("resolution.json"), r#"{"torch":"2.9.1+cu130","artifacts":[{"name":"torch","version":"2.9.1+cu130","url":"https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl","sha256":"e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b"}]}"#)
         .map_err(PumasError::from)?;
     std::fs::write(python, "# fake interpreter\n").map_err(PumasError::from)?;

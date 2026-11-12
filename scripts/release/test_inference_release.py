@@ -500,6 +500,18 @@ class InstalledRuntimeTests(unittest.TestCase):
                     support.require_no_bundled_runtime(root)
                 runtime.unlink()
 
+    def test_runtime_telemetry_storage_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "cache" / "Microsoft" / "DeveloperTools").mkdir(parents=True)
+            (root / "cache" / "unrelated" / ".onnxruntime").mkdir(parents=True)
+            support.require_no_runtime_telemetry_storage(root)
+            storage = root / "cache" / "Microsoft" / "DeveloperTools" / ".onnxruntime"
+            storage.mkdir()
+            (storage / "onnxruntime.db").write_bytes(b"controlled")
+            with self.assertRaisesRegex(ValueError, "telemetry storage"):
+                support.require_no_runtime_telemetry_storage(root)
+
     def test_process_tree_follows_descendants_only(self):
         parents = {1: 0, 10: 1, 11: 10, 12: 11, 13: 1, 20: 99, 21: 20, 30: 30}
         self.assertEqual(support.process_tree(10, parents), {10, 11, 12})

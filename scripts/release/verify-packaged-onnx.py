@@ -115,6 +115,7 @@ def main(binary, fixture):
                     model,
                     lambda tag: support.installed_runtime(process.pid, root, tag),
                 )
+                support.require_no_runtime_telemetry_storage(root)
                 print(
                     json.dumps(
                         {
@@ -123,6 +124,7 @@ def main(binary, fixture):
                             "fixture_sha256": fixture_hashes,
                             "fixture_acceptance": "caller-owned; lifecycle does not establish model provenance",
                             "bundled_runtimes": [],
+                            "runtime_telemetry_storage": "absent",
                             **result,
                         }
                     ),

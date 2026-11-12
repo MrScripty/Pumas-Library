@@ -718,6 +718,13 @@ mod onnx_host_tests {
             Some("v1.31.1+cuda12")
         );
         assert!(config.env_vars.contains_key(host_protocol::RUNTIME_DIR_ENV));
+        assert_eq!(
+            config
+                .env_vars
+                .get(host_protocol::ORT_DISABLE_TELEMETRY_ENV)
+                .map(String::as_str),
+            Some("1")
+        );
         for mode in [
             RuntimeDeviceMode::Auto,
             RuntimeDeviceMode::Cpu,

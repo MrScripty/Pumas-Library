@@ -176,6 +176,10 @@ impl BinaryLaunchConfig {
                 version_dir.to_string_lossy().into_owned(),
             ),
             (host_protocol::RUNTIME_VERSION_ENV.to_string(), tag.clone()),
+            (
+                host_protocol::ORT_DISABLE_TELEMETRY_ENV.to_string(),
+                "1".to_string(),
+            ),
         ]);
         Self {
             tag,

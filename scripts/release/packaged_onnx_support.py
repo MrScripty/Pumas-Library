@@ -65,6 +65,23 @@ def require_no_bundled_runtime(directory):
     )
 
 
+def require_no_runtime_telemetry_storage(root):
+    """Refuse ONNX Runtime telemetry storage anywhere under the isolated root.
+
+    Pumas disables third-party telemetry; with it off ORT creates no device id
+    or event database (`Microsoft/DeveloperTools/.onnxruntime`) in the cache.
+    """
+    stored = sorted(
+        str(path.relative_to(root))
+        for path in Path(root).rglob(".onnxruntime")
+        if path.parent.name == "DeveloperTools"
+    )
+    package.require(
+        not stored,
+        f"ONNX Runtime wrote telemetry storage although Pumas disables it: {stored}",
+    )
+
+
 def child_environment(root):
     root = Path(root).resolve()
     # An allowlist prevents all ambient ORT/Pumas/Python/loader/proxy overrides,

@@ -82,12 +82,19 @@ pub(super) fn ensure_runtime_library(
     // re-enters initialization. Reject those failures before entering ORT.
     let (_held_library, preflighted_api) = preflight_library(&path)?;
     // Load the explicitly selected library fallibly before Session's lazy API
-    // initialization. Leave environment settings with the embedding application.
-    let _environment_builder = ort::environment::init_from(path).map_err(|error| {
-        runtime_library_error(&format!(
-            "ONNX Runtime library could not be loaded: {error}"
-        ))
-    })?;
+    // initialization, and commit the environment with telemetry events off:
+    // Pumas disables third-party telemetry. That API switch is what Windows
+    // builds honor; the host's launch environment also sets
+    // `ORT_DISABLE_TELEMETRY`, which POSIX builds read before any API call.
+    // A second load in the same host finds the options already committed.
+    let _committed = ort::environment::init_from(path)
+        .map_err(|error| {
+            runtime_library_error(&format!(
+                "ONNX Runtime library could not be loaded: {error}"
+            ))
+        })?
+        .with_telemetry(false)
+        .commit();
     // While `_held_library` stays loaded, reopening the same file yields the
     // same image, so the API tables match exactly when ORT adopted it.
     let adopted_api: *const ort::sys::OrtApi = ort::api();

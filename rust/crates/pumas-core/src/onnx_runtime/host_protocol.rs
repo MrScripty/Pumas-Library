@@ -32,6 +32,12 @@ pub const PARENT_PID_ENV: &str = "PUMAS_ONNX_HOST_PARENT_PID";
 pub const RUNTIME_DIR_ENV: &str = "PUMAS_ONNX_HOST_RUNTIME_DIR";
 /// Environment variable naming the installed version tag, such as `v1.31.1+cuda12`.
 pub const RUNTIME_VERSION_ENV: &str = "PUMAS_ONNX_HOST_RUNTIME_VERSION";
+/// ONNX Runtime's own telemetry opt-out. Pumas disables third-party
+/// telemetry, so every host runs with it set to `1`. ORT reads it when its
+/// environment initializes, before any API call could disable telemetry: on
+/// Linux and macOS it stops the 1DS uploader and its device-id and event
+/// database under the user cache (`Microsoft/DeveloperTools/.onnxruntime`).
+pub const ORT_DISABLE_TELEMETRY_ENV: &str = "ORT_DISABLE_TELEMETRY";
 
 /// Readiness and runtime identity; never needs the token.
 pub const HEALTH_PATH: &str = "/health";

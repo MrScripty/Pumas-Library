@@ -11,7 +11,8 @@ use std::collections::HashMap;
 pub enum InstallationType {
     /// Standalone binary download (Ollama, etc.)
     Binary,
-    /// Runtime is provided in-process by Pumas and has no version manager.
+    /// Runtime executes inside the Pumas process. Its native library may still
+    /// be a downloaded, version-managed runtime (ONNX Runtime).
     InProcess,
     /// Python virtual environment (for example, Torch)
     PythonVenv,
@@ -364,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn onnx_runtime_manifest_matches_in_process_contract() {
+    fn onnx_runtime_manifest_is_an_in_process_version_managed_runtime() {
         let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .join("launcher-data/plugins/onnx-runtime.json");
@@ -374,12 +375,21 @@ mod tests {
         assert_eq!(config.id, "onnx-runtime");
         assert_eq!(config.display_name, "ONNX Runtime");
         assert_eq!(config.installation_type, InstallationType::InProcess);
-        assert!(!config.capabilities.has_version_management);
+        assert!(config.capabilities.has_version_management);
+        assert_eq!(
+            config.github_repo.as_deref(),
+            Some(crate::config::AppId::OnnxRuntime.github_repo())
+        );
         assert!(!config.capabilities.has_connection_url);
         assert!(config.supports_format("onnx"));
-        assert!(config
-            .panel_layout
-            .iter()
-            .any(|section| section.section_type == "runtime_profiles"));
+        for section in ["version_manager", "runtime_profiles"] {
+            assert!(
+                config
+                    .panel_layout
+                    .iter()
+                    .any(|layout| layout.section_type == section),
+                "{section}"
+            );
+        }
     }
 }

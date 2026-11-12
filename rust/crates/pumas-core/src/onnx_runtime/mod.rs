@@ -31,6 +31,15 @@ pub use postprocess::{
     OnnxOutputTensorSelection,
 };
 pub use real::OnnxRuntimeSession;
+
+/// Check, without loading it, that an ONNX Runtime library is available for
+/// the host-selected installed version (or a developer override). The error
+/// says what is missing and how to install a compatible version.
+pub fn ensure_runtime_library_available(
+    selected: Option<&OnnxRuntimeLibrary>,
+) -> Result<(), OnnxRuntimeError> {
+    native_library::runtime_library_available(selected)
+}
 pub use real_backend::{OnnxEmbeddingBackendKind, RealOnnxEmbeddingBackend};
 pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 
@@ -145,6 +154,34 @@ impl OnnxModelPath {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// The ONNX Runtime library of one installed, host-selected runtime version.
+///
+/// The host resolves it from the version manager's selection. It is never
+/// built from a request or model, because loading it executes native code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnnxRuntimeLibrary {
+    version_tag: String,
+    path: PathBuf,
+}
+
+impl OnnxRuntimeLibrary {
+    /// The library inside an installed version directory.
+    pub fn installed_version(version_tag: impl Into<String>, version_dir: &Path) -> Self {
+        Self {
+            version_tag: version_tag.into(),
+            path: version_dir.join(crate::onnx_runtime_distribution::library_relative_path()),
+        }
+    }
+
+    pub fn version_tag(&self) -> &str {
+        &self.version_tag
     }
 
     pub fn path(&self) -> &Path {

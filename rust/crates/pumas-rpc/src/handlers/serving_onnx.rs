@@ -11,8 +11,8 @@ use pumas_library::models::{
     UnserveModelResponse,
 };
 use pumas_library::{
-    ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    ProviderRegistry,
+    AppId, ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId,
+    OnnxRuntimeError, OnnxRuntimeLibrary, ProviderRegistry,
 };
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -93,9 +93,10 @@ pub(super) async fn serve_onnx_model(
     let onnx_model_id = validated.load_request.model_id.clone();
     let provider_model_id = onnx_model_id.as_str().to_string();
     let gateway_alias = validated.gateway_alias.clone();
+    let runtime_library = active_onnx_runtime_library(state).await?;
     let session = match state
         .onnx_session_manager
-        .load(validated.load_request)
+        .load_with_runtime_library(validated.load_request, runtime_library)
         .await
     {
         Ok(session) => session,
@@ -106,13 +107,14 @@ pub(super) async fn serve_onnx_model(
                 provider_model_id = %provider_model_id,
                 profile_id = %request.config.profile_id.as_str(),
                 error_code = ?error.code,
+                error_field = ?error.field,
                 "ONNX session load failed"
             );
             return non_critical_failure_response(
                 state,
                 serving_error(
                     ModelServeErrorCode::ProviderLoadFailed,
-                    "ONNX Runtime could not load the selected model",
+                    &onnx_load_failure_message(&error),
                     &request,
                 ),
             )
@@ -349,6 +351,35 @@ pub(super) async fn unserve_onnx_model(
         unloaded: true,
         snapshot: Some(snapshot),
     })?)
+}
+
+/// The ONNX Runtime library of the active installed version, if one is set.
+pub(super) async fn active_onnx_runtime_library(
+    state: &AppState,
+) -> pumas_library::Result<Option<OnnxRuntimeLibrary>> {
+    let Some(version_manager) =
+        super::get_version_manager(state, AppId::OnnxRuntime.as_str()).await
+    else {
+        return Ok(None);
+    };
+    let Some(tag) = version_manager.get_active_version().await? else {
+        return Ok(None);
+    };
+    let version_dir = version_manager.version_path(&tag)?;
+    Ok(Some(OnnxRuntimeLibrary::installed_version(
+        tag,
+        &version_dir,
+    )))
+}
+
+/// A missing or unusable runtime library is an installation problem the user
+/// can fix, so its reason is returned. Other load failures stay generic.
+fn onnx_load_failure_message(error: &OnnxRuntimeError) -> String {
+    if error.field.as_deref() == Some("runtime_library") {
+        format!("ONNX Runtime is not available: {}", error.message)
+    } else {
+        "ONNX Runtime could not load the selected model".to_string()
+    }
 }
 
 async fn validate_onnx_serve_request<'a>(

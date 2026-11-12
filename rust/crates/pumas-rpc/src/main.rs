@@ -36,7 +36,12 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 const RPC_WORKER_THREADS: usize = 4;
 const RPC_MAX_BLOCKING_THREADS: usize = 16;
 #[cfg(feature = "inference-plugins")]
-const VERSION_MANAGED_APPS: &[AppId] = &[AppId::Ollama, AppId::Torch, AppId::LlamaCpp];
+const VERSION_MANAGED_APPS: &[AppId] = &[
+    AppId::Ollama,
+    AppId::Torch,
+    AppId::LlamaCpp,
+    AppId::OnnxRuntime,
+];
 
 async fn finish_signal_observer(task: &mut tokio::task::JoinHandle<Result<()>>) -> Result<()> {
     if !task.is_finished() {
@@ -476,9 +481,13 @@ mod tests {
     fn version_managed_apps_are_the_installable_inference_runtimes() {
         assert_eq!(
             VERSION_MANAGED_APPS,
-            &[AppId::Ollama, AppId::Torch, AppId::LlamaCpp]
+            &[
+                AppId::Ollama,
+                AppId::Torch,
+                AppId::LlamaCpp,
+                AppId::OnnxRuntime
+            ]
         );
-        assert!(!VERSION_MANAGED_APPS.contains(&AppId::OnnxRuntime));
         assert!(VERSION_MANAGED_APPS.iter().all(AppId::has_version_manager));
     }
 }

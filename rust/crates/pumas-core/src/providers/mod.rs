@@ -308,7 +308,7 @@ impl ProviderBehavior {
             managed_runtime_uninitialized_message: "ONNX Runtime session manager not initialized"
                 .to_string(),
             managed_runtime_no_active_version_message:
-                "ONNX Runtime is provided by the Pumas Rust runtime".to_string(),
+                "No ONNX Runtime version is installed and active; install one from the ONNX Runtime versions".to_string(),
             managed_runtime_path_segment: "onnx-runtime".to_string(),
             managed_runtime_base_port: 19_080,
             provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,

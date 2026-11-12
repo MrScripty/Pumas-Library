@@ -12,11 +12,11 @@ use super::{
     output::extract_hidden_states, tensors::TokenTensors, OnnxEmbedding,
     OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest,
     OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider, OnnxLoadOptions,
-    OnnxLoadRequest, OnnxModelConfig, OnnxModelId, OnnxRuntimeError, OnnxSessionState,
-    OnnxSessionStatus, OnnxTokenizer,
+    OnnxLoadRequest, OnnxModelConfig, OnnxModelId, OnnxRuntimeError, OnnxRuntimeLibrary,
+    OnnxSessionState, OnnxSessionStatus, OnnxTokenizer,
 };
 
-const ORT_NATIVE_LIBRARY_STRATEGY: &str = "explicit-runtime-library-cpu";
+const ORT_NATIVE_LIBRARY_STRATEGY: &str = "installed-runtime-library-cpu";
 const ONNX_RUNTIME_GRAPH_OPTIMIZATION: GraphOptimizationLevel = GraphOptimizationLevel::Level3;
 const ONNX_RUNTIME_INTRA_THREADS: usize = 1;
 const ONNX_RUNTIME_INTER_THREADS: usize = 1;
@@ -35,11 +35,22 @@ pub struct OnnxRuntimeSession {
 }
 
 impl OnnxRuntimeSession {
+    /// Load without a host-selected installed version. Only the developer
+    /// override `ORT_DYLIB_PATH` or a library beside the executable can serve.
     pub fn load(request: OnnxLoadRequest) -> Result<Self, OnnxRuntimeError> {
+        Self::load_with_runtime_library(request, None)
+    }
+
+    /// Load with the library of the host-selected installed ONNX Runtime
+    /// version. The selection is host authority, never request-supplied.
+    pub fn load_with_runtime_library(
+        request: OnnxLoadRequest,
+        runtime_library: Option<&OnnxRuntimeLibrary>,
+    ) -> Result<Self, OnnxRuntimeError> {
         let tokenizer = OnnxTokenizer::from_model_path(&request.model_path)?;
         let model_config = OnnxModelConfig::from_model_path(&request.model_path)?;
         let embedding_dimensions = resolve_embedding_dimensions(&request.options, &model_config)?;
-        super::native_library::ensure_runtime_library()?;
+        super::native_library::ensure_runtime_library(runtime_library)?;
         info!(
             provider = "onnx_runtime",
             model_id = %request.model_id.as_str(),

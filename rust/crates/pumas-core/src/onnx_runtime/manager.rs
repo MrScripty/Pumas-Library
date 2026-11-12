@@ -14,7 +14,7 @@ use tokio::{
 
 use super::{
     OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    OnnxSessionStatus,
+    OnnxRuntimeLibrary, OnnxSessionStatus,
 };
 
 /// One admitted operation's share of [`OnnxSessionManager`]'s concurrency limit.
@@ -73,6 +73,17 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
         result
     }
 
+    /// [`Self::load_leased`] using the host-selected ONNX Runtime library.
+    /// Backends that do not execute ONNX Runtime ignore the selection.
+    async fn load_leased_with_runtime_library(
+        &self,
+        request: OnnxLoadRequest,
+        _runtime_library: Option<OnnxRuntimeLibrary>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        self.load_leased(request, lease).await
+    }
+
     /// [`Self::embed_with_admission`] while `lease` is held for as long as the
     /// work may run. The default suits backends whose work stops when this
     /// future is dropped.
@@ -127,6 +138,20 @@ where
     ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
         let lease = OnnxOperationLease::new(self.operation_permit().await?);
         self.backend.load_leased(request, lease).await
+    }
+
+    /// Load with the ONNX Runtime library of the host-selected installed
+    /// version. `None` means no version is selected; the real backend then
+    /// refuses with how to install one, unless a developer override is set.
+    pub async fn load_with_runtime_library(
+        &self,
+        request: OnnxLoadRequest,
+        runtime_library: Option<OnnxRuntimeLibrary>,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        let lease = OnnxOperationLease::new(self.operation_permit().await?);
+        self.backend
+            .load_leased_with_runtime_library(request, runtime_library, lease)
+            .await
     }
 
     pub async fn unload(

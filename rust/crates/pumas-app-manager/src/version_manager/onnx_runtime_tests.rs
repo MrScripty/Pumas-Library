@@ -53,17 +53,23 @@ fn upstream_shaped_archive() -> Vec<u8> {
     );
     append_file(format!("{wrapper}/LICENSE"), b"license fixture");
     append_file(format!("{wrapper}/VERSION_NUMBER"), VERSION.as_bytes());
-    let mut link = tar::Header::new_gnu();
-    link.set_entry_type(tar::EntryType::Symlink);
-    link.set_size(0);
-    link.set_mode(0o777);
-    archive
-        .append_link(
-            &mut link,
-            format!("{wrapper}/lib/{unversioned}"),
-            &versioned,
-        )
-        .unwrap();
+    let mut append_link = |name: &str, target: &str| {
+        let mut link = tar::Header::new_gnu();
+        link.set_entry_type(tar::EntryType::Symlink);
+        link.set_size(0);
+        link.set_mode(0o777);
+        archive
+            .append_link(&mut link, format!("{wrapper}/lib/{name}"), target)
+            .unwrap();
+    };
+    if cfg!(target_os = "macos") {
+        append_link(&unversioned, &versioned);
+    } else {
+        // Linux archives chain the names: .so -> .so.1 -> .so.<version>.
+        let soname = format!("{unversioned}.1");
+        append_link(&soname, &versioned);
+        append_link(&unversioned, &soname);
+    }
     archive.into_inner().unwrap().finish().unwrap()
 }
 
@@ -252,20 +258,24 @@ async fn onnx_runtime_installs_selects_and_reopens_a_downloaded_version() {
     let metadata = std::fs::symlink_metadata(&library).unwrap();
     assert!(metadata.is_file(), "the loaded library is a regular file");
     assert_eq!(std::fs::read(&library).unwrap(), LIBRARY_BYTES);
-    let versioned_names: Vec<_> = std::fs::read_dir(library.parent().unwrap())
+    // Every upstream library name still resolves, as a link, to that file.
+    let other_names: Vec<_> = std::fs::read_dir(library.parent().unwrap())
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| path != &library)
         .collect();
-    assert_eq!(versioned_names.len(), 1, "{versioned_names:?}");
-    assert!(std::fs::symlink_metadata(&versioned_names[0])
-        .unwrap()
-        .file_type()
-        .is_symlink());
-    assert_eq!(
-        std::fs::canonicalize(&versioned_names[0]).unwrap(),
-        std::fs::canonicalize(&library).unwrap()
-    );
+    let expected_links = if cfg!(target_os = "macos") { 1 } else { 2 };
+    assert_eq!(other_names.len(), expected_links, "{other_names:?}");
+    for name in &other_names {
+        assert!(std::fs::symlink_metadata(name)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::canonicalize(name).unwrap(),
+            std::fs::canonicalize(&library).unwrap()
+        );
+    }
     assert!(version_dir.join("include/onnxruntime_c_api.h").is_file());
     assert!(version_dir.join("LICENSE").is_file());
 

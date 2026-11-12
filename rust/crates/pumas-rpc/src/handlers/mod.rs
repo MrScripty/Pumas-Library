@@ -2776,7 +2776,7 @@ mod tests {
         #[cfg(feature = "inference-plugins")]
         assert_eq!(
             wire,
-            json!({"jsonrpc":"2.0","id":"available-runtime-fixture","result":{"success":true,"versions":[]}})
+            json!({"jsonrpc":"2.0","id":"available-runtime-fixture","result":{"success":true,"versions":[],"availability_pending":false}})
         );
         #[cfg(not(feature = "inference-plugins"))]
         assert_eq!(

@@ -1555,7 +1555,9 @@ fn refine_named(name: &str, schema: &mut Value) {
                 "totalSize",
                 "archiveSize",
                 "dependenciesSize",
-                "installing"
+                "installing",
+                "unavailableReason",
+                "installAvailability"
             ]),
         );
     }

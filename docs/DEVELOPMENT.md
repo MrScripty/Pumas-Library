@@ -57,6 +57,13 @@ profile launches, so profiles on different versions serve at once; see
 combination that was verified end to end; it is evidence, not a required
 version.
 
+A CUDA build needs no CUDA toolkit or cuDNN on the host: installing it also
+installs the NVIDIA libraries its `onnxruntime-gpu` metadata names, resolved
+to current NVIDIA wheels on PyPI, into `onnx-runtime-versions/<tag>/cuda/lib`,
+and its host's `LD_LIBRARY_PATH` (Linux) or `PATH` (Windows) points there.
+Only the NVIDIA driver must be installed. Tests resolve and install against
+loopback package indexes and fixture wheels and never download real ones.
+
 `ORT_DYLIB_PATH` remains an explicit developer override: set it to an absolute
 `.so`/`.dylib`/`.dll` file before process startup and it wins over the installed
 version. No Pumas package bundles the library, headless archives included.

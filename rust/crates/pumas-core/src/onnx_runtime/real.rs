@@ -37,6 +37,29 @@ const ONNX_RUNTIME_GRAPH_OPTIMIZATION: GraphOptimizationLevel = GraphOptimizatio
 const ONNX_RUNTIME_INTRA_THREADS: usize = 1;
 const ONNX_RUNTIME_INTER_THREADS: usize = 1;
 
+/// Where the CUDA libraries of the library being loaded come from: the
+/// installed version's own, unless a developer's `ORT_DYLIB_PATH` library
+/// replaces it.
+fn cuda_libraries(
+    runtime_library: Option<&OnnxRuntimeLibrary>,
+) -> super::cuda_driver::CudaLibraries {
+    use super::cuda_driver::CudaLibraries;
+    let version_dir = runtime_library.and_then(|library| library.path().parent()?.parent());
+    match version_dir {
+        _ if std::env::var_os("ORT_DYLIB_PATH").is_some_and(|path| !path.is_empty()) => {
+            CudaLibraries::External
+        }
+        None => CudaLibraries::External,
+        Some(version_dir) => {
+            if crate::onnx_runtime_distribution::installed_cuda_library_dir(version_dir).is_some() {
+                CudaLibraries::Installed
+            } else {
+                CudaLibraries::NotInstalled
+            }
+        }
+    }
+}
+
 /// Register exactly the requested execution provider. A GPU provider that
 /// cannot initialize is an error with the reason, never a silent CPU
 /// fallback. For CUDA the reason names the missing piece: the NVIDIA driver
@@ -62,6 +85,7 @@ fn register_execution_provider(
                     runtime_library
                         .and_then(|library| OnnxRuntimeVariant::from_tag(library.version_tag()))
                         .and_then(OnnxRuntimeVariant::cuda_major),
+                    cuda_libraries(runtime_library),
                 ),
                 OnnxExecutionProvider::CoreMl => "; CoreML needs macOS on Apple hardware".into(),
             };

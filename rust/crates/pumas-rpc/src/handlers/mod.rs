@@ -1801,6 +1801,13 @@ async fn dispatch_method(
         "refetch_model_metadata_from_hf" => {
             models::refetch_model_metadata_from_hf(state, params).await
         }
+        "get_model_documents" => models::get_model_documents(state, params).await,
+        "backfill_model_companion_files" => {
+            models::backfill_model_companion_files(state, params).await
+        }
+        "backfill_library_companion_files" => {
+            models::backfill_library_companion_files(state, params).await
+        }
         "adopt_orphan_models" => models::adopt_orphan_models(state, params).await,
         "import_model_in_place" => models::import_model_in_place(state, params).await,
         "scan_shared_storage" => models::scan_shared_storage(state, params).await,

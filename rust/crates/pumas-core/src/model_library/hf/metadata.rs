@@ -10,11 +10,12 @@ use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::artifact_identity::DownloadRevision;
+use crate::model_library::companion_files::is_git_blob_oid;
 use crate::model_library::hashing::compute_fast_hash;
 use crate::model_library::naming::extract_base_name;
 use crate::model_library::types::{
     DownloadRequest, HfMetadataResult, HfSearchParams, HuggingFaceEvidence, HuggingFaceModel,
-    LfsFileInfo, RepoFileTree, REPO_FILE_TREE_VERSION,
+    LfsFileInfo, RegularFileInfo, RepoFileTree, REPO_FILE_TREE_VERSION,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -264,12 +265,36 @@ impl HuggingFaceClient {
         repo_id: &str,
         revision: &DownloadRevision,
     ) -> Result<RepoFileTree> {
+        self.repo_files_at_revision(repo_id, revision, true).await
+    }
+
+    /// Fetch the tree from the Hub, bypassing a cached entry, and cache it.
+    /// Used when a cached entry lacks the regular-file hashes a caller needs.
+    pub(crate) async fn refresh_repo_files_at_revision(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+    ) -> Result<RepoFileTree> {
+        self.repo_files_at_revision(repo_id, revision, false).await
+    }
+
+    async fn repo_files_at_revision(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+        use_cache: bool,
+    ) -> Result<RepoFileTree> {
         // The ID names both the cache file and the authenticated API path.
         validate_hf_repo_id(repo_id)?;
         // Check cache first
         let cache_repo_id = revision_cache_key(repo_id, revision);
         let cache_file = self.get_cache_path(&cache_repo_id, "files");
-        if let Some(cached) = read_repo_file_tree_cache(cache_file.clone()).await? {
+        let cached = if use_cache {
+            read_repo_file_tree_cache(cache_file.clone()).await?
+        } else {
+            None
+        };
+        if let Some(cached) = cached {
             // Reject entries from an older cache format (e.g. pre-recursive)
             if cached.cache_version >= REPO_FILE_TREE_VERSION
                 && repo_file_tree_cache_is_fresh(&cache_file).await?
@@ -296,6 +321,15 @@ impl HuggingFaceClient {
             cause: None,
         })?;
 
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            // The repository or this revision no longer exists upstream.
+            return Err(PumasError::NotFound {
+                resource: format!(
+                    "Hugging Face repository {repo_id} at revision {}",
+                    revision.as_str()
+                ),
+            });
+        }
         if !response.status().is_success() {
             return Err(PumasError::Network {
                 message: format!("HuggingFace API returned {}", response.status()),
@@ -311,6 +345,7 @@ impl HuggingFaceClient {
         // Separate LFS and regular files
         let mut lfs_files = Vec::new();
         let mut regular_files = Vec::new();
+        let mut regular_file_details = Vec::new();
 
         for file in files {
             // Skip directory entries returned by recursive tree listing
@@ -324,6 +359,15 @@ impl HuggingFaceClient {
                     sha256: lfs.oid,
                 });
             } else {
+                if let (Some(size), Some(oid)) = (file.size, file.oid.as_deref()) {
+                    if is_git_blob_oid(oid) {
+                        regular_file_details.push(RegularFileInfo {
+                            filename: file.path.clone(),
+                            size,
+                            git_oid: oid.to_ascii_lowercase(),
+                        });
+                    }
+                }
                 regular_files.push(file.path);
             }
         }
@@ -332,6 +376,7 @@ impl HuggingFaceClient {
             repo_id: repo_id.to_string(),
             lfs_files,
             regular_files,
+            regular_file_details: Some(regular_file_details),
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None, // Would need separate API call to get this
             cache_version: REPO_FILE_TREE_VERSION,

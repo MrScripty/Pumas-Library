@@ -768,6 +768,11 @@ pub struct DownloadOption {
     /// rather than a quant-based selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_group: Option<FileGroup>,
+    /// Bytes of the model card, license, code and other metadata files that
+    /// download with this option, in addition to `size_bytes`. Absent when
+    /// the Hub did not report every companion's size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion_size_bytes: Option<u64>,
 }
 
 /// Model download status.

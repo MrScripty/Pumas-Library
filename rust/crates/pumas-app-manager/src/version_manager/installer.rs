@@ -166,6 +166,161 @@ fn native_workspace_path(versions: &Path, tag: &str, attempt: &str) -> PathBuf {
     versions.join(format!(".llama-install-{}-{attempt}", &digest[..24]))
 }
 
+/// The durable operation of a native install attempt's acquisition demand:
+/// `{tag}:{os}-{arch}:{attempt}`. Persisted records name it, so its form must
+/// never change; [`parse_native_demand_operation`] reads it back.
+fn native_demand_operation(tag: &str, attempt: &str) -> String {
+    format!(
+        "{tag}:{}-{}:{attempt}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )
+}
+
+/// The tag, platform and attempt of a native demand operation.
+fn parse_native_demand_operation(operation: &str) -> Option<(&str, &str, &str)> {
+    let (version_platform, attempt) = operation.rsplit_once(':')?;
+    let (tag, platform) = version_platform.rsplit_once(':')?;
+    Some((tag, platform, attempt))
+}
+
+const NATIVE_CARRY_PREFIX: &str = ".native-carry-";
+
+/// Where finished downloads of a superseded attempt wait for the next one.
+fn native_carry_path(versions: &Path, tag: &str) -> PathBuf {
+    let digest = format!("{:x}", Sha256::digest(tag.as_bytes()));
+    versions.join(format!("{NATIVE_CARRY_PREFIX}{}", &digest[..24]))
+}
+
+/// Remove the carried downloads of `tag`, if any.
+fn remove_native_carry(versions: &Path, tag: &str) -> Result<()> {
+    let holding = native_carry_path(versions, tag);
+    if path_exists_sync(&holding)? {
+        std::fs::remove_dir_all(&holding)
+            .map_err(|error| PumasError::io_with_path(error, &holding))?;
+    }
+    Ok(())
+}
+
+/// Remove carried downloads that no live install attempt can pick up: their
+/// tag's attempt is gone or revoked. Carries of a live attempt stay.
+fn sweep_orphaned_native_carries(versions: &Path) -> Result<()> {
+    if !path_exists_sync(versions)? {
+        return Ok(());
+    }
+    let Ok(_lock) = NativeVersionsLock::try_acquire(versions) else {
+        // An install or removal holds the versions; it settles its own carry.
+        return Ok(());
+    };
+    for entry in
+        std::fs::read_dir(versions).map_err(|error| PumasError::io_with_path(error, versions))?
+    {
+        let entry = entry.map_err(|error| PumasError::io_with_path(error, versions))?;
+        let name = entry.file_name();
+        let Some(digest) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(NATIVE_CARRY_PREFIX))
+        else {
+            continue;
+        };
+        let attempt_path = versions.join(format!(".llama-attempt-{digest}.json"));
+        let live =
+            pumas_library::metadata::atomic_read_json::<NativeAttemptIdentity>(&attempt_path)
+                .ok()
+                .flatten()
+                .is_some_and(|identity| !identity.removed);
+        if !live {
+            std::fs::remove_dir_all(entry.path())
+                .map_err(|error| PumasError::io_with_path(error, entry.path()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Move the finished files named in `carry` out of a superseded workspace.
+/// Partial (`.part`) files are not finished and stay to be cleared.
+fn carry_out_finished_files(workspace: &Path, holding: &Path, carry: &[String]) -> Result<()> {
+    for name in carry {
+        let source = workspace.join(name);
+        let finished = std::fs::symlink_metadata(&source)
+            .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink());
+        if !finished {
+            continue;
+        }
+        std::fs::create_dir_all(holding)
+            .map_err(|error| PumasError::io_with_path(error, holding))?;
+        let destination = holding.join(name);
+        std::fs::rename(&source, &destination)
+            .map_err(|error| PumasError::io_with_path(error, &destination))?;
+    }
+    sync_native_directory(workspace)?;
+    if path_exists_sync(holding)? {
+        sync_native_directory(holding)?;
+    }
+    Ok(())
+}
+
+/// Move carried finished files the new selection names into its workspace,
+/// where acquisition verifies them before reuse, and drop the rest.
+fn carry_in_finished_files(holding: &Path, workspace: &Path, selected: &[String]) -> Result<()> {
+    if !path_exists_sync(holding)? {
+        return Ok(());
+    }
+    for entry in
+        std::fs::read_dir(holding).map_err(|error| PumasError::io_with_path(error, holding))?
+    {
+        let entry = entry.map_err(|error| PumasError::io_with_path(error, holding))?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let destination = workspace.join(&name);
+        if selected.contains(&name) && !path_exists_sync(&destination)? {
+            std::fs::rename(entry.path(), &destination)
+                .map_err(|error| PumasError::io_with_path(error, &destination))?;
+        }
+    }
+    sync_native_directory(workspace)?;
+    std::fs::remove_dir_all(holding).map_err(|error| PumasError::io_with_path(error, holding))
+}
+
+/// Append one timestamped line to an installation's log, which the desktop
+/// app offers to open. Blocking: call it on the blocking pool from async code.
+pub(super) fn append_install_log_line(path: &Path, message: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{} {}", Utc::now().to_rfc3339(), message.trim_end())
+}
+
+/// Append to an installation's log from async code, off the async workers.
+/// A log that cannot be written is reported, never fatal.
+async fn note_install_log(path: &Path, message: String) {
+    let path = path.to_path_buf();
+    let written = tokio::task::spawn_blocking(move || append_install_log_line(&path, &message))
+        .await
+        .map_err(std::io::Error::other)
+        .and_then(|result| result);
+    if let Err(error) = written {
+        warn!("Could not write the install log: {error}");
+    }
+}
+
+/// The unfinished (not revoked) install attempt of a tag, as a retry finds it.
+struct LiveNativeAttempt {
+    attempt: String,
+    /// The CUDA selection kept with it, when present and readable.
+    selection: Option<onnx_cuda::CudaWheelSelection>,
+    /// Its acquisition record, when the store retains one.
+    record: Option<pumas_library::acquisition::AcquisitionRecord>,
+    /// Files its workspace already holds in full (by logical path).
+    finished: Vec<String>,
+}
+
 const NATIVE_CLEANUP_STATUS_PREFIX: &str = "Installed output verified; ";
 
 pub(crate) fn has_native_cleanup_pending(progress: &InstallationProgress) -> bool {
@@ -327,6 +482,8 @@ pub(crate) fn mark_native_attempt_removed(
     lock: NativeVersionsLock,
 ) -> Result<NativeCleanupReport> {
     VersionInstaller::validate_native_tag(tag)?;
+    // Downloads carried for a later attempt of this tag go with it.
+    remove_native_carry(versions, tag)?;
     if let Some(mut identity) = read_native_attempt(versions, tag)? {
         identity.removed = true;
         write_native_attempt(versions, &identity)?;
@@ -1661,22 +1818,13 @@ impl VersionInstaller {
             {
                 continue;
             }
-            let (version_platform, attempt) =
-                record
-                    .demand
-                    .operation
-                    .rsplit_once(':')
-                    .ok_or_else(|| PumasError::Validation {
-                        field: "acquisition.consumer_recovery_required".into(),
-                        message: "Retained native demand has no exact attempt identity".into(),
-                    })?;
-            let (tag, platform) =
-                version_platform
-                    .rsplit_once(':')
-                    .ok_or_else(|| PumasError::Validation {
-                        field: "acquisition.consumer_recovery_required".into(),
-                        message: "Retained native demand has no exact version/platform".into(),
-                    })?;
+            let (tag, platform, attempt) = parse_native_demand_operation(&record.demand.operation)
+                .ok_or_else(|| PumasError::Validation {
+                    field: "acquisition.consumer_recovery_required".into(),
+                    message: "Retained native demand has no exact version, platform and \
+                                  attempt identity"
+                        .into(),
+                })?;
             Self::validate_native_tag(tag)?;
             if platform != format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH) {
                 return Err(PumasError::Validation {
@@ -1867,6 +2015,14 @@ impl VersionInstaller {
             self.report_native_cleanup(&recovery_status_tag, &cleanup, None)
                 .await;
         }
+        // Downloads carried for an attempt that no longer exists can never be
+        // picked up; recovery is the point where none of them is in use.
+        let versions = self.versions_dir();
+        consumer
+            .run_blocking("remove orphaned carried downloads", move || {
+                sweep_orphaned_native_carries(&versions)
+            })
+            .await?;
         Ok(())
     }
 
@@ -2192,15 +2348,77 @@ impl VersionInstaller {
         })
     }
 
+    /// The unfinished install attempt of `tag`, with its kept CUDA selection,
+    /// its retained acquisition record and the files its workspace already
+    /// holds in full; `None` when the tag has no live attempt.
+    async fn live_native_attempt(
+        &self,
+        consumer: &Arc<AcquisitionConsumer>,
+        tag: &str,
+    ) -> Result<Option<LiveNativeAttempt>> {
+        let versions = self.versions_dir();
+        let lookup_tag = tag.to_owned();
+        let found = consumer
+            .run_blocking("read the live install attempt", move || {
+                let Some(identity) = read_native_attempt(&versions, &lookup_tag)
+                    .ok()
+                    .flatten()
+                    .filter(|identity| !identity.removed)
+                else {
+                    return Ok(None);
+                };
+                let workspace = native_workspace_path(&versions, &lookup_tag, &identity.attempt);
+                let selection =
+                    onnx_cuda::read_selection(&workspace.join(onnx_cuda::SELECTION_FILE))
+                        .ok()
+                        .flatten();
+                let finished = std::fs::read_dir(&workspace)
+                    .map(|entries| {
+                        entries
+                            .filter_map(|entry| entry.ok())
+                            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+                            .filter_map(|entry| entry.file_name().into_string().ok())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(Some((identity.attempt, selection, finished)))
+            })
+            .await?;
+        let Some((attempt, selection, finished)) = found else {
+            return Ok(None);
+        };
+        let operation = native_demand_operation(tag, &attempt);
+        let record = consumer
+            .retained_acquisitions()
+            .await?
+            .into_iter()
+            .find(|record| record.demand.operation == operation);
+        Ok(Some(LiveNativeAttempt {
+            attempt,
+            selection,
+            record,
+            finished,
+        }))
+    }
+
     /// The CUDA library wheels an ONNX Runtime CUDA tag installs, or `None`
-    /// for every other install. An unfinished attempt of the same tag keeps
-    /// the selection it started with, so its retained downloads resume;
-    /// otherwise the current compatible releases are resolved.
+    /// for every other install, with the reason when a kept selection had to
+    /// be replaced.
+    ///
+    /// An unfinished attempt of the same tag keeps the selection it started
+    /// with, so its retained downloads resume. Only wheels it does not hold in
+    /// full yet are checked against the index, and none when its download is
+    /// already complete; a retry that needs no download needs no network. When
+    /// one of them is not found any more, the set is resolved again without
+    /// that file. Without a usable kept selection the current compatible
+    /// releases are resolved.
     async fn onnx_cuda_selection(
         &self,
         runtime: NativeRuntime,
         tag: &str,
-    ) -> Result<Option<onnx_cuda::CudaWheelSelection>> {
+        live: Option<&LiveNativeAttempt>,
+    ) -> Result<Option<(onnx_cuda::CudaWheelSelection, Option<String>)>> {
+        use pumas_library::acquisition::AcquisitionPhase;
         use pumas_library::onnx_runtime_distribution as distribution;
         if runtime != NativeRuntime::OnnxRuntime {
             return Ok(None);
@@ -2223,38 +2441,73 @@ impl VersionInstaller {
             distribution::release_version(tag).ok_or_else(|| PumasError::InstallationFailed {
                 message: format!("ONNX Runtime release {tag} does not have a semantic version"),
             })?;
-        let versions = self.versions_dir();
-        let retained_tag = tag.to_owned();
-        let retained = tokio::task::spawn_blocking(move || {
-            let identity = read_native_attempt(&versions, &retained_tag)
-                .ok()
-                .flatten()?;
-            if identity.removed {
-                return None;
-            }
-            let path = native_workspace_path(&versions, &retained_tag, &identity.attempt)
-                .join(onnx_cuda::SELECTION_FILE);
-            onnx_cuda::read_selection(&path).ok().flatten()
-        })
-        .await
-        .map_err(|error| PumasError::Other(format!("CUDA selection lookup failed: {error}")))?;
-        if let Some(selection) =
-            retained.filter(|selection| selection.serves(tag, platform, cuda_major))
-        {
-            info!(
-                "Resuming the CUDA {cuda_major} libraries selected for {tag}: {}",
-                onnx_cuda::describe(&selection)
+        let mut replaced = None;
+        let mut excluded = std::collections::BTreeSet::new();
+        if let Some((live, selection)) = live.and_then(|live| {
+            live.selection
+                .as_ref()
+                .filter(|selection| selection.serves(tag, platform, cuda_major))
+                .map(|selection| (live, selection))
+        }) {
+            let downloaded = live.record.as_ref().is_some_and(|record| {
+                !matches!(
+                    record.phase,
+                    AcquisitionPhase::Transferring | AcquisitionPhase::Withdrawn
+                )
+            });
+            let mut pending = selection.clone();
+            pending
+                .wheels
+                .retain(|wheel| !live.finished.contains(&wheel.filename));
+            let vanished = if downloaded || pending.wheels.is_empty() {
+                None
+            } else {
+                // A retry keeps its selection unless a wheel it still needs
+                // is gone.
+                self.cuda.refresh();
+                tokio::select! {
+                    vanished = onnx_cuda::vanished_wheel(self.cuda.sources(), &pending) => vanished,
+                    _ = super::wait_for_install_cancel(self.cancel_flag.clone()) => {
+                        return Err(Self::cancellation_error());
+                    }
+                    _ = super::wait_for_install_cancel(self.shutdown_flag.clone()) => {
+                        return Err(Self::cancellation_error());
+                    }
+                }
+            };
+            let Some(vanished) = vanished else {
+                info!(
+                    "Resuming the CUDA {cuda_major} libraries selected for {tag}: {}",
+                    onnx_cuda::describe(selection)
+                );
+                return Ok(Some((selection.clone(), None)));
+            };
+            warn!(
+                "The CUDA {cuda_major} libraries selected for {tag} cannot be downloaded any \
+                 more ({}); resolving them again",
+                vanished.reason
             );
-            return Ok(Some(selection));
+            excluded.insert(vanished.filename);
+            replaced = Some(vanished.reason);
+        } else {
+            // An install reads the indexes as they are now. (A replacement
+            // reuses the pages the check just read.)
+            self.cuda.refresh();
         }
-        // An install reads the indexes as they are now, and what it finds
-        // also answers the version listing. A refusal names the listed builds
-        // that install instead. Resolution only reads package indexes, so a
-        // cancel or shutdown abandons it at once instead of waiting for slow
-        // requests.
-        self.cuda.refresh();
+        // What an install finds also answers the version listing. A refusal
+        // names the listed builds that install instead. Resolution only reads
+        // package indexes, so a cancel or shutdown abandons it at once instead
+        // of waiting for slow requests.
         let resolution = async {
-            match onnx_cuda::resolve(self.cuda.sources(), tag, &release, cuda_major, platform).await
+            match onnx_cuda::resolve_excluding(
+                self.cuda.sources(),
+                tag,
+                &release,
+                cuda_major,
+                platform,
+                &excluded,
+            )
+            .await
             {
                 Ok(selection) => {
                     self.cuda
@@ -2288,7 +2541,104 @@ impl VersionInstaller {
             "Selected the CUDA {cuda_major} libraries for {tag}: {}",
             onnx_cuda::describe(&selection)
         );
-        Ok(Some(selection))
+        Ok(Some((selection, replaced)))
+    }
+
+    /// Replace the live attempt of `tag` when its retained download cannot
+    /// serve `manifest`: withdraw an unfinished download (or settle a withdrawn
+    /// one), keep its finished files that `manifest` still names (same logical
+    /// path and SHA-256) aside for the next attempt, which verifies them again
+    /// before reuse, then revoke the attempt and remove its workspace. Returns
+    /// whether the attempt was replaced.
+    async fn supersede_native_attempt(
+        &self,
+        consumer: &Arc<AcquisitionConsumer>,
+        tag: &str,
+        live: &LiveNativeAttempt,
+        manifest: &pumas_library::acquisition::ArtifactManifest,
+    ) -> Result<bool> {
+        use pumas_library::acquisition::AcquisitionPhase;
+        let Some(record) = live.record.clone() else {
+            // Nothing retained: the next download admits the new set as is.
+            return Ok(false);
+        };
+        let withdrawable = matches!(
+            record.phase,
+            AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady
+        );
+        if withdrawable && record.manifest == *manifest {
+            return Ok(false);
+        }
+        if !withdrawable && record.phase != AcquisitionPhase::Withdrawn {
+            return Err(PumasError::InstallationFailed {
+                message: format!(
+                    "The earlier install attempt of {tag} still holds its download ({:?}); \
+                     restart Pumas so it is reconciled, then install again",
+                    record.phase
+                ),
+            });
+        }
+        let versions = self.versions_dir();
+        let (reopen_versions, reopen_tag, reopen_attempt) =
+            (versions.clone(), tag.to_owned(), live.attempt.clone());
+        let (custody, workspace) = consumer
+            .run_blocking("reopen the superseded install attempt", move || {
+                prepare_native_acquisition_workspace(
+                    reopen_versions,
+                    reopen_tag,
+                    Some(reopen_attempt),
+                )
+            })
+            .await?;
+        let carry: Vec<String> = record
+            .manifest
+            .files()
+            .iter()
+            .filter(|file| manifest.files().contains(file))
+            .map(|file| file.logical_path().to_owned())
+            .collect();
+        let holding = native_carry_path(&versions, tag);
+        let cleanup_for = |custody: Arc<NativeInstallWorkspace>| {
+            let workspace_dir = custody.path().to_path_buf();
+            let holding = holding.clone();
+            let carry = carry.clone();
+            move || {
+                carry_out_finished_files(&workspace_dir, &holding, &carry)?;
+                custody.revoke_and_clear()
+            }
+        };
+        let withdrawn = if withdrawable {
+            consumer
+                .withdraw_unfinished_transfer(
+                    record.demand,
+                    record.manifest,
+                    workspace,
+                    cleanup_for(custody.clone()),
+                )
+                .await?
+        } else {
+            drop(workspace);
+            false
+        };
+        if !withdrawn {
+            // No unfinished download to withdraw (already withdrawn, or gone
+            // since it was read): carry and revoke all the same.
+            consumer
+                .run_blocking(
+                    "clear the superseded install attempt",
+                    cleanup_for(custody.clone()),
+                )
+                .await?;
+        }
+        let report = consumer
+            .run_blocking("remove the superseded install workspace", move || {
+                Ok(cleanup_settled_native_workspace(custody))
+            })
+            .await?;
+        if let Some(pending) = report.pending_message() {
+            warn!("Superseded install attempt of {tag}: {pending}");
+        }
+        Ok(true)
     }
 
     fn extract_native_archive_from(
@@ -2363,7 +2713,18 @@ impl VersionInstaller {
 
         // A CUDA build of ONNX Runtime brings its CUDA runtime and cuDNN
         // libraries: they join the archive in one verified download set.
-        let cuda = self.onnx_cuda_selection(runtime, tag).await?;
+        let live = if runtime == NativeRuntime::OnnxRuntime {
+            self.live_native_attempt(&consumer, tag).await?
+        } else {
+            None
+        };
+        let (cuda, replaced) = match self
+            .onnx_cuda_selection(runtime, tag, live.as_ref())
+            .await?
+        {
+            Some((selection, replaced)) => (Some(selection), replaced),
+            None => (None, None),
+        };
         let (manifest, source_urls) = match &cuda {
             None => (selection.manifest().clone(), vec![download_url.clone()]),
             Some(cuda) => (
@@ -2396,6 +2757,44 @@ impl VersionInstaller {
             );
         }
 
+        // A live attempt whose retained download cannot serve this set (a
+        // vanished wheel, or a kept selection that could not be used) is
+        // replaced; otherwise its download could never be admitted again.
+        if let Some(live) = &live {
+            let why = replaced.clone().unwrap_or_else(|| {
+                "the download set of the earlier attempt differs from the current one".into()
+            });
+            match self
+                .supersede_native_attempt(&consumer, tag, live, &manifest)
+                .await
+            {
+                Ok(true) => {
+                    note_install_log(
+                        &log_path,
+                        format!(
+                            "Replaced the earlier install attempt of {tag}: {why}. Selected \
+                             against the current package indexes: {}. Finished downloads \
+                             still selected are kept.",
+                            cuda.as_ref().map(onnx_cuda::describe).unwrap_or_default()
+                        ),
+                    )
+                    .await;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    note_install_log(
+                        &log_path,
+                        format!(
+                            "Could not replace the earlier install attempt of {tag} ({why}): \
+                             {error}"
+                        ),
+                    )
+                    .await;
+                    return Err(error);
+                }
+            }
+        }
+
         let versions = self.versions_dir();
         let workspace_versions = versions.clone();
         let workspace_tag = tag.to_owned();
@@ -2412,8 +2811,16 @@ impl VersionInstaller {
             // install downloads exactly these files.
             let path = custody.path().join(onnx_cuda::SELECTION_FILE);
             let selection = cuda.clone();
+            let carried_from = native_carry_path(&versions, tag);
+            let carried_into = custody.path().to_path_buf();
+            let selected: Vec<String> = manifest
+                .files()
+                .iter()
+                .map(|file| file.logical_path().to_owned())
+                .collect();
             consumer
                 .run_blocking("keep the CUDA library selection", move || {
+                    carry_in_finished_files(&carried_from, &carried_into, &selected)?;
                     if onnx_cuda::read_selection(&path).ok().flatten().as_ref() != Some(&selection)
                     {
                         onnx_cuda::write_selection(&path, &selection)?;
@@ -2425,12 +2832,7 @@ impl VersionInstaller {
 
         let demand = AcquisitionDemand {
             consumer: consumer.owner().to_owned(),
-            operation: format!(
-                "{tag}:{}-{}:{}",
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-                custody.attempt
-            ),
+            operation: native_demand_operation(tag, &custody.attempt),
         };
         let custody_for_reconcile = custody.clone();
         let manager_for_reconcile = self.metadata_manager.clone();
@@ -4562,6 +4964,55 @@ mod tests {
         assert_ne!(reinstalled.attempt, first_identity);
         assert_ne!(reinstalled.path(), first_path);
         reinstalled.cleanup().into_result().unwrap();
+    }
+
+    #[test]
+    fn native_demand_operations_round_trip() {
+        let operation = native_demand_operation("v1.24.2+cuda12", "ab12");
+        assert_eq!(
+            operation,
+            format!(
+                "v1.24.2+cuda12:{}-{}:ab12",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )
+        );
+        let (tag, platform, attempt) = parse_native_demand_operation(&operation).unwrap();
+        assert_eq!(tag, "v1.24.2+cuda12");
+        assert_eq!(
+            platform,
+            format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+        );
+        assert_eq!(attempt, "ab12");
+        assert!(parse_native_demand_operation("no-separators").is_none());
+    }
+
+    #[test]
+    fn carried_downloads_go_with_removal_and_with_their_attempt() {
+        let root = tempfile::tempdir().unwrap();
+        let versions = root.path();
+        let carry = |tag: &str| {
+            let holding = native_carry_path(versions, tag);
+            std::fs::create_dir_all(&holding).unwrap();
+            std::fs::write(holding.join("kept.whl"), b"wheel").unwrap();
+            holding
+        };
+        // Removing a version removes what was carried for it.
+        let removed = carry("v1.0.0+cuda12");
+        let lock = NativeVersionsLock::try_acquire(versions).unwrap();
+        mark_native_attempt_removed(versions, "v1.0.0+cuda12", lock.clone()).unwrap();
+        drop(lock);
+        assert!(!removed.exists());
+
+        // Recovery removes carries no live attempt can pick up, and keeps
+        // the one a live attempt still can.
+        let orphan = carry("v1.1.0+cuda12");
+        let live = NativeInstallWorkspace::create(versions, "v1.2.0+cuda12").unwrap();
+        let kept = carry("v1.2.0+cuda12");
+        drop(live);
+        sweep_orphaned_native_carries(versions).unwrap();
+        assert!(!orphan.exists());
+        assert!(kept.join("kept.whl").is_file());
     }
 
     #[test]

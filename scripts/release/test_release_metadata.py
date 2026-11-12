@@ -84,10 +84,21 @@ class MetadataTests(unittest.TestCase):
             )
             documents = list(output.glob("*.spdx.json"))
             self.assertEqual(len(documents), 16)
+            plan = json.loads((repository / "scripts/release/artifact-plan.json").read_text())
+            variants = {
+                entry["filename"].replace("{version}", "0.8.0-rc.1"): entry.get("variant", "full")
+                for entry in plan["artifacts"]
+            }
             for path in documents:
                 document = json.loads(path.read_text())
                 artifact = output / document["name"]
                 self.assertFalse(document["packages"][0]["filesAnalyzed"])
+                packages_ort = any(
+                    package["SPDXID"] == "SPDXRef-ORT" for package in document["packages"]
+                )
+                self.assertEqual(
+                    packages_ort, variants[document["name"]] == "headless-inference", document["name"]
+                )
                 self.assertEqual(
                     document["packages"][0]["checksums"][0]["checksumValue"],
                     hashlib.sha256(artifact.read_bytes()).hexdigest(),

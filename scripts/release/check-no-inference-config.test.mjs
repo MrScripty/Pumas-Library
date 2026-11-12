@@ -50,7 +50,7 @@ test('no-inference packaging config matches the artifact plan', () => {
   );
   assert.deepEqual(config.extraResources.find(resource => resource.from === 'resources/bin').filter,
     ['pumas-rpc', 'pumas-rpc.exe']);
+  // ONNX Runtime is downloaded by the desktop at runtime, never packaged.
   const full = base.extraResources.find(resource => resource.from === 'resources/bin').filter;
-  assert.ok(full.includes('ONNX-LICENSE.txt'));
-  assert.ok(full.includes('ONNX-NOTICES.txt'));
+  assert.deepEqual(full, ['pumas-rpc', 'pumas-rpc.exe']);
 });

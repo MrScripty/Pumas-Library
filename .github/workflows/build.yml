@@ -565,9 +565,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            ort_target: linux-x86_64
           - os: macos-15
-            ort_target: macos-arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
@@ -584,10 +582,6 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
-      - name: Provision official desktop CPU runtime
-        run: python scripts/release/onnx_runtime_stage.py --target ${{ matrix.ort_target }} --download --output-dir "${{ runner.temp }}/desktop-ort"
-      - name: Probe desktop native CPU runtime
-        run: python scripts/release/onnx_runtime_probe.py --target ${{ matrix.ort_target }} --runtime-dir "${{ runner.temp }}/desktop-ort" --output "${{ runner.temp }}/desktop-native-loader.json"
       - name: Build release backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
       - name: Test release workspace
@@ -595,7 +589,7 @@ jobs:
       - name: Verify backend startup from isolated staging
         shell: bash
         run: |
-          python scripts/release/stage-rpc.py --target ${{ matrix.ort_target }} --runtime-dir "${{ runner.temp }}/desktop-ort"
+          python scripts/release/stage-rpc.py
           python scripts/release/smoke-rpc.py electron/resources/bin
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -797,13 +791,9 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
-      - name: Provision official desktop CPU runtime
-        run: python scripts/release/onnx_runtime_stage.py --target windows-x86_64 --download --output-dir "${{ runner.temp }}/desktop-ort"
-      - name: Probe desktop native CPU runtime
-        run: python scripts/release/onnx_runtime_probe.py --target windows-x86_64 --runtime-dir "${{ runner.temp }}/desktop-ort" --output "${{ runner.temp }}/desktop-native-loader.json"
       - name: Build Windows backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
-      - run: python scripts/release/stage-rpc.py --target windows-x86_64 --runtime-dir "${{ runner.temp }}/desktop-ort"
+      - run: python scripts/release/stage-rpc.py
       - run: python scripts/release/smoke-rpc.py electron/resources/bin
       - name: Package Windows installers
         env:

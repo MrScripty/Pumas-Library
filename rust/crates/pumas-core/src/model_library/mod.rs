@@ -93,6 +93,7 @@ pub use hf::{
 };
 pub use hf_cache::{CacheStats, CachedRepoDetails, HfCacheConfig, HfSearchCache};
 pub use identifier::{extract_gguf_metadata, identify_model_type, ModelTypeInfo};
+pub(crate) use identifier::{probe_gguf_decision_head, GgufDecisionProbe};
 pub(crate) use importer::TEMP_IMPORT_PREFIX;
 pub use importer::{
     AcquiredGgufVisionSpec, AcquiredGgufVisionTask, InPlaceImportSpec, IncompleteShardRecovery,

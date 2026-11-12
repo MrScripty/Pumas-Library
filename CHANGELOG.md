@@ -220,6 +220,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and a retry checks only the wheels it still has to download. A retry whose
   kept selection cannot be read or no longer applies replaces the earlier
   download the same way instead of failing on it.
+- A Hugging Face download whose GGUF declares a llama.cpp decision head
+  (`<arch>.decision.type`, as Kev does) is classified `decision` before it
+  downloads. The download preflight reads only the GGUF's metadata header with
+  HTTP Range requests, the same evidence used to classify the file after
+  download, so a `config.json` or task tag no longer files it as `llm`. If the
+  header cannot be read, the reason is logged and the download is classified
+  from repository metadata as before; the downloaded file still settles it.
+  GGUF identification now reads every model key, rather than stopping after
+  100 keys, so a head declared after many `general.*` keys is still found.
+- Reclassifying the library while a download holds the library root defers
+  the affected models (`ReclassifyResult.deferred`, with the reason) instead
+  of reporting "Download library root is busy" as an error. A downloading
+  model is classified from its files when the download finishes.
 
 ## [0.8.0] - 2026-11-08
 

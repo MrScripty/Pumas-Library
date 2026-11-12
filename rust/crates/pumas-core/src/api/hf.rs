@@ -410,6 +410,41 @@ impl PumasApi {
                                 })??;
                         }
                     }
+                    // After download, a GGUF that declares a decision head
+                    // outranks config and task tags (model_type_resolver). Read
+                    // the same key from the selected GGUF's header now, so the
+                    // download is placed by the same evidence.
+                    let header_client = client.clone();
+                    let header_request = resolved_request.clone();
+                    let header_revision = revision.clone();
+                    let decision_head = context
+                        .run_fallible_async_named("read selected GGUF header", move || async move {
+                            Ok::<_, PumasError>(
+                                header_client
+                                    .selected_gguf_declares_decision_head(
+                                        &header_request,
+                                        &header_revision,
+                                    )
+                                    .await,
+                            )
+                        })
+                        .await
+                        .map_err(|error| {
+                            error.into_pumas_error("Download GGUF header observation failed")
+                        })??;
+                    match decision_head {
+                        Ok(true) => {
+                            resolved_model_type =
+                                Some(model_library::ModelType::Decision.as_str().to_string());
+                        }
+                        Ok(false) => {}
+                        Err(err) => warn!(
+                            "Could not read the GGUF header of {} before download; it is \
+                             classified from repository metadata until its file is downloaded: {}",
+                            request.repo_id, err
+                        ),
+                    }
+
                     if let Some(model_info) = remote_model.as_ref() {
                         apply_remote_model_metadata(&mut resolved_request, model_info);
                     } else if resolved_request.license_status.is_none() {
@@ -5190,6 +5225,151 @@ pub(super) mod tests {
             .await
             .is_empty());
         api.shutdown_downloads().await.unwrap();
+    }
+    /// Serve pinned metadata plus GGUF header ranges, recording request lines.
+    async fn serve_decision_gguf_preflight(
+        commit: &'static str,
+        config_model_type: Option<&'static str>,
+        gguf: Vec<u8>,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<Vec<String>>,
+    ) {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let mut observed = Vec::new();
+            loop {
+                let (mut socket, _) = tokio::select! {
+                    biased;
+                    _ = &mut stopped => break,
+                    accepted = listener.accept() => accepted.unwrap(),
+                };
+                let request = read_intent_test_request(&mut socket).await;
+                observed.push(request.clone());
+                if request.contains(&format!("/resolve/{commit}/")) {
+                    // The whole fixture fits the first range.
+                    let head = format!(
+                        "HTTP/1.1 206 Partial Content\r\ncontent-range: bytes 0-{}/{}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                        gguf.len() - 1,
+                        gguf.len(),
+                        gguf.len()
+                    );
+                    socket.write_all(head.as_bytes()).await.unwrap();
+                    socket.write_all(&gguf).await.unwrap();
+                } else if request.contains(&format!("/revision/{commit}")) {
+                    let config = config_model_type
+                        .map(|model_type| {
+                            format!(
+                                r#","config":{{"model_type":"{model_type}","architectures":["Qwen3_5ForConditionalGeneration"]}}"#
+                            )
+                        })
+                        .unwrap_or_default();
+                    let body = format!(
+                        r#"{{"modelId":"acme/kev","sha":"{commit}","pipeline_tag":"text-classification","tags":["gguf","decision-model"]{config}}}"#
+                    );
+                    write_intent_test_response(&mut socket, "200 OK", &body).await;
+                } else {
+                    write_intent_test_response(&mut socket, "404 Not Found", "{}").await;
+                }
+            }
+            observed
+        });
+        (base_url, stop, server)
+    }
+
+    fn decision_gguf_header(decision: bool) -> Vec<u8> {
+        let mut keys = vec![
+            ("general.architecture", "qwen35"),
+            ("general.name", "Kev-4B"),
+        ];
+        if decision {
+            keys.push(("qwen35.decision.type", "kev"));
+        }
+        keys.push(("tokenizer.ggml.model", "gpt2"));
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&(keys.len() as u64).to_le_bytes());
+        for (key, value) in keys {
+            bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(key.as_bytes());
+            bytes.extend_from_slice(&8_u32.to_le_bytes());
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        bytes
+    }
+
+    async fn prepare_with_gguf_header(
+        config_model_type: Option<&'static str>,
+        decision: bool,
+    ) -> (PreparedIntentDownload, Vec<String>) {
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        let (base_url, stop, server) = serve_decision_gguf_preflight(
+            COMMIT,
+            config_model_type,
+            decision_gguf_header(decision),
+        )
+        .await;
+        let root = tempfile::TempDir::new().unwrap();
+        let library = Arc::new(
+            model_library::ModelLibrary::new(root.path().join("models"))
+                .await
+                .unwrap(),
+        );
+        let mut client = model_library::HuggingFaceClient::new(root.path().join("cache")).unwrap();
+        client.set_test_download_base_url(base_url);
+        client.enable_test_gguf_header_probe();
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/kev".into(),
+            family: "qwen35".into(),
+            official_name: "Kev-4B".into(),
+            model_type: None,
+            quant: None,
+            filename: None,
+            filenames: Some(vec!["Kev-4B-Q8_0.gguf".into()]),
+            pipeline_tag: None,
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let prepared = PumasApi::prepare_hf_download_owned_at_revision(
+            library,
+            Arc::new(client),
+            &request,
+            DownloadRevision::from_commit(COMMIT).unwrap(),
+        )
+        .await
+        .unwrap();
+        stop.send(()).unwrap();
+        (prepared, server.await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn preflight_places_a_gguf_decision_head_as_decision_before_download() {
+        // A causal-LM config would otherwise file the model as `llm`; the
+        // GGUF's decision head outranks it, as it does after download.
+        let (prepared, observed) = prepare_with_gguf_header(Some("qwen3_5"), true).await;
+        assert_eq!(prepared.model_type, "decision");
+        assert!(prepared.model_ref.model_id.starts_with("decision/"));
+        assert!(observed.iter().any(|line| line.starts_with(
+            "GET /acme/kev/resolve/0123456789abcdef0123456789abcdef01234567/Kev-4B-Q8_0.gguf"
+        )));
+    }
+
+    #[tokio::test]
+    async fn preflight_without_a_decision_head_keeps_repository_evidence() {
+        // Mica v0.5: a qwen3_5 config and a text-classification tag, but a
+        // plain causal GGUF. The config's hard signal still decides.
+        let (prepared, _) = prepare_with_gguf_header(Some("qwen3_5"), false).await;
+        assert_eq!(prepared.model_type, "llm");
     }
 
     async fn read_intent_test_request(socket: &mut tokio::net::TcpStream) -> String {

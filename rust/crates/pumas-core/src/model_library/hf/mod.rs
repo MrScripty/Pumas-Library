@@ -18,6 +18,7 @@ mod acquisition_source;
 mod auth;
 mod bundles;
 mod download;
+mod gguf_header;
 mod lifecycle;
 mod metadata;
 mod package_selection;
@@ -125,6 +126,10 @@ pub struct HuggingFaceClient {
     downloads_unavailable: Arc<std::sync::RwLock<Option<String>>>,
     #[cfg(any(test, feature = "test-support"))]
     download_base_url: Option<String>,
+    /// Unit-test fixtures script every request; only tests that serve a GGUF
+    /// header range turn the download preflight's header read on.
+    #[cfg(test)]
+    pub(super) test_gguf_header_probe: bool,
 }
 
 impl std::fmt::Debug for HuggingFaceClient {
@@ -225,6 +230,8 @@ impl HuggingFaceClient {
             downloads_unavailable: self.downloads_unavailable.clone(),
             #[cfg(any(test, feature = "test-support"))]
             download_base_url: self.download_base_url.clone(),
+            #[cfg(test)]
+            test_gguf_header_probe: self.test_gguf_header_probe,
         }
     }
 
@@ -269,6 +276,11 @@ impl HuggingFaceClient {
                 message: "Download mutation requires a configured library root".into(),
             }),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enable_test_gguf_header_probe(&mut self) {
+        self.test_gguf_header_probe = true;
     }
 
     #[cfg(test)]
@@ -422,6 +434,8 @@ impl HuggingFaceClient {
             downloads_unavailable: Arc::new(std::sync::RwLock::new(None)),
             #[cfg(any(test, feature = "test-support"))]
             download_base_url: None,
+            #[cfg(test)]
+            test_gguf_header_probe: false,
         })
     }
 

@@ -97,11 +97,7 @@ pub(super) async fn run(
     }
     // Conversion scripts load models with third-party libraries.
     command
-        .envs(
-            crate::platform::child_environment::THIRD_PARTY_TELEMETRY_OPT_OUT
-                .iter()
-                .copied(),
-        )
+        .envs(crate::platform::child_environment::third_party_library_environment())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -402,9 +398,9 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn conversion_processes_run_with_third_party_telemetry_disabled() {
+    async fn conversion_processes_run_with_telemetry_disabled_and_the_hub_offline() {
         let mut command =
-            shell("printf '%s %s\\n' \"$HF_HUB_DISABLE_TELEMETRY\" \"$DO_NOT_TRACK\"");
+            shell("printf '%s %s %s\\n' \"$HF_HUB_DISABLE_TELEMETRY\" \"$DO_NOT_TRACK\" \"$HF_HUB_OFFLINE\"");
         command.env("HF_HUB_DISABLE_TELEMETRY", "0");
         let mut lines = Vec::new();
         run(
@@ -415,7 +411,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(lines, ["1 1"]);
+        assert_eq!(lines, ["1 1 1"]);
     }
 
     #[cfg(unix)]

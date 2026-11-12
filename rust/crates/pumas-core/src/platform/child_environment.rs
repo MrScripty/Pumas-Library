@@ -19,7 +19,8 @@
 //! explicitly (the llama.cpp launch configuration does).
 //!
 //! Always set: the third-party telemetry opt-outs in
-//! [`THIRD_PARTY_TELEMETRY_OPT_OUT`].
+//! [`THIRD_PARTY_TELEMETRY_OPT_OUT`] and the Hub offline switch in
+//! [`HUGGING_FACE_HUB_OFFLINE`].
 
 use std::ffi::{OsStr, OsString};
 use std::process::Command;
@@ -168,13 +169,31 @@ pub const THIRD_PARTY_TELEMETRY_OPT_OUT: &[(&str, &str)] = &[
     ("ORT_DISABLE_TELEMETRY", "1"),
 ];
 
+/// Keeps third-party libraries off the Hugging Face Hub. Pumas downloads every
+/// model file into the library; runtimes and conversions read only what is
+/// there, so a missing file fails the load instead of being fetched behind
+/// Pumas into the Hugging Face cache.
+///
+/// - `HF_HUB_OFFLINE`: `huggingface_hub`, and through it Transformers,
+///   Diffusers and sentence-transformers.
+pub const HUGGING_FACE_HUB_OFFLINE: &[(&str, &str)] = &[("HF_HUB_OFFLINE", "1")];
+
+/// Everything Pumas sets for processes that may load third-party libraries:
+/// [`THIRD_PARTY_TELEMETRY_OPT_OUT`] and [`HUGGING_FACE_HUB_OFFLINE`].
+pub fn third_party_library_environment() -> impl Iterator<Item = (&'static str, &'static str)> {
+    THIRD_PARTY_TELEMETRY_OPT_OUT
+        .iter()
+        .chain(HUGGING_FACE_HUB_OFFLINE)
+        .copied()
+}
+
 /// Clear `command`'s environment and inherit only the allowlisted variables
-/// from this process, with third-party telemetry disabled. Apply
-/// launch-specific variables after this call.
+/// from this process, with third-party telemetry disabled and the Hugging
+/// Face Hub offline. Apply launch-specific variables after this call.
 pub fn apply_owned_child_environment(command: &mut Command) {
     command.env_clear();
     command.envs(inherited_environment(std::env::vars_os()));
-    command.envs(THIRD_PARTY_TELEMETRY_OPT_OUT.iter().copied());
+    command.envs(third_party_library_environment());
 }
 
 #[cfg(test)]
@@ -234,9 +253,7 @@ mod tests {
         apply_owned_child_environment(&mut command);
         let configured: Vec<_> = command.get_envs().collect();
         let opt_out = |name: &OsStr| {
-            THIRD_PARTY_TELEMETRY_OPT_OUT
-                .iter()
-                .any(|(opt_out, _)| name == OsStr::new(opt_out))
+            third_party_library_environment().any(|(set, _)| name == OsStr::new(set))
         };
         assert!(configured
             .iter()
@@ -247,11 +264,11 @@ mod tests {
     }
 
     #[test]
-    fn owned_children_have_third_party_telemetry_disabled() {
+    fn owned_children_have_telemetry_disabled_and_the_hub_offline() {
         let mut command = Command::new("runtime");
         apply_owned_child_environment(&mut command);
         let configured: Vec<_> = command.get_envs().collect();
-        for (name, value) in THIRD_PARTY_TELEMETRY_OPT_OUT {
+        for (name, value) in third_party_library_environment() {
             assert!(configured.contains(&(OsStr::new(name), Some(OsStr::new(value)))));
         }
     }

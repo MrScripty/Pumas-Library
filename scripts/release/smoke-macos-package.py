@@ -75,9 +75,9 @@ def verify(package, variant="full"):
         executable = contents / "MacOS" / info["CFBundleExecutable"]
         for binary in [executable, resources / "pumas-rpc"]:
             subprocess.run(["lipo", str(binary), "-verify_arch", "arm64"], check=True, timeout=10)
-        for library in (ROOT / "electron/resources/bin").glob("libonnxruntime*.dylib"):
-            if digest(resources / library.name) != digest(library):
-                raise RuntimeError(f"Packaged ONNX library differs: {library.name}")
+        # ONNX Runtime is downloaded by the desktop at runtime, never packaged.
+        if any(resources.glob("libonnxruntime*.dylib")):
+            raise RuntimeError("Desktop package must not bundle ONNX Runtime")
         command = [
             sys.executable,
             str(ROOT / "scripts/release/smoke-rpc.py"),

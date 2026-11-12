@@ -30,40 +30,24 @@ STAGE_SPEC.loader.exec_module(desktop)
 
 
 class ReleaseTests(unittest.TestCase):
-    def test_desktop_staging_uses_only_pinned_payloads_and_preserves_old_stage_on_refusal(self):
+    def test_desktop_staging_packages_only_the_backend_never_onnx_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source, runtime, target = root / "source", root / "runtime", root / "stage"
+            source, target = root / "source", root / "stage"
             source.mkdir()
-            runtime.mkdir()
             target.mkdir()
             binary = "pumas-rpc.exe" if os.name == "nt" else "pumas-rpc"
-            (source / binary).write_bytes(b"test RPC, not executable")
-            (source / "ambient.dll").write_bytes(b"must never copy")
-            payloads = {"native.dll": b"test native", "ONNX-LICENSE.txt": b"test notice"}
-            selected = {"files": {}, "notices": {}}
-            for name, data in payloads.items():
-                (runtime / name).write_bytes(data)
-                selected["notices" if name.endswith(".txt") else "files"][name] = {
-                    "bytes": len(data),
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                }
-            pins = root / "pins.json"
-            pins.write_text(json.dumps({"targets": {"test-native": selected}}))
             (target / "sentinel").write_bytes(b"prior usable stage")
-            with (
-                patch.object(desktop, "PINS", pins),
-                patch.object(desktop, "native_target", return_value="test-native"),
-            ):
-                (runtime / "native.dll").write_bytes(b"corrupt0000")
-                with self.assertRaises(ValueError):
-                    desktop.stage_rpc(source, target, runtime, "test-native")
-                self.assertEqual((target / "sentinel").read_bytes(), b"prior usable stage")
-                (runtime / "native.dll").write_bytes(payloads["native.dll"])
-                desktop.stage_rpc(source, target, runtime, "test-native")
-                self.assertEqual({p.name for p in target.iterdir()}, {binary, *payloads})
-                for name, data in payloads.items():
-                    self.assertEqual((target / name).read_bytes(), data)
+            with self.assertRaises(ValueError):
+                desktop.stage_rpc(source, target)
+            self.assertEqual((target / "sentinel").read_bytes(), b"prior usable stage")
+            (source / binary).write_bytes(b"test RPC, not executable")
+            # ONNX Runtime is downloaded by the desktop at runtime; libraries
+            # beside the build output must never be staged into a package.
+            for name in ["onnxruntime.dll", "libonnxruntime.so", "libonnxruntime.dylib", "ONNX-LICENSE.txt"]:
+                (source / name).write_bytes(b"must never copy")
+            desktop.stage_rpc(source, target)
+            self.assertEqual({p.name for p in target.iterdir()}, {binary})
 
     def test_windows_module_paths_drop_the_verbatim_prefix(self):
         # A module loaded through a canonical path is reported as \\?\D:\...

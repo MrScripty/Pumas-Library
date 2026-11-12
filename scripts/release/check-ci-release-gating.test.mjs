@@ -87,13 +87,11 @@ test('manual source guard accepts only its exact Git commit', () => {
   }
 });
 
-test('full desktop native runtimes are provisioned and probed before staging', () => {
+test('full desktop packages stage only the backend; ONNX Runtime is downloaded at runtime', () => {
   for (const name of ['build-rust', 'windows-release']) {
     const block = job(name);
-    assert.ok(block.includes('onnx_runtime_stage.py'));
-    assert.ok(block.includes('onnx_runtime_probe.py'));
-    assert.ok(block.indexOf('onnx_runtime_probe.py') < block.indexOf('stage-rpc.py'));
-    assert.match(block, /stage-rpc.py --target .* --runtime-dir/);
+    assert.doesNotMatch(block, /onnx_runtime_stage\.py|onnx_runtime_probe\.py|--runtime-dir/);
+    assert.match(block, /python scripts\/release\/stage-rpc\.py\n/);
   }
   const inference = job('headless-inference');
   assert.match(inference, /binary: pumas-rpc.exe/);

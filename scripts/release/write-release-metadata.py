@@ -95,7 +95,9 @@ def write_metadata(directory, build_id, source, repository=ROOT):
                 "relatedSpdxElement": "SPDXRef-Pumas",
             }
         ]
-        if artifact.get("variant", "full") in {"full", "headless-inference"}:
+        # Desktop packages download ONNX Runtime at runtime; only headless
+        # inference archives still package the pinned runtime input.
+        if artifact.get("variant", "full") == "headless-inference":
             runtime = next(
                 entry
                 for entry in pins["targets"].values()

@@ -28,7 +28,7 @@ class BuildCandidateTests(unittest.TestCase):
             '[workspace.package]\nversion = "0.8.0-test"\n'
             '[profile.release]\nlto = true\ncodegen-units = 1\nstrip = "debuginfo"\n'
         )
-        self.inputs, self.build, self.runtime, self.contract, self.schema, _ = fixture(self.root)
+        self.inputs, self.build, self.contract, self.schema, _ = fixture(self.root)
         binary = self.root / "pumas-rpc"
         binary.write_bytes(self.inputs["pumas-rpc"].read_bytes())
         self.inputs["pumas-rpc"] = binary
@@ -38,7 +38,6 @@ class BuildCandidateTests(unittest.TestCase):
             self.inputs["THIRD-PARTY-NOTICES.txt"].read_bytes()
         )
         (self.repository / "LICENSE").write_bytes(self.inputs["LICENSE.txt"].read_bytes())
-        self.runtime_inputs = {name: self.inputs[name] for name in self.runtime["files"]}
         self.output = self.root / "output"
         self.calls = []
         self.dirty_after_build = False
@@ -107,7 +106,7 @@ class BuildCandidateTests(unittest.TestCase):
             stdout = ""
         return SimpleNamespace(stdout=stdout, returncode=0)
 
-    def produce(self, environment=None, real_configuration=False, runtime_notices=()):
+    def produce(self, environment=None, real_configuration=False):
         with (
             patch.object(
                 subject.provenance,
@@ -125,14 +124,11 @@ class BuildCandidateTests(unittest.TestCase):
                 self.repository,
                 "linux-x86_64",
                 self.contract,
-                self.runtime,
-                self.runtime_inputs,
                 self.schema,
                 self.inputs["LICENSE.txt"],
                 self.inputs["THIRD-PARTY-NOTICES.txt"],
                 self.output,
                 runner=self.runner,
-                runtime_notices=runtime_notices,
                 environment=environment
                 if environment is not None
                 else {"CARGO_HOME": str(self.root / "cargo")},
@@ -157,16 +153,21 @@ class BuildCandidateTests(unittest.TestCase):
         self.assertEqual(manifest["qualification"], "unverified_candidate")
         self.assertTrue((self.output / "build-evidence.json").exists())
 
-    def test_native_notices_are_embedded_with_source_notices(self):
-        result = self.produce(
-            runtime_notices=(b"synthetic ORT license", b"synthetic native notices")
-        )
+    def test_archive_packages_no_runtime_and_only_source_notices(self):
+        result = self.produce()
         destination = self.root / "extract-notices"
-        package.extract_verified(result["archive"], result["archive_sha256"], destination)
-        notices = (destination / "THIRD-PARTY-NOTICES.txt").read_bytes()
-        self.assertIn(self.inputs["THIRD-PARTY-NOTICES.txt"].read_bytes(), notices)
-        self.assertIn(b"synthetic ORT license", notices)
-        self.assertIn(b"synthetic native notices", notices)
+        manifest = package.extract_verified(
+            result["archive"], result["archive_sha256"], destination
+        )
+        self.assertEqual(
+            (destination / "THIRD-PARTY-NOTICES.txt").read_bytes(),
+            self.inputs["THIRD-PARTY-NOTICES.txt"].read_bytes(),
+        )
+        self.assertEqual(result["bundled_runtimes"], [])
+        self.assertFalse(
+            [name for name in manifest["files"] if "onnx" in name.lower()],
+            "runtimes are installed by Pumas, never packaged",
+        )
 
     def test_current_07_version_refuses_before_any_build(self):
         self.contract["expected"]["version"] = "0.7.0"
@@ -209,12 +210,6 @@ class BuildCandidateTests(unittest.TestCase):
                 )
         self.assertTrue(self.built)
         self.assertFalse(list(self.output.glob("*.tar.gz")))
-
-    def test_runtime_byte_mismatch_refuses_before_any_build(self):
-        next(iter(self.runtime_inputs.values())).write_bytes(b"changed runtime")
-        with self.assertRaisesRegex(ValueError, "runtime bytes mismatch"):
-            self.produce()
-        self.assertFalse(self.built)
 
     def test_current_source_version_cannot_be_relabelled_by_08_contract(self):
         manifest = self.repository / "rust/Cargo.toml"
@@ -362,8 +357,6 @@ class BuildCandidateTests(unittest.TestCase):
                     self.repository,
                     "linux-x86_64",
                     self.contract,
-                    self.runtime,
-                    self.runtime_inputs,
                     self.schema,
                     self.inputs["LICENSE.txt"],
                     self.inputs["THIRD-PARTY-NOTICES.txt"],

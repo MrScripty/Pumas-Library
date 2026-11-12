@@ -155,8 +155,8 @@ Electron/Chromium notices alongside the combined notice.
 
 For Linux, use `python3 scripts/release/verify-deb-install.py CANDIDATE_DEB` for
 isolated native install/remove checks. Run `scripts/release/verify-packaged-onnx.py` with the extracted RPC
-and a real local Nomic fixture to verify import, load, gateway embeddings and
-unload. `write-linux-metadata.py` remains a separate optional extracted-file
+and a real local Nomic fixture to verify ONNX Runtime installation through Pumas,
+import, load, gateway embeddings and unload. `write-linux-metadata.py` remains a separate optional extracted-file
 inventory for the two full Linux installers. It does not generate the complete
 sixteen-artifact publication metadata; do not mix its output directory into a
 fresh final candidate assembly.
@@ -177,82 +177,66 @@ Review archives and diagnostic evidence are retained for seven days under
 separate `review-inference-*` artifact names; they cannot satisfy the full
 matrix's release-candidate inventory. This job grants neither pretrained-model
 acceptance nor Windows/macOS qualification, and publishes no tag or release.
-The Linux review job also imports, loads, executes and unloads a deterministic
-untrained ONNX graph through its own extracted Pumas binary, observes the pinned
-native runtime mapping, and requires graceful shutdown. Its separately labeled
-fixture hashes and lifecycle log are execution evidence, not pretrained Nomic
-acceptance or embedding-quality evidence. No model weights are downloaded.
+The Linux review job also installs ONNX Runtime through its own extracted Pumas,
+then imports, loads, executes and unloads a deterministic untrained ONNX graph
+on a profile pinned to that version, observes that the loaded runtime is the one
+Pumas installed, and requires graceful shutdown. Its separately labeled fixture
+hashes and lifecycle log are execution evidence, not pretrained Nomic acceptance
+or embedding-quality evidence. No model weights are downloaded.
 
 The producer requires source version 0.8; older 0.7 sources fail before
 compilation. After manifest or dependency changes, regenerate/review the
 matching `<version>` and `<version>-s3` attribution directories. The generator and inference producer
 select those source-version paths without retaining a hard-coded 0.7 directory.
 
-`onnx-runtime-pins.json` records the official CPU 1.24.2 GitHub release archive
-digests and the hashes/sizes of selected native members and license/notice bytes.
-Those archive digests were checked against upstream release metadata and the
-actual downloaded archives. `onnx_runtime_stage.py --target TARGET --archive FILE
---output-dir FRESH_DIRECTORY` verifies a private snapshot and writes only named
-regular members, materializing Linux's versioned library under the loader name.
-`--download` explicitly authorizes fetching that exact pinned official archive;
-Cargo continues to use `ORT_SKIP_DOWNLOAD=1`. Pin updates require reviewing both
-upstream archive identity and actual member/notice bytes. The records cover the
-shipped CPU ORT files and observed static direct imports. Linux ORT requires
-GLIBC 2.27, GLIBCXX 3.4.22 and CXXABI 1.3.11 (the final RPC may require newer
-versions). Windows additionally requires compatible MSVCP140/MSVCP140_1 and
-VCRUNTIME140/VCRUNTIME140_1 DLLs, which are absent from the upstream ORT archive;
-users must have a compatible Microsoft Visual C++ runtime. The pinned macOS
-library declares minimum macOS 14.0 in its Mach-O build command and imports
-system frameworks and libraries. These prerequisites are not redistributed or qualified
-merely by recording their names; recursive/session-dependent closure, signatures
-and GPU providers remain separate gates.
-
-Before compilation, `onnx_runtime_probe.py` runs an isolated, time-bounded native
-child, validates the exact files, loads ORT and requires version 1.24.2 and C API
-24. Every native workflow target must pass that loader gate; it detects loader
-failures that lazy RPC startup cannot. The probe runs inside Python, so libraries
-already loaded by that interpreter are part of its host context; it does not
-substitute for exercising ORT from the final extracted RPC process. Linux evidence additionally
-hashes every observed process file mapping before and after the API probe and
-checks mapped device/inode identity. These include host/Python libraries and
-are an observation of this process, not a universal redistributable closure.
-Windows/macOS mapped-file audit remains unavailable in this probe. Process exit
-ends the probe's native lifetime; no model or session is created.
+Headless archives bundle no runtime. Each contains exactly the RPC executable,
+`LICENSE.txt`, `THIRD-PARTY-NOTICES.txt`, `protocol-schema.json`,
+`build-record.json`, `manifest.json` and `SHA256SUMS`; the manifest is schema 2
+(schema 1 archives also packaged ONNX Runtime 1.24.2 and a `runtime` record) and
+admission refuses any other member. Consumers install ONNX Runtime, llama.cpp or
+Torch through the Pumas version manager, like the desktop. Cargo never downloads
+ONNX Runtime: builds keep `ORT_SKIP_DOWNLOAD=1` with the `ort` crate's dynamic
+loading, so no step stages, probes or pins a runtime library.
 
 The CI adapter exports the actual source DTO schema separately, pins the source
 commit/tree and expected shared build advertisements, and compares the production
 executable's actual `--build-info` against those expectations. It builds locked,
 offline, native release with exactly `s3,inference-plugins`, embeds the checked
-S3 notices plus exact upstream native notices, verifies/extracts the resulting
-archive, and runs authenticated owner startup/graceful shutdown. Archive artifacts
-and diagnostic evidence are uploaded separately. These remain unsigned,
-`unverified_candidate` outputs; startup never qualifies model execution.
+S3 notices, verifies/extracts the resulting archive, and runs authenticated owner
+startup/graceful shutdown. Archive artifacts and diagnostic evidence are uploaded
+separately. These remain unsigned, `unverified_candidate` outputs; startup never
+qualifies model execution.
 
-For native real-model acceptance, `verify-packaged-onnx.py RPC NOMIC_DIRECTORY`
-requires the selected target's pinned CPU ORT files beside RPC. The child receives an allowlist
-environment and isolated home/config/cache/registry/current directory, with no
-ambient ORT, loader, Pumas, Python or proxy overrides. Windows retains the actual
-OS directory needed for system DLLs and uses a new process group plus graceful
-CTRL_BREAK shutdown; Unix uses SIGINT. Fixture copying uses Python on all hosts.
-After finite embedding inference, Linux `/proc/PID/maps` must identify the packaged
-loader by path, device and inode. Windows PSAPI and macOS lsof observe the actual
-process's native module paths; current packaged bytes must match the reviewed pin.
-Windows/macOS mapped-file-object identity is not established by these path
-observations. The receipt records that narrower scope and copied fixture hashes. Missing runtime,
-ambient mappings, model errors and forced shutdown fail acceptance. This observes
-the mapped ORT file; it is not a filesystem sandbox, protection against concurrent
-hostile same-user mutation, or a complete audit of every loaded system dependency.
+For real-model acceptance, `verify-packaged-onnx.py RPC NOMIC_DIRECTORY` refuses
+any ONNX Runtime, llama.cpp or Torch library beside RPC, starts it with an
+allowlist environment and isolated home/config/cache/registry/current directory
+(no ambient ORT, loader, Pumas, Python or proxy overrides), and drives its
+JSON-RPC/HTTP API: `get_available_versions` for app `onnx-runtime`, then
+`install_version` of the newest stable `+cpu` release with
+`get_installation_progress` polled to completion (this downloads from
+`microsoft/onnxruntime`, so it needs network access and is CI only, never a unit
+test). It pins a managed CPU `onnx_serve` profile to that version through
+`runtime_version`, launches it, and imports, serves, embeds and unloads the
+fixture. The version is resolved at run time; the receipt records which one was
+verified. Windows retains the actual OS directory needed for system DLLs and uses
+a new process group plus graceful CTRL_BREAK shutdown; Unix uses SIGINT. After
+finite embedding inference, every ONNX Runtime library mapped by the RPC process
+or its descendants (the out-of-process ONNX host included) must lie in the
+installed version directory: Linux `/proc/PID/maps` binds path, device and inode;
+Windows PSAPI and macOS lsof observe native module paths only. Missing installs,
+installation failures, ambient mappings, model errors and forced shutdown fail
+acceptance with their reason. This is not a filesystem sandbox, protection
+against concurrent hostile same-user mutation, or a complete audit of every
+loaded system dependency. ONNX Runtime's own platform prerequisites (for example
+a Microsoft Visual C++ runtime on Windows) are the installed release's, not
+redistributed by Pumas.
 
-The focused Python/Node tests use synthetic native bytes, controlled subprocesses
-and controlled mapping text. Successful staging of real official Linux/Windows/
-macOS archives establishes byte identity only. A Linux native loader/API probe
-also passed against the pinned library in this environment. A separate C harness
-executed a real CPU session using a synthetic two-element Identity graph, observed
-the pinned mapped runtime, released its native handles and exited successfully.
-That bounded untrained graph is not Pumas/Nomic or pretrained-model evidence.
-None of these local checks executes a release build, a pretrained ONNX model,
-native Windows/macOS startup, signing/notarization, a final SBOM or security
-qualification. Those remain gates before the maintainer's publication decision.
+The focused Python/Node tests use fake RPC results, controlled subprocesses and
+controlled mapping text; they download nothing and load no ONNX Runtime. None of
+these local checks executes a release build, a runtime installation, a
+pretrained ONNX model, native Windows/macOS startup, signing/notarization, a
+final SBOM or security qualification. Those remain gates before the maintainer's
+publication decision.
 
 ## Complete candidate metadata
 
@@ -266,15 +250,15 @@ python3 scripts/release/write-release-metadata.py release-candidate --build-id l
 CI invokes the same generator with its actual run/attempt build identity. It
 requires unchanged tracked source and current default/S3 attribution inputs. It
 writes sixteen SPDX 2.3 package inventories, aggregate unsigned in-toto provenance,
-project license, combined default/S3/native notices, and SHA-256 checksums over
+project license, combined default/S3 notices, and SHA-256 checksums over
 all other final files. SPDX `filesAnalyzed=false` is intentional: these describe
-exact artifact bytes and referenced attribution/runtime inputs, not exhaustive
-extracted-file or native transitive component analysis. Native package inspection,
-current audits and maintainer license/notice acceptance remain separate gates.
-The aggregate disclosure includes every pinned native notice representation,
-including Windows CRLF bytes. Embedded notice identity continues to use each
-producer's accepted default/S3 collection and exact target runtime notice bytes;
-inspect those actual package contents separately.
+exact artifact bytes and referenced attribution inputs, not exhaustive
+extracted-file or native transitive component analysis. No artifact bundles an
+inference runtime, so no SBOM lists one; the collected notices describe ONNX
+Runtime and uv as downloaded by Pumas. Native package inspection, current audits
+and maintainer license/notice acceptance remain separate gates. Embedded notice
+identity uses each producer's accepted default/S3 collection; inspect the actual
+package contents separately.
 Reassemble a fresh set after changing artifacts or metadata; do not retain stale
 SPDX/provenance or treat installer-only checksums as final publication coverage.
 
@@ -318,12 +302,12 @@ flows.
 
 Before tagging or publishing, satisfy the remaining artifact-plan obligations:
 
-- Desktop packages do not bundle ONNX Runtime. `stage-rpc.py` stages only the
-  RPC executable, and the package smoke checks refuse a packaged ONNX Runtime
-  library. Users download a compatible ONNX Runtime from the ONNX Runtime
-  versions in the desktop. Prove real ONNX execution with a downloaded version
-  before claiming inference; an SDK-free build/health check does not qualify it.
-  Headless inference archives still package the pinned runtime (see below).
+- No package bundles a runtime. `stage-rpc.py` stages only the RPC executable,
+  the package smoke checks refuse a packaged ONNX Runtime library, and headless
+  archive admission refuses any member beyond the RPC and its metadata. Users
+  install ONNX Runtime, llama.cpp and Torch through the Pumas version manager.
+  Prove real ONNX execution with an installed version before claiming
+  inference; an SDK-free build/health check does not qualify it.
 - Extract each exact installer and verify renderer, RPC, native dependencies,
   version identity, and installation/startup on its target platform.
 - Exercise the required desktop, launcher-root recovery, and termination flows

@@ -87,15 +87,17 @@ test('manual source guard accepts only its exact Git commit', () => {
   }
 });
 
-test('full desktop packages stage only the backend; ONNX Runtime is downloaded at runtime', () => {
+test('no package bundles a runtime; Pumas installs ONNX Runtime at runtime', () => {
   for (const name of ['build-rust', 'windows-release']) {
-    const block = job(name);
-    assert.doesNotMatch(block, /onnx_runtime_stage\.py|onnx_runtime_probe\.py|--runtime-dir/);
-    assert.match(block, /python scripts\/release\/stage-rpc\.py\n/);
+    assert.match(job(name), /python scripts\/release\/stage-rpc\.py\n/);
   }
+  // Headless archives package no runtime either: nothing stages, probes or
+  // pins an ONNX Runtime library, anywhere in the workflow.
+  assert.doesNotMatch(workflow, /onnx_runtime_stage\.py|onnx_runtime_probe\.py|onnx-runtime-pins|--runtime-dir|native-loader\.json/);
   const inference = job('headless-inference');
   assert.match(inference, /binary: pumas-rpc.exe/);
-  assert.match(inference, /name: Verify packaged native untrained model lifecycle/);
+  assert.match(inference, /headless_inference_ci\.py --target \$\{\{ matrix\.target \}\} --output-dir/);
+  assert.match(inference, /name: Verify untrained model lifecycle on ONNX Runtime installed by the packaged Pumas\n        timeout-minutes: 20/);
   assert.match(inference, /verify-packaged-onnx.py .*matrix.binary/);
   assert.match(job('torch-quality'), /python -m unittest -v test_inference_release test_release_metadata/);
 });
@@ -123,11 +125,9 @@ test('review inference candidate is bounded, source-pinned and never publishes a
   assert.match(review, /CARGO_BUILD_JOBS: '1'/);
   assert.match(review, /ORT_SKIP_DOWNLOAD: '1'/);
   assert.match(review, /cargo fetch --locked --manifest-path rust\/Cargo\.toml/);
-  assert.match(review, /onnx_runtime_stage\.py --target linux-x86_64 --download/);
-  assert.match(review, /onnx_runtime_probe\.py --target linux-x86_64/);
-  assert.match(review, /headless_inference_ci\.py --target linux-x86_64/);
+  assert.match(review, /headless_inference_ci\.py --target linux-x86_64 --output-dir/);
   assert.match(review, /check-artifacts\.mjs .* headless-inference-linux/);
-  assert.match(review, /name: Verify extracted Pumas with an untrained synthetic ONNX graph\n        timeout-minutes: 3/);
+  assert.match(review, /name: Verify extracted Pumas installs ONNX Runtime and runs an untrained synthetic ONNX graph\n        timeout-minutes: 20/);
   assert.match(review, /verify_synthetic_packaged_onnx\.py --candidate-dir .* --expected-source "\$EXPECTED_SOURCE_SHA"/);
   assert.ok(review.indexOf('verify_synthetic_packaged_onnx.py') < review.indexOf('uses: actions/upload-artifact@'));
   assert.match(review, /name: review-inference-linux-x86_64/);

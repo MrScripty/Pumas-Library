@@ -2,13 +2,17 @@
 """Verify a native packaged RPC with a supplied Nomic-layout ONNX fixture.
 
 Usage: verify-packaged-onnx.py /path/to/packaged/pumas-rpc /path/to/nomic-model
-The fixture is copied into an isolated library and is never modified.
+
+The package bundles no runtime. Through the RPC's own JSON-RPC API this installs
+the newest stable `+cpu` ONNX Runtime with Pumas's version manager (a network
+download), pins a managed CPU profile to it, then imports, serves, embeds and
+unloads the fixture. The fixture is copied into an isolated library and is never
+modified. CI only: never run from local unit tests.
 """
 
 import json
-import math
-import re
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,167 +21,118 @@ import time
 import urllib.request
 from pathlib import Path
 
-from packaged_onnx_support import child_environment, loaded_runtime, stop_process, verify_runtime
-from headless_inference import require, sha256
+from headless_inference import sha256
+import packaged_onnx_support as support
 
-binary = Path(sys.argv[1]).resolve()
-fixture = Path(sys.argv[2]).resolve()
-verify_runtime(binary.parent)
-http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
-    root = Path(tmp)
-    for name in ("home", "tmp", "config", "data", "cache", "state", "run"):
-        (root / name).mkdir(mode=0o700)
+FIXTURE_FILES = [
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+]
+
+
+def copy_fixture(fixture, root):
     model = root / "shared-resources/models/embedding/fixture/nomic"
     model.mkdir(parents=True)
-    for name in [
-        "config.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "special_tokens_map.json",
-    ]:
+    for name in FIXTURE_FILES:
         if (fixture / name).exists():
             shutil.copyfile(fixture / name, model / name)
     shutil.copyfile(fixture / "onnx/model_fp16.onnx", model / "model.onnx")
-    fixture_hashes = {path.name: sha256(path) for path in model.iterdir() if path.is_file()}
-    with (root / "rpc.log").open("w+") as log:
-        p = subprocess.Popen(
-            [str(binary), "--launcher-root", str(root), "--port", "0"],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            cwd=root,
-            env=child_environment(root),
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
-        )
-        try:
-            for _ in range(450):
-                text = (root / "rpc.log").read_text()
-                m = re.search(r"RPC_PORT=(\d+)", text)
-                if m:
-                    break
-                if p.poll() is not None:
-                    raise RuntimeError(text)
-                time.sleep(0.1)
-            else:
-                raise RuntimeError(text)
-            base = "http://127.0.0.1:" + m[1]
+    return model
 
-            def post(path, data):
-                with http.open(
-                    urllib.request.Request(
-                        base + path,
-                        data=json.dumps(data).encode(),
-                        headers={"Content-Type": "application/json"},
-                    ),
-                    timeout=120,
-                ) as r:
-                    return json.load(r)
 
-            def rpc(method, params={}):
-                # Startup reconciliation can briefly hold the library; Pumas
-                # reports that as a retryable conflict ("try again").
-                deadline = time.monotonic() + 120
-                while True:
-                    x = post(
-                        "/rpc", {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-                    )
-                    error = x.get("error")
-                    if error is None:
-                        return x["result"]
-                    conflict = (error.get("data") or {}).get("class") == "conflict"
-                    if not conflict or time.monotonic() >= deadline:
-                        raise RuntimeError((method, x))
-                    time.sleep(0.5)
+def wait_for_port(process, log_path):
+    for _ in range(450):
+        text = log_path.read_text()
+        match = re.search(r"RPC_PORT=(\d+)", text)
+        if match:
+            return int(match[1])
+        if process.poll() is not None:
+            raise RuntimeError(f"packaged RPC exited before announcing its port:\n{text}")
+        time.sleep(0.1)
+    raise RuntimeError(f"packaged RPC did not announce its port:\n{log_path.read_text()}")
 
-            result = rpc(
-                "import_model_in_place",
-                {
-                    "model_dir": str(model),
-                    "official_name": "Nomic fixture",
-                    "family": "nomic_bert",
-                    "model_type": "embedding",
-                },
+
+def clients(base):
+    http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def post(path, data):
+        with http.open(
+            urllib.request.Request(
+                base + path,
+                data=json.dumps(data).encode(),
+                headers={"Content-Type": "application/json"},
+            ),
+            timeout=120,
+        ) as response:
+            return json.load(response)
+
+    def rpc(method, params=None):
+        # Startup reconciliation can briefly hold the library; Pumas reports
+        # that as a retryable conflict ("try again").
+        deadline = time.monotonic() + 120
+        while True:
+            reply = post(
+                "/rpc", {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
             )
-            print("import", json.dumps(result)[:1000], flush=True)
-            require(result.get("success") is True, f"Import failed: {result}")
-            model_id = result["model_id"]
-            profile = "onnx-verification"
-            print(
-                "profile",
-                rpc(
-                    "upsert_runtime_profile",
-                    {
-                        "profile": {
-                            "profile_id": profile,
-                            "provider": "onnx_runtime",
-                            "provider_mode": "onnx_serve",
-                            "management_mode": "managed",
-                            "name": "Installer verification",
+            error = reply.get("error")
+            if error is None:
+                return reply["result"]
+            conflict = (error.get("data") or {}).get("class") == "conflict"
+            if not conflict or time.monotonic() >= deadline:
+                raise RuntimeError((method, reply))
+            time.sleep(0.5)
+
+    return rpc, post
+
+
+def main(binary, fixture):
+    binary, fixture = Path(binary).resolve(), Path(fixture).resolve()
+    support.require_no_bundled_runtime(binary.parent)
+    with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
+        root = Path(tmp)
+        for name in ("home", "tmp", "config", "data", "cache", "state", "run"):
+            (root / name).mkdir(mode=0o700)
+        model = copy_fixture(fixture, root)
+        fixture_hashes = {path.name: sha256(path) for path in model.iterdir() if path.is_file()}
+        log_path = root / "rpc.log"
+        with log_path.open("w+") as log:
+            process = subprocess.Popen(
+                [str(binary), "--launcher-root", str(root), "--port", "0"],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                cwd=root,
+                env=support.child_environment(root),
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+            )
+            try:
+                port = wait_for_port(process, log_path)
+                rpc, post = clients(f"http://127.0.0.1:{port}")
+                result = support.exercise_installed_runtime(
+                    rpc,
+                    post,
+                    model,
+                    lambda tag: support.installed_runtime(process.pid, root, tag),
+                )
+                print(
+                    json.dumps(
+                        {
+                            "binary": str(binary),
+                            "binary_sha256": sha256(binary),
+                            "fixture_sha256": fixture_hashes,
+                            "fixture_acceptance": "caller-owned; lifecycle does not establish model provenance",
+                            "bundled_runtimes": [],
+                            **result,
                         }
-                    },
-                ),
-                flush=True,
-            )
-            print("launch", rpc("launch_runtime_profile", {"profile_id": profile}), flush=True)
-            loaded = rpc(
-                "serve_model",
-                {
-                    "request": {
-                        "model_id": model_id,
-                        "config": {
-                            "provider": "onnx_runtime",
-                            "profile_id": profile,
-                            "device_mode": "auto",
-                            "keep_loaded": True,
-                            "model_alias": "verification-nomic",
-                        },
-                    }
-                },
-            )
-            require(loaded.get("loaded") is True, f"Load failed: {loaded}")
-            embedding = post(
-                "/v1/embeddings",
-                {
-                    "model": "verification-nomic",
-                    "input": ["search_query: hello world"],
-                    "dimensions": 256,
-                },
-            )
-            vector = embedding["data"][0]["embedding"]
-            require(
-                len(vector) == 256
-                and all(type(x) in (int, float) and math.isfinite(x) for x in vector),
-                "Embedding must contain 256 finite numeric values",
-            )
-            runtime_evidence = loaded_runtime(p.pid, binary.parent)
-            unloaded = rpc(
-                "unserve_model",
-                {
-                    "request": {
-                        "model_id": model_id,
-                        "provider": "onnx_runtime",
-                        "profile_id": profile,
-                        "model_alias": "verification-nomic",
-                    }
-                },
-            )
-            require(unloaded.get("unloaded") is True, f"Unload failed: {unloaded}")
-            print(
-                json.dumps(
-                    {
-                        "binary": str(binary),
-                        "binary_sha256": sha256(binary),
-                        "fixture_sha256": fixture_hashes,
-                        "fixture_acceptance": "caller-owned; lifecycle does not establish model provenance",
-                        "runtime": runtime_evidence,
-                        "import": "passed",
-                        "load": "passed",
-                        "embedding_dimensions": len(vector),
-                        "finite": True,
-                        "unload": "passed",
-                    }
-                ),
-                flush=True,
-            )
-        finally:
-            stop_process(p)
+                    ),
+                    flush=True,
+                )
+            finally:
+                support.stop_process(process)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        raise SystemExit(__doc__)
+    main(sys.argv[1], sys.argv[2])

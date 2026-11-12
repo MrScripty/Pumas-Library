@@ -673,6 +673,12 @@ const electronAPI = {
     validatedApiCall('get_library_model_metadata', decodeLibraryModelMetadataOutcome, { model_id: modelId }),
   refetch_model_metadata_from_hf: (modelId: string) =>
     apiCall('refetch_model_metadata_from_hf', { model_id: modelId }),
+  get_model_documents: (modelId: string) =>
+    apiCall('get_model_documents', { model_id: modelId }),
+  backfill_model_companion_files: (modelId: string, dryRun: boolean) =>
+    apiCall('backfill_model_companion_files', { model_id: modelId, dry_run: dryRun }),
+  backfill_library_companion_files: (dryRun: boolean) =>
+    apiCall('backfill_library_companion_files', { dry_run: dryRun }),
   resolve_model_package_facts: (modelId: string) =>
     apiCall('resolve_model_package_facts', { model_id: modelId }),
   list_model_library_updates_since: (cursor?: string | null, limit?: number) =>

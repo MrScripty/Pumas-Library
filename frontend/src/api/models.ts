@@ -7,6 +7,8 @@
 import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
 import type {
+  CompanionBackfillReport,
+  ModelDocumentsResponse,
   LibraryModelMetadataResponse,
   InferenceParamSchema,
   InferenceSettingsResponse,
@@ -170,6 +172,24 @@ class ModelsAPI {
   }> {
     const api = this.getAPI();
     return await api.refetch_model_metadata_from_hf(modelId);
+  }
+
+  /** The model card, license documents and code stored with a model. */
+  async getModelDocuments(modelId: string): Promise<ModelDocumentsResponse> {
+    return await this.getAPI().get_model_documents(modelId);
+  }
+
+  /** Fetch (or, with `dryRun`, plan) the companion files a model is missing. */
+  async backfillModelCompanionFiles(
+    modelId: string,
+    dryRun: boolean
+  ): Promise<CompanionBackfillReport> {
+    return await this.getAPI().backfill_model_companion_files(modelId, dryRun);
+  }
+
+  /** Fetch (or, with `dryRun`, plan) every library model's missing companion files. */
+  async backfillLibraryCompanionFiles(dryRun: boolean): Promise<CompanionBackfillReport> {
+    return await this.getAPI().backfill_library_companion_files(dryRun);
   }
 
   /**

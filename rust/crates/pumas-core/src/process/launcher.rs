@@ -60,10 +60,17 @@ impl BinaryLaunchConfig {
 
     /// Create a new binary launch config for the Torch inference server.
     ///
-    /// The Torch server is a Python-based FastAPI app launched via its venv Python.
-    pub fn torch(tag: impl Into<String>, version_dir: impl AsRef<Path>) -> Self {
+    /// The Torch server is a Python-based FastAPI app launched via its venv
+    /// Python. The runtime in `version_dir` supplies the interpreter and
+    /// packages; `entry` is the sidecar shipped with this Pumas (see
+    /// [`crate::runtime_profiles::torch_sidecar_entry`]), shared by every
+    /// installed runtime.
+    pub fn torch(
+        tag: impl Into<String>,
+        version_dir: impl AsRef<Path>,
+        entry: impl AsRef<Path>,
+    ) -> Self {
         let version_dir = version_dir.as_ref().to_path_buf();
-        // The torch server uses a Python venv with serve.py as the entry point.
         // The "binary" here is the venv's Python interpreter.
         let binary_path = version_dir.join("venv").join("bin").join("python");
         let pid_file = version_dir.join("torch.pid");
@@ -73,8 +80,12 @@ impl BinaryLaunchConfig {
             version_dir: version_dir.clone(),
             binary_path,
             command: None,
-            // Imports must preserve the installed package byte manifest.
-            extra_args: vec!["-B".to_string(), "serve.py".to_string()],
+            // Imports must preserve the installed package byte manifest and
+            // write nothing next to the shared sidecar.
+            extra_args: vec![
+                "-B".to_string(),
+                entry.as_ref().to_string_lossy().into_owned(),
+            ],
             env_vars: HashMap::new(),
             pid_file,
             log_file: None,

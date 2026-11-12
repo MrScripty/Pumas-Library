@@ -1055,9 +1055,10 @@ impl VersionState {
             }
             AppId::OnnxRuntime => vec![version_path
                 .join(pumas_library::onnx_runtime_distribution::library_relative_path())],
+            // The sidecar comes from the running Pumas; a runtime is its
+            // environment and records. Copies left by earlier installs are unused.
             AppId::Torch => vec![
                 version_path.join("runtime.json"),
-                version_path.join("serve.py"),
                 pumas_library::platform::paths::venv_python(version_path),
                 version_path.join("requirements.txt"),
             ],

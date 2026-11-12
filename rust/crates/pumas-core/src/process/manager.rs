@@ -351,8 +351,29 @@ impl ProcessManager {
             dir.join(format!("torch_{}_{}.log", tag, timestamp))
         });
 
+        // The runtime supplies the interpreter; the sidecar is this Pumas's.
+        // A runtime whose packages cannot run it is refused with the reasons.
+        let entry = match crate::runtime_profiles::prepare_torch_sidecar_blocking(
+            &self.root_dir,
+            version_dir,
+        ) {
+            Ok(entry) => entry,
+            Err(error) => {
+                let message = error.to_string();
+                error!("{}", message);
+                *self.last_launch_error.lock().unwrap() = Some(message.clone());
+                return LaunchResult {
+                    success: false,
+                    process: None,
+                    log_path: None,
+                    error: Some(message),
+                    ready: false,
+                };
+            }
+        };
+
         // Build launch config
-        let mut config = BinaryLaunchConfig::torch(tag, version_dir);
+        let mut config = BinaryLaunchConfig::torch(tag, version_dir, entry);
         if let Some(ref log_path) = log_file {
             config = config.with_log_file(log_path);
         }
@@ -1036,7 +1057,7 @@ mod tests {
         let mut config = if label == "ollama" {
             BinaryLaunchConfig::ollama("owned-fixture", &version_dir)
         } else {
-            BinaryLaunchConfig::torch("owned-fixture", &version_dir)
+            BinaryLaunchConfig::torch("owned-fixture", &version_dir, "serve.py")
         };
         config.binary_path = binary;
         config.command = None;

@@ -16,6 +16,8 @@ pub(crate) mod router_observer;
 pub use router_model_operation::OwnedRouterModelOperation;
 #[path = "runtime_profiles/route_config.rs"]
 mod route_config;
+#[path = "runtime_profiles/torch_sidecar.rs"]
+pub mod torch_sidecar;
 pub(crate) use process_owner::RuntimeProfileProcessOwner;
 pub use process_owner::{OwnedRuntimeProfileLaunchReceipt, OwnedRuntimeProfileObservation};
 
@@ -54,6 +56,10 @@ pub use launch_strategy::{
     RuntimeProfileLaunchStrategy,
 };
 use route_config::{load_or_initialize_config, validate_model_route};
+pub use torch_sidecar::{
+    materialize_torch_sidecar_async, prepare_torch_sidecar, prepare_torch_sidecar_blocking,
+    torch_sidecar_dir, torch_sidecar_entry,
+};
 
 const RUNTIME_PROFILE_EVENT_RETAIN_LIMIT: usize = 256;
 const RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY: usize = 64;
@@ -546,6 +552,11 @@ impl Drop for RuntimeProfileOperationGuard {
 }
 
 impl RuntimeProfileService {
+    /// The launcher root this service derives runtime paths from.
+    pub(crate) fn launcher_root(&self) -> &Path {
+        &self.launcher_root
+    }
+
     pub fn with_provider_registry_and_adapters(
         launcher_root: impl AsRef<Path>,
         provider_registry: ProviderRegistry,

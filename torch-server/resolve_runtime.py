@@ -1,4 +1,4 @@
-"""Resolve or stage-install an official Torch wheel and optional image adapter.
+"""Resolve or stage-install an official Torch wheel with every general modality.
 
 Run this with the interpreter that will own the environment. Installation has
 two phases. Without `--install`, pip resolves once (a dry run) and the resolver
@@ -6,6 +6,13 @@ writes `requirements.txt`, a per-install hash lock, with `resolution.json` and
 pip's report. The caller validates that lock, then runs `--install`, which
 installs exactly the lock with `--require-hashes --no-deps` and records every
 staged file, checked against its wheel RECORD, in `installed-files.json`.
+
+A caller that downloads wheels itself (Pumas does, through its resumable,
+SHA-256 verified acquisition) first runs `--select-torch-wheel` to learn the
+official Torch wheel, passes the verified local copy to the resolution with
+`--torch-local-wheel`, and passes the acquired wheel directories to `--install`
+with `--wheel-dir`. The lock keeps the official URLs as provenance; pip reads
+the local files and downloads nothing for them.
 """
 
 import argparse
@@ -32,7 +39,7 @@ from pip._vendor.packaging.utils import (
 )
 from pip._vendor.packaging.version import Version, InvalidVersion
 from urllib.parse import unquote, urljoin, urlparse, urlunparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener, url2pathname
 
 CORE = ("fastapi", "uvicorn", "psutil", "pillow", "safetensors")
 DOWNLOAD_PROGRESS_INTERVAL_SECONDS = 0.25
@@ -336,49 +343,84 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
     return {"files": sorted(files, key=lambda item: item["path"])}
 
 
-# Image adapters name their packages without versions: pip resolves current
-# releases at install time into the per-install hash lock, which is then
-# installed with --require-hashes, and the install probe checks the adapter
-# imports. Verified combinations (runtime/verified-runtimes.json) are evidence,
-# not install pins, unless the user opts into a record's versions; the
-# installer then passes them here as --constraints.
-IMAGE = (
-    "torchvision",
-    "diffusers",
+# Every Torch install carries the general modalities: text, image and audio.
+# Packages are named without versions: pip resolves current releases at
+# install time into the per-install hash lock, which is then installed with
+# --require-hashes, and the install probe reports what is importable. Image
+# and audio models use the text stack too. Verified combinations
+# (runtime/verified-runtimes.json) are evidence, not install pins, unless the
+# user opts into a record's versions; the installer then passes them here as
+# --constraints.
+TEXT = (
     "transformers",
-    "accelerate",
-    "peft",
-    "sentencepiece",
-    "protobuf",
-)
-# Transformers' native Cohere ASR starts at 5.4.0. Other packages resolve
-# current releases like every adapter; these are floors, never pins.
-COHERE_ASR = (
-    "transformers>=5.4.0",
-    "accelerate>=1.1.0",
-    "huggingface-hub",
     "tokenizers",
-    "librosa",
-    "soxr",
-    "soundfile",
+    "huggingface-hub",
+    "jinja2",
     "sentencepiece",
     "protobuf",
-    "numpy",
-    "scipy",
 )
-COHERE_ASR_PACKAGES = {re.match(r"[a-z0-9-]+", item).group() for item in COHERE_ASR}
+IMAGE = ("torchvision", "diffusers", "accelerate", "peft")
+# Accelerate is listed with audio too: Cohere ASR needs it even when the image
+# packages could not install.
+AUDIO = ("accelerate", "librosa", "soundfile", "soxr", "numpy", "scipy")
+MODALITY_PACKAGES = {
+    "text": TEXT,
+    "image": (*TEXT, *IMAGE),
+    "audio": (*TEXT, *AUDIO),
+}
+MODALITIES = tuple(MODALITY_PACKAGES)
+# Model-family floors, never pins. Cohere ASR's native Transformers support
+# starts at 5.4.0 and needs Torch >=2.4. A floor is skipped where the selected
+# Torch or a verified-version constraint excludes it; the probe then reports
+# that family unavailable with its reason instead of failing the install.
+FAMILY_FLOORS = (("transformers", "5.4.0"), ("accelerate", "1.1.0"))
+FAMILY_FLOOR_TORCH = "2.4.0"
+# The only optional extra: its wheel is qualified to one Torch/Python pair.
+EXTRAS = ("nunchaku",)
 
 
-def validate_cohere_asr_versions(version: str, versions: dict[str, str]) -> None:
-    if Version(version) < Version("2.4.0"):
-        raise ValueError("cohere-asr requires Torch >=2.4.0")
-    missing = COHERE_ASR_PACKAGES - versions.keys()
-    if missing:
-        raise ValueError(f"Resolution omitted requested packages: {', '.join(sorted(missing))}")
-    if Version(versions["transformers"]).release < (5, 4, 0):
-        raise ValueError("cohere-asr requires Transformers >=5.4.0")
-    if Version(versions["accelerate"]) < Version("1.1.0"):
-        raise ValueError("cohere-asr requires Accelerate >=1.1.0")
+def constraint_pins(constraints: Path | None) -> dict[str, str]:
+    """Exact `name==version` pins from a verified-versions constraints file."""
+    if constraints is None:
+        return {}
+    pins = {}
+    for line in constraints.read_text(encoding="utf-8").splitlines():
+        match = re.fullmatch(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([^\s;#]+)\s*", line)
+        if match:
+            pins[canonicalize_name(match.group(1))] = match.group(2)
+    return pins
+
+
+def applicable_floors(version: str, pins: dict[str, str]) -> dict[str, str]:
+    """Family floors the selected Torch and any verified pins allow."""
+    if Version(version) < Version(FAMILY_FLOOR_TORCH):
+        return {}
+    return {
+        name: floor
+        for name, floor in FAMILY_FLOORS
+        if name not in pins or Version(pins[name]) >= Version(floor)
+    }
+
+
+def modality_requirements(
+    modalities: tuple[str, ...] | list[str], floors: dict[str, str]
+) -> list[str]:
+    """Requirement strings for the resolved modalities, each package once."""
+    names = []
+    for modality in modalities:
+        for name in MODALITY_PACKAGES[modality]:
+            if name not in names:
+                names.append(name)
+    return [f"{name}>={floors[name]}" if name in floors else name for name in names]
+
+
+def extras_from_arguments(adapter: str, extras: list[str]) -> tuple[str, ...]:
+    """Requested extras. The former `--adapter nunchaku` still selects the
+    Nunchaku extra; every other former adapter is part of every install."""
+    selected = set(extras)
+    if adapter == "nunchaku":
+        selected.add("nunchaku")
+    return tuple(name for name in EXTRAS if name in selected)
 
 
 NUNCHAKU_URL = (
@@ -1000,7 +1042,7 @@ def official_torch_url(url: str, build: str) -> bool:
 
 
 def trusted_wheel_url(
-    url: str, build: str, name: str, adapter: str, target: str, version: str
+    url: str, build: str, name: str, extras: tuple[str, ...], target: str, version: str
 ) -> bool:
     parsed = urlparse(url)
     if (
@@ -1041,19 +1083,15 @@ def trusted_wheel_url(
         return True
     if parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"}:
         return parsed.path.startswith("/whl/")
-    return adapter == "nunchaku" and name == "nunchaku" and url == NUNCHAKU_URL
+    return "nunchaku" in extras and name == "nunchaku" and url == NUNCHAKU_URL
 
 
-def adapter_requirements(adapter: str, version: str, build: str) -> tuple[str, ...]:
-    if adapter == "none":
-        return ()
-    if adapter == "cohere-asr":
-        if Version(version) < Version("2.4.0"):
-            raise ValueError("cohere-asr requires selected Torch >=2.4.0")
-        return COHERE_ASR
-    if adapter == "flux2":
-        return IMAGE
-    if adapter == "nunchaku":
+def extra_requirements(extras: tuple[str, ...], version: str, build: str) -> tuple[str, ...]:
+    """Requirements for the selected extras, refused outside their qualification."""
+    requirements = []
+    for extra in extras:
+        if extra != "nunchaku":
+            raise ValueError(f"Unknown extra: {extra}")
         if not (
             version == "2.9.1"
             and build == "cu130"
@@ -1066,13 +1104,54 @@ def adapter_requirements(adapter: str, version: str, build: str) -> tuple[str, .
                 "The qualified Nunchaku wheel requires Torch 2.9.1+cu130, "
                 "CPython 3.12, and Linux x86_64"
             )
-        return (*IMAGE, f"nunchaku @ {NUNCHAKU_URL}#sha256={NUNCHAKU_SHA256}")
-    raise ValueError(f"Unknown adapter: {adapter}")
+        requirements.append(f"nunchaku @ {NUNCHAKU_URL}#sha256={NUNCHAKU_SHA256}")
+    return tuple(requirements)
+
+
+def wheel_filename(url: str) -> str:
+    """The wheel file name a URL names, with percent-escapes decoded."""
+    return unquote(urlparse(url).path.rsplit("/", 1)[-1])
+
+
+def local_file_url_path(url: str) -> Path | None:
+    """The local path a `file:` URL names, or None for any other URL."""
+    parsed = urlparse(url)
+    if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+        return None
+    return Path(url2pathname(parsed.path))
+
+
+def same_local_file(url: str, path: Path) -> bool:
+    """Whether a pip report URL names exactly this existing local file."""
+    reported = local_file_url_path(url)
+    if reported is None:
+        return False
+    try:
+        return reported.resolve(strict=True) == path.resolve(strict=True)
+    except OSError:
+        return False
 
 
 def requirements_from_report(
-    report: dict, version: str, build: str, adapter: str = "none"
+    report: dict,
+    version: str,
+    build: str,
+    modalities: tuple[str, ...] = MODALITIES,
+    extras: tuple[str, ...] = (),
+    local_torch: tuple[Path, str] | None = None,
+    omitted: dict[str, str] | None = None,
 ) -> tuple[list[str], dict]:
+    """Build the hash lock from pip's report.
+
+    `modalities` are the general modalities this resolution carries; any
+    general modality left out must appear in `omitted` with its reason.
+    `local_torch` is `(local wheel, official URL)` when the caller resolved
+    against its own verified copy of the official Torch wheel: pip reports the
+    local file, and the lock records the official URL it was acquired from.
+    """
+    omitted = dict(omitted or {})
+    if set(modalities) | set(omitted) != set(MODALITIES) or set(modalities) & set(omitted):
+        raise ValueError("Every general modality must be resolved or omitted with a reason")
     entries = report.get("install", [])
     if not isinstance(entries, list) or not entries:
         raise ValueError("The pip report contains no resolved artifacts")
@@ -1101,10 +1180,14 @@ def requirements_from_report(
         seen.add(name)
         info = item["download_info"]
         url = info["url"]
+        if local_torch is not None and name == "torch":
+            if not same_local_file(url, local_torch[0]):
+                raise ValueError("Resolved Torch artifact is not the acquired local wheel")
+            url = local_torch[1]
         digest = info.get("archive_info", {}).get("hashes", {}).get("sha256")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
             raise ValueError(f"No SHA-256 provenance for {name}")
-        if not trusted_wheel_url(url, build, name, adapter, target, item["metadata"]["version"]):
+        if not trusted_wheel_url(url, build, name, extras, target, item["metadata"]["version"]):
             raise ValueError(f"Untrusted or non-binary artifact for {name}: {url}")
         if name == "torchvision":
             vision_version = item["metadata"]["version"]
@@ -1116,7 +1199,7 @@ def requirements_from_report(
             )
             if not (local_build or plain_mac_cpu):
                 raise ValueError("Torchvision build differs from the selected Torch build")
-        if name == "nunchaku" and (adapter != "nunchaku" or digest.lower() != NUNCHAKU_SHA256):
+        if name == "nunchaku" and ("nunchaku" not in extras or digest.lower() != NUNCHAKU_SHA256):
             raise ValueError("Nunchaku artifact differs from the qualified wheel")
         artifact = {
             "name": name,
@@ -1126,23 +1209,9 @@ def requirements_from_report(
         }
         lines.append(lock_line(artifact))
         artifacts.append(artifact)
-    required = {"torch", *CORE}
-    if adapter in ("flux2", "nunchaku"):
-        required.update(
-            {
-                "torchvision",
-                "diffusers",
-                "transformers",
-                "accelerate",
-                "peft",
-                "sentencepiece",
-                "protobuf",
-            }
-        )
-    if adapter == "cohere-asr":
-        validate_cohere_asr_versions(version, {item["name"]: item["version"] for item in artifacts})
-    if adapter == "nunchaku":
-        required.add("nunchaku")
+    required = {"torch", *CORE, *extras}
+    for modality in modalities:
+        required.update(MODALITY_PACKAGES[modality])
     missing = required - seen
     if missing:
         raise ValueError(f"Resolution omitted requested packages: {', '.join(sorted(missing))}")
@@ -1150,7 +1219,9 @@ def requirements_from_report(
         "release": version,
         "torch": resolved_torch,
         "build": build,
-        "adapter": adapter,
+        "modalities": [modality for modality in MODALITIES if modality in modalities],
+        "omitted_modalities": dict(sorted(omitted.items())),
+        "extras": list(extras),
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         "interpreter": sys.executable,
         "implementation": sys.implementation.name,
@@ -1198,14 +1269,14 @@ def select_official_torch_wheel(
     return wheel
 
 
-def read_install_lock(output: Path, version: str, build: str, adapter: str) -> dict:
+def read_install_lock(output: Path, version: str, build: str, extras: tuple[str, ...]) -> dict:
     """Read the phase-1 resolution and check that its hash lock is exactly the
     resolution's artifacts for this selection, one hash-bearing line each."""
     resolution = json.loads((output / "resolution.json").read_text(encoding="utf-8"))
     if (
         resolution["release"] != version
         or resolution["build"] != build
-        or resolution["adapter"] != adapter
+        or tuple(resolution["extras"]) != extras
     ):
         raise ValueError("The hash lock was resolved for another selection")
     artifacts = resolution["artifacts"]
@@ -1217,8 +1288,26 @@ def read_install_lock(output: Path, version: str, build: str, adapter: str) -> d
     return resolution
 
 
-def installed_artifacts_match_lock(report: dict, artifacts: list[dict]) -> None:
-    """The phase-2 pip report must install exactly the locked wheels."""
+def _installed_source(url: str) -> str:
+    """Compare a local wheel by its resolved file, any other source by URL."""
+    path = local_file_url_path(url)
+    if path is None:
+        return url
+    try:
+        return f"local:{path.resolve(strict=True)}"
+    except OSError:
+        return url
+
+
+def installed_artifacts_match_lock(
+    report: dict, artifacts: list[dict], local_files: dict[str, Path] | None = None
+) -> None:
+    """The phase-2 pip report must install exactly the locked wheels.
+
+    An artifact in `local_files` must have been installed from that acquired
+    local file; every other artifact from its locked URL.
+    """
+    local_files = local_files or {}
     entries = report.get("install")
     if not isinstance(entries, list):
         raise ValueError("The pip installation report contains no artifact list")
@@ -1226,7 +1315,7 @@ def installed_artifacts_match_lock(report: dict, artifacts: list[dict]) -> None:
         (
             canonicalize_name(item["metadata"]["name"]),
             item["metadata"]["version"],
-            item["download_info"]["url"],
+            _installed_source(item["download_info"]["url"]),
             item["download_info"]["archive_info"]["hashes"]["sha256"].lower(),
         )
         for item in entries
@@ -1235,7 +1324,9 @@ def installed_artifacts_match_lock(report: dict, artifacts: list[dict]) -> None:
         (
             canonicalize_name(artifact["name"]),
             artifact["version"],
-            artifact["url"],
+            f"local:{local_files[artifact['name']].resolve(strict=True)}"
+            if artifact["name"] in local_files
+            else artifact["url"],
             artifact["sha256"].lower(),
         )
         for artifact in artifacts
@@ -1244,11 +1335,29 @@ def installed_artifacts_match_lock(report: dict, artifacts: list[dict]) -> None:
         raise ValueError("Installed artifacts differ from the hash lock")
 
 
+def missing_requirement_names(stderr: str) -> list[str]:
+    """Distribution names pip reports it found no compatible wheel for."""
+    missing = MISSING_REQUIREMENT.findall(stderr.lower())
+    return [re.match(r"[a-z0-9][a-z0-9._-]*", requirement).group() for requirement in missing]
+
+
+def missing_requested_package(stderr: str, requested: set[str]) -> str | None:
+    """The first requested package pip reports it has no compatible wheel for."""
+    return next((name for name in missing_requirement_names(stderr) if name in requested), None)
+
+
+def requested_packages(modalities: tuple[str, ...], extras: tuple[str, ...]) -> set[str]:
+    requested = set(CORE) | set(extras)
+    for modality in modalities:
+        requested.update(MODALITY_PACKAGES[modality])
+    return requested
+
+
 def resolution_failure(
     stderr: str,
     version: str,
     build: str,
-    adapter: str = "none",
+    requested: set[str] | None = None,
     torch_requirement: str | None = None,
 ) -> tuple[int, str]:
     lowered = stderr.lower()
@@ -1269,25 +1378,19 @@ def resolution_failure(
             f"No official Torch {version}+{build} wheel matches this interpreter and platform. Choose another build or installed Python.",
         )
     if missing:
-        requested = set(CORE)
-        if adapter in ("flux2", "nunchaku"):
-            requested.update(requirement.partition("==")[0] for requirement in IMAGE)
-        if adapter == "cohere-asr":
-            requested.update(COHERE_ASR_PACKAGES)
-        if adapter == "nunchaku":
-            requested.add("nunchaku")
-        names = [re.match(r"[a-z0-9][a-z0-9._-]*", requirement).group() for requirement in missing]
-        named = next((name for name in names if name in requested), None)
+        named = missing_requested_package(
+            stderr, requested if requested is not None else requested_packages(MODALITIES, ())
+        )
         return (
             2,
-            f"No compatible binary wheel was found for requested package {named}. Choose another Python, build, or adapter."
+            f"No compatible binary wheel was found for requested package {named}. Choose another Python, build, or extra."
             if named
-            else "A required dependency has no compatible binary wheel. Choose another Python, build, or adapter.",
+            else "A required dependency has no compatible binary wheel. Choose another Python, build, or extra.",
         )
     if "resolutionimpossible" in lowered or "conflicting dependencies" in lowered:
         return (
             2,
-            "The selected package requirements conflict. Choose another Python, build, or adapter.",
+            "The selected package requirements conflict. Choose another Python, build, or extra.",
         )
     return (
         1,
@@ -1299,7 +1402,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
     parser.add_argument("--build")
+    # Accepted for older callers: every former adapter's packages are part of
+    # every install, and `nunchaku` selects that extra.
     parser.add_argument("--adapter", choices=ADAPTERS, default="none")
+    parser.add_argument("--extra", choices=EXTRAS, action="append", default=[])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--target", type=Path)
@@ -1313,7 +1419,14 @@ def main() -> None:
     parser.add_argument("--python-candidate", action="append")
     parser.add_argument("--torch-wheel")
     parser.add_argument("--torch-sha256")
+    parser.add_argument("--select-torch-wheel", action="store_true")
+    parser.add_argument("--torch-local-wheel", type=Path)
+    parser.add_argument("--wheel-dir", type=Path, action="append", default=[])
     args = parser.parse_args()
+    args.extras = extras_from_arguments(args.adapter, args.extra)
+    acquired_inputs = (
+        args.select_torch_wheel or args.torch_local_wheel is not None or bool(args.wheel_dir)
+    )
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("Only stable upstream Torch versions are supported")
     if args.release_options:
@@ -1326,10 +1439,12 @@ def main() -> None:
             or args.cache_dir is not None
             or args.progress_file is not None
             or args.adapter != "none"
+            or args.extras
             or args.torch_wheel is not None
             or args.torch_sha256 is not None
             or args.install
             or args.target is not None
+            or acquired_inputs
         ):
             parser.error("Release options accepts only --version and one or more --interpreter")
         if not args.interpreter:
@@ -1357,6 +1472,8 @@ def main() -> None:
         args.constraints is not None
         or args.torch_wheel is not None
         or args.torch_sha256 is not None
+        or args.torch_local_wheel is not None
+        or args.select_torch_wheel
     ):
         parser.error(
             "--install installs only the validated hash lock; constraints and the Torch "
@@ -1364,8 +1481,29 @@ def main() -> None:
         )
     if not args.install and args.target is not None:
         parser.error("--target is only valid with --install")
+    if not args.install and args.wheel_dir:
+        parser.error("--wheel-dir is only valid with --install")
     if args.torch_sha256 is not None and args.torch_wheel is None:
         parser.error("--torch-sha256 requires --torch-wheel")
+    if args.torch_local_wheel is not None and (
+        args.torch_wheel is None
+        or args.torch_sha256 is None
+        or not args.torch_local_wheel.is_absolute()
+        or args.torch_local_wheel.is_symlink()
+        or not args.torch_local_wheel.is_file()
+        or args.torch_local_wheel.name != wheel_filename(args.torch_wheel)
+    ):
+        parser.error(
+            "--torch-local-wheel must be the absolute acquired file of --torch-wheel, "
+            "with its --torch-sha256"
+        )
+    if args.select_torch_wheel and (
+        args.constraints is not None
+        or args.torch_wheel is not None
+        or args.torch_local_wheel is not None
+        or args.progress_file is not None
+    ):
+        parser.error("--select-torch-wheel selects the Torch wheel and resolves nothing else")
     if not RELEASE_CHANNEL.fullmatch(args.build):
         parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:
@@ -1375,6 +1513,8 @@ def main() -> None:
             parser.error("Discovery does not accept --install")
         if args.cache_dir is not None:
             parser.error("Discovery does not accept --cache-dir")
+        if acquired_inputs:
+            parser.error("Discovery does not accept acquired wheel inputs")
         if not args.selected_python or not args.interpreter:
             parser.error("Discovery requires --selected-python and at least one --interpreter")
         try:
@@ -1399,7 +1539,7 @@ def main() -> None:
             f"{sys.version_info.major}.{sys.version_info.minor}",
             sys.implementation.name,
         )
-        extras = adapter_requirements(args.adapter, args.version, args.build)
+        extras = extra_requirements(args.extras, args.version, args.build)
         if args.torch_wheel is not None:
             tags = {str(tag) for tag in packaging_tags.sys_tags()}
             selected_wheel = wheel_match(args.torch_wheel, args.version, args.build, tags)
@@ -1414,6 +1554,9 @@ def main() -> None:
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.select_torch_wheel:
+        write_torch_wheel_selection(parser, args)
+        return
     cache_dir = args.cache_dir or args.output / "pip-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     if args.install:
@@ -1442,6 +1585,65 @@ def run_pip(args: argparse.Namespace, pip_arguments: list[str]) -> subprocess.Co
     return completed
 
 
+def select_torch_wheel_or_exit(parser: argparse.ArgumentParser, args: argparse.Namespace) -> dict:
+    """This interpreter's official Torch wheel, or exit with a classified code."""
+    try:
+        return select_official_torch_wheel(args.version, args.build)
+    except (OSError, TimeoutError):
+        parser.exit(
+            75,
+            "Wheel index access failed; availability is inconclusive. Retry with network access.\n",
+        )
+    except LookupError:
+        parser.exit(
+            4,
+            f"No official Torch {args.version}+{args.build} wheel matches this interpreter "
+            "and platform. Choose another build or installed Python.\n",
+        )
+    except ValueError as error:
+        parser.exit(3, f"Invalid wheel resolution: {error}\n")
+
+
+def write_torch_wheel_selection(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Publish the official Torch wheel URL and index SHA-256, resolving nothing
+    else, so the caller can acquire the wheel before the lock resolution."""
+    selection_path = args.output / "torch-wheel.json"
+    if selection_path.exists():
+        parser.error("Selection output must not contain a previous Torch wheel selection")
+    selected = select_torch_wheel_or_exit(parser, args)
+    selection_path.write_text(
+        json.dumps({"url": selected["wheelUrl"], "sha256": selected["sha256"].lower()}) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def acquired_wheel_files(artifacts: list[dict], wheel_dirs: list[Path]) -> dict[str, Path]:
+    """Map each locked artifact to its acquired file in the wheel directories.
+
+    A wheel is found by the file name its locked URL names. An artifact with no
+    acquired file is absent from the map and installs from its locked URL.
+    """
+    for directory in wheel_dirs:
+        if not directory.is_absolute() or directory.is_symlink() or not directory.is_dir():
+            raise ValueError(f"Wheel directory is not an absolute directory: {directory}")
+    found = {}
+    for artifact in artifacts:
+        filename = wheel_filename(artifact["url"])
+        if not filename.endswith(".whl") or "/" in filename or "\\" in filename:
+            raise ValueError(f"Locked artifact names no wheel file: {artifact['name']}")
+        matches = [
+            directory / filename
+            for directory in wheel_dirs
+            if (directory / filename).is_file() and not (directory / filename).is_symlink()
+        ]
+        if len(matches) > 1:
+            raise ValueError(f"More than one acquired wheel for {artifact['name']}")
+        if matches:
+            found[artifact["name"]] = matches[0]
+    return found
+
+
 def resolve_lock(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
@@ -1463,55 +1665,106 @@ def resolve_lock(
         else f"{args.version}+{args.build}"
     )
     if args.torch_wheel is None:
-        try:
-            selected = select_official_torch_wheel(args.version, args.build)
-        except (OSError, TimeoutError):
-            parser.exit(
-                75,
-                "Wheel index access failed; availability is inconclusive. Retry with network access.\n",
-            )
-        except LookupError:
-            parser.exit(
-                4,
-                f"No official Torch {args.version}+{args.build} wheel matches this interpreter "
-                "and platform. Choose another build or installed Python.\n",
-            )
-        except ValueError as error:
-            parser.exit(3, f"Invalid wheel resolution: {error}\n")
+        selected = select_torch_wheel_or_exit(parser, args)
         args.torch_wheel, args.torch_sha256 = selected["wheelUrl"], selected["sha256"]
+    torch_source = args.torch_wheel
+    local_torch = None
+    if args.torch_local_wheel is not None:
+        local_torch = (args.torch_local_wheel, args.torch_wheel)
+        torch_source = args.torch_local_wheel.as_uri()
     report_path = args.output / "pip-resolution.json"
-    completed = run_pip(
-        args,
-        [
-            "--isolated",
-            "install",
-            "--cache-dir",
-            str(cache_dir),
-            "--dry-run",
-            "--report",
-            str(report_path),
-            "--ignore-installed",
-            *(["--constraint", str(args.constraints)] if args.constraints is not None else []),
-            "--only-binary=:all:",
-            "--index-url",
-            f"https://download.pytorch.org/whl/{args.build}",
-            "--extra-index-url",
-            "https://pypi.org/simple",
-            f"torch @ {args.torch_wheel}"
-            + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else ""),
-            *CORE,
-            *extras,
-        ],
-    )
-    if completed.returncode:
-        code, message = resolution_failure(
-            completed.stderr, args.version, args.build, args.adapter, torch_requirement
+    try:
+        floors = applicable_floors(args.version, constraint_pins(args.constraints))
+    except (OSError, InvalidVersion) as error:
+        parser.exit(3, f"Invalid version constraints: {error}\n")
+
+    # Every install resolves all general modalities together. When a package
+    # a modality needs, directly or through its dependencies, has no
+    # compatible wheel here, that modality is left out with its reason and the
+    # rest resolve; core packages, Torch and requested extras never degrade.
+    def resolve(selected: list[str]) -> subprocess.CompletedProcess:
+        return run_pip(
+            args,
+            [
+                "--isolated",
+                "install",
+                "--cache-dir",
+                str(cache_dir),
+                "--dry-run",
+                "--report",
+                str(report_path),
+                "--ignore-installed",
+                *(["--constraint", str(args.constraints)] if args.constraints is not None else []),
+                "--only-binary=:all:",
+                "--index-url",
+                f"https://download.pytorch.org/whl/{args.build}",
+                "--extra-index-url",
+                "https://pypi.org/simple",
+                f"torch @ {torch_source}"
+                + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else ""),
+                *CORE,
+                *modality_requirements(selected, floors),
+                *extras,
+            ],
         )
-        parser.exit(code, f"{message}\n")
+
+    modalities = list(MODALITIES)
+    omitted = {}
+    completed = resolve(modalities)
+    while completed.returncode:
+        requested = requested_packages(tuple(modalities), args.extras)
+        code, message = resolution_failure(
+            completed.stderr, args.version, args.build, requested, torch_requirement
+        )
+        missing = missing_requirement_names(completed.stderr)
+        if (
+            code != 2
+            or not missing
+            or any(name == "torch" or name in CORE or name in args.extras for name in missing)
+        ):
+            parser.exit(code, f"{message}\n")
+        named = missing_requested_package(completed.stderr, requested)
+        if named is not None:
+            candidates = [
+                [modality for modality in modalities if named in MODALITY_PACKAGES[modality]]
+            ]
+        else:
+            # An indirect dependency: find the modality that brings it in by
+            # resolving without one modality at a time, the text stack last
+            # because image and audio models use it too.
+            candidates = [[modality] for modality in ("audio", "image") if modality in modalities]
+            candidates.append(list(modalities))
+        reason = (
+            f"No compatible binary wheel for {named or missing[0]} matches this Torch build "
+            "and Python"
+        )
+        for dropped in candidates:
+            remaining = [modality for modality in modalities if modality not in dropped]
+            retry = resolve(remaining)
+            if retry.returncode and set(missing) & set(missing_requirement_names(retry.stderr)):
+                continue  # Still missing without this modality: not its dependency.
+            for modality in dropped:
+                omitted[modality] = reason
+            modalities = remaining
+            completed = retry
+            print(
+                f"Leaving out {', '.join(dropped)} support: {reason}",
+                file=sys.stderr,
+                flush=True,
+            )
+            break
+        else:
+            parser.exit(code, f"{message}\n")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         requirements, resolution = requirements_from_report(
-            report, args.version, args.build, args.adapter
+            report,
+            args.version,
+            args.build,
+            tuple(modalities),
+            args.extras,
+            local_torch,
+            omitted,
         )
         torch_artifact = next(item for item in resolution["artifacts"] if item["name"] == "torch")
         if torch_artifact["url"] != args.torch_wheel or (
@@ -1544,9 +1797,32 @@ def install_from_lock(
     ):
         parser.error("Staged --target must be an empty directory and not a symlink")
     try:
-        resolution = read_install_lock(args.output, args.version, args.build, args.adapter)
+        resolution = read_install_lock(args.output, args.version, args.build, args.extras)
     except (KeyError, TypeError, ValueError, OSError) as error:
         parser.exit(3, f"Invalid install lock: {error}\n")
+    requirement_path = args.output / "requirements.txt"
+    local_files = {}
+    if args.wheel_dir:
+        # Acquired wheels install from their verified local files under the
+        # same locked SHA-256; the lock file itself keeps the official URLs.
+        requirement_path = args.output / "requirements-local.txt"
+        if requirement_path.exists():
+            parser.error("Install output must not contain a previous local lock")
+        try:
+            local_files = acquired_wheel_files(resolution["artifacts"], args.wheel_dir)
+        except (KeyError, TypeError, ValueError, OSError) as error:
+            parser.exit(3, f"Invalid acquired wheels: {error}\n")
+        requirement_path.write_text(
+            "".join(
+                f"{artifact['name']} @ {local_files[artifact['name']].as_uri()} "
+                f"--hash=sha256:{artifact['sha256']}\n"
+                if artifact["name"] in local_files
+                else lock_line(artifact) + "\n"
+                for artifact in resolution["artifacts"]
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
     args.target.mkdir(parents=True, exist_ok=True)
     report_path = args.output / "pip-install.json"
     completed = run_pip(
@@ -1566,7 +1842,7 @@ def install_from_lock(
             "--only-binary=:all:",
             "--no-index",
             "--requirement",
-            str(args.output / "requirements.txt"),
+            str(requirement_path),
         ],
     )
     if completed.returncode:
@@ -1576,12 +1852,12 @@ def install_from_lock(
                 "Locked installation failed: a downloaded wheel does not match its SHA-256 "
                 "in the hash lock, so nothing was installed\n",
             )
-        code, message = resolution_failure(completed.stderr, args.version, args.build, args.adapter)
+        code, message = resolution_failure(completed.stderr, args.version, args.build)
         # The lock is already resolved: only access can be inconclusive here.
         parser.exit(code if code == 75 else 3, f"Locked installation failed: {message}\n")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        installed_artifacts_match_lock(report, resolution["artifacts"])
+        installed_artifacts_match_lock(report, resolution["artifacts"], local_files)
         manifest = installed_file_manifest(args.target, resolution["artifacts"])
     except (KeyError, TypeError, ValueError, OSError) as error:
         parser.exit(3, f"Invalid locked installation: {error}\n")

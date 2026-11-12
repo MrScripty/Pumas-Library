@@ -91,14 +91,22 @@ test('Torch runtime options require verified records and an offered default adap
   const options = {
     builds: ['cpu'], defaultBuild: 'auto', pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
     adapters: ['none', 'flux2'], defaultAdapter: 'flux2',
+    modalities: ['text', 'image', 'audio'], extras: ['flux2'],
     verified: [{
-      tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2'], verifiedOn: '2026-09-23',
+      tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2'], extras: [], verifiedOn: '2026-09-23',
       scope: 'Adapter imports passed.', sourceCommit: '5d373bf8', packages: [{ name: 'diffusers', version: '0.37.0' }],
     }],
     adapterRequirements: [{ adapter: 'flux2', tag: 'v2.9.1', build: 'cu130', python: 'python3.12' }],
-    installed: [],
+    installed: [{
+      tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'none', extras: [], qualification: 'unverified',
+      capabilities: [
+        { name: 'text', status: 'available', reason: null },
+        { name: 'audio', status: 'unavailable', reason: 'No compatible binary wheel for soxr' },
+        { name: 'cohere_asr', status: 'unknown', reason: 'Probed before modality probing' },
+      ],
+    }],
   };
-  for (const valid of [options, { ...options, adapters: ['none'], defaultAdapter: 'none', verified: [], adapterRequirements: [] }]) {
+  for (const valid of [options, { ...options, adapters: ['none'], defaultAdapter: 'none', extras: [], verified: [], adapterRequirements: [], installed: [] }]) {
     harness.respondWith(valid);
     assert.deepEqual(toPlainValue(await harness.api.get_torch_runtime_options()), valid);
   }
@@ -111,7 +119,12 @@ test('Torch runtime options require verified records and an offered default adap
     { ...options, defaultAdapter: 'bundled' },
     { ...options, adapters: ['none'], defaultAdapter: 'flux2' },
     { ...options, defaultBuild: undefined },
-    { ...options, installed: [{ tag: 'v2.10.0', build: null, python: null, adapter: null, qualification: 'unknown' }] },
+    { ...options, installed: [{ tag: 'v2.10.0', build: null, python: null, adapter: null, extras: null, capabilities: [], qualification: 'unknown' }] },
+    { ...options, installed: [{ ...options.installed[0], capabilities: [{ name: 'text', status: 'maybe', reason: null }] }] },
+    { ...options, installed: [{ ...options.installed[0], capabilities: undefined }] },
+    { ...options, modalities: undefined },
+    { ...options, extras: undefined },
+    { ...options, verified: [{ ...options.verified[0], extras: undefined }] },
     { ...options, extra: true },
   ]) {
     harness.respondWith(invalid);
@@ -146,11 +159,11 @@ test('runtime provider discovery sends no parameters and rejects malformed descr
 
 test('Torch preview decodes ready and all typed rejection outcomes without reading message wording', async () => {
   const harness = loadCompiledPreload();
-  const request = { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'none' };
+  const request = { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', extras: [] };
   const ready = {
     status: 'ready',
     preview: {
-      previewId: 'preview-42', ...request, expiresInSeconds: 300,
+      previewId: 'preview-42', ...request, adapter: 'none', expiresInSeconds: 300,
       qualification: 'unverified',
       artifacts: [{ name: 'torch', version: '2.10.0', url: 'https://download.pytorch.org/torch.whl', sha256: 'abc123' }],
     },

@@ -64,12 +64,10 @@ def fixture(root, target="linux-x86_64"):
     contract = {"schema_version": 2, "expected": expected}
     binary = root / "binary"
     binary.write_bytes(b"controlled-binary-not-a-Pumas-release")
-    native = root / "native"
-    native.write_bytes(b"controlled-runtime-not-ORT")
     license_file = root / "license"
     license_file.write_text("controlled project license fixture\n")
     notices = root / "notices"
-    notices.write_text("controlled runtime notice fixture\n")
+    notices.write_text("controlled notice fixture\n")
     build = {
         "target": definition["rust_target"],
         "host": definition["rust_target"],
@@ -99,26 +97,13 @@ def fixture(root, target="linux-x86_64"):
         ],
         "rustc": "rustc 0.0.0 (0000000 2000-01-01)",
     }
-    runtime = {
-        "target": definition["rust_target"],
-        "version": "1.24.2",
-        "loader_entry": definition["runtime_entry"],
-        "source_archive_sha256": "c" * 64,
-        "files": {
-            definition["runtime_entry"]: {
-                "sha256": package.sha256(native),
-                "bytes": native.stat().st_size,
-            }
-        },
-    }
     inputs = {
         definition["binary"]: binary,
-        definition["runtime_entry"]: native,
         "LICENSE.txt": license_file,
         "THIRD-PARTY-NOTICES.txt": notices,
     }
     output = root / f"pumas-rpc-inference-{expected['version']}-{target}.{definition['format']}"
-    return inputs, build, runtime, contract, schema, output
+    return inputs, build, contract, schema, output
 
 
 class ArchiveTests(unittest.TestCase):
@@ -130,34 +115,28 @@ class ArchiveTests(unittest.TestCase):
     def test_canary_extra_metadata_rejected_before_serialization(self):
         canary = "DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
         cases = {
-            "build": lambda build, runtime, contract: build.update(unexpected_secret=canary),
-            "source": lambda build, runtime, contract: build["source"].update(
+            "build": lambda build, contract: build.update(unexpected_secret=canary),
+            "source": lambda build, contract: build["source"].update(unexpected_secret=canary),
+            "contract": lambda build, contract: contract.update(unexpected_secret=canary),
+            "expected": lambda build, contract: contract["expected"].update(
                 unexpected_secret=canary
             ),
-            "runtime": lambda build, runtime, contract: runtime.update(unexpected_secret=canary),
-            "runtime_item": lambda build, runtime, contract: runtime["files"][
-                "libonnxruntime.so"
+            "rpc_build": lambda build, contract: contract["expected"]["build_info"].update(
+                unexpected_secret=canary
+            ),
+            "schema": lambda build, contract: contract["expected"]["core_build_info"]["schemas"][
+                0
             ].update(unexpected_secret=canary),
-            "contract": lambda build, runtime, contract: contract.update(unexpected_secret=canary),
-            "expected": lambda build, runtime, contract: contract["expected"].update(
-                unexpected_secret=canary
-            ),
-            "rpc_build": lambda build, runtime, contract: contract["expected"]["build_info"].update(
-                unexpected_secret=canary
-            ),
-            "schema": lambda build, runtime, contract: contract["expected"]["core_build_info"][
-                "schemas"
-            ][0].update(unexpected_secret=canary),
         }
         for name, mutate in cases.items():
             with self.subTest(name=name):
                 root = self.root / name
                 root.mkdir()
-                inputs, build, runtime, contract, schema, output = fixture(root)
-                mutate(build, runtime, contract)
+                inputs, build, contract, schema, output = fixture(root)
+                mutate(build, contract)
                 with mock.patch.object(package, "canonical", wraps=package.canonical) as serialize:
                     with self.assertRaises(ValueError):
-                        package.assemble(inputs, build, runtime, contract, schema, output)
+                        package.assemble(inputs, build, contract, schema, output)
                     self.assertFalse(
                         any(canary in json.dumps(call.args[0]) for call in serialize.call_args_list)
                     )
@@ -165,10 +144,8 @@ class ArchiveTests(unittest.TestCase):
                 self.assertFalse(output.with_name(output.name + ".partial").exists())
 
     def test_metadata_snapshot_survives_input_mutation_during_staging(self):
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
-        original_build, original_runtime, original_contract = copy.deepcopy(
-            (build, runtime, contract)
-        )
+        inputs, build, contract, schema, output = fixture(self.root)
+        original_build, original_contract = copy.deepcopy((build, contract))
         canary = "DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
         copy_payload = shutil.copyfile
         written = []
@@ -181,8 +158,6 @@ class ArchiveTests(unittest.TestCase):
             build["source"]["unexpected_secret"] = canary
             build["features"].append(canary)
             build["command"].append(canary)
-            runtime["unexpected_secret"] = canary
-            runtime["files"]["libonnxruntime.so"]["unexpected_secret"] = canary
             contract["unexpected_secret"] = canary
             contract["expected"]["build_info"]["compiled_features"].append(canary)
             contract["expected"]["core_build_info"]["schemas"][0]["name"] = canary
@@ -194,23 +169,18 @@ class ArchiveTests(unittest.TestCase):
 
         with mock.patch.object(package.shutil, "copyfile", side_effect=mutate_inputs):
             with mock.patch.object(Path, "write_bytes", capture_write):
-                manifest, digest = package.assemble(
-                    inputs, build, runtime, contract, schema, output
-                )
+                manifest, digest = package.assemble(inputs, build, contract, schema, output)
         self.assertTrue(written)
         self.assertTrue(all(canary.encode() not in data for data in written))
         observed = package.extract_verified(output, digest, self.root / "consumer")
         self.assertEqual(observed, manifest)
         self.assertEqual(observed["build"], original_build)
-        self.assertEqual(observed["runtime"], original_runtime)
         self.assertEqual(observed["compatibility"], original_contract)
 
     def test_public_metadata_projection_preserves_values_without_container_aliases(self):
-        _, build, runtime, contract, _, _ = fixture(self.root)
-        supplied = (build, runtime, contract)
-        admitted = package.admitted_metadata(
-            build, runtime, contract, package.TARGETS["linux-x86_64"]
-        )
+        _, build, contract, _, _ = fixture(self.root)
+        supplied = (build, contract)
+        admitted = package.admitted_metadata(build, contract, package.TARGETS["linux-x86_64"])
         self.assertEqual(admitted, supplied)
 
         def container_ids(value):
@@ -223,8 +193,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertFalse(container_ids(supplied) & container_ids(admitted))
 
     def test_cli_pinned_metadata_roundtrip_from_other_working_directory(self):
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
-        records = {"build-record": build, "runtime-record": runtime, "contract": contract}
+        inputs, build, contract, schema, output = fixture(self.root)
+        records = {"build-record": build, "contract": contract}
         command = [sys.executable, str(Path(package.__file__).resolve()), "assemble"]
         for name, data in records.items():
             path = self.root / (name + ".json")
@@ -253,12 +223,11 @@ class ArchiveTests(unittest.TestCase):
             output, report["archive_sha256"], self.root / "consumer"
         )
         self.assertEqual(observed["build"], build)
-        self.assertEqual(observed["runtime"], runtime)
         self.assertEqual(observed["compatibility"], contract)
 
     def test_manifest_and_payload_item_extra_canary_fields_refused(self):
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
-        manifest, _ = package.assemble(inputs, build, runtime, contract, schema, output)
+        inputs, build, contract, schema, output = fixture(self.root)
+        manifest, _ = package.assemble(inputs, build, contract, schema, output)
         for location in ("manifest", "payload_item"):
             with self.subTest(location=location):
                 candidate = copy.deepcopy(manifest)
@@ -266,6 +235,44 @@ class ArchiveTests(unittest.TestCase):
                 item["unexpected_secret"] = "DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
                 with self.assertRaisesRegex(ValueError, "unexpected or missing"):
                     package.check_manifest(candidate)
+
+    def test_runtime_libraries_are_never_packaged(self):
+        for target in package.TARGETS:
+            for name in ("libonnxruntime.so", "onnxruntime.dll", "libllama.dylib"):
+                with self.subTest(target=target, name=name):
+                    root = self.root / f"{target}-{name}"
+                    root.mkdir()
+                    inputs, build, contract, schema, output = fixture(root, target)
+                    runtime = root / name
+                    runtime.write_bytes(b"controlled-runtime-not-ORT")
+                    inputs[name] = runtime
+                    with self.assertRaisesRegex(ValueError, "never packaged"):
+                        package.assemble(inputs, build, contract, schema, output)
+                    self.assertFalse(output.exists())
+
+    def test_schema_one_manifest_with_packaged_runtime_refused_with_reason(self):
+        inputs, build, contract, schema, output = fixture(self.root)
+        manifest, _ = package.assemble(inputs, build, contract, schema, output)
+        self.assertEqual(manifest["schema_version"], 2)
+        self.assertNotIn("runtime", manifest)
+        self.assertEqual(
+            set(manifest["files"]),
+            {
+                "pumas-rpc",
+                "LICENSE.txt",
+                "THIRD-PARTY-NOTICES.txt",
+                "protocol-schema.json",
+                "build-record.json",
+            },
+        )
+        legacy = copy.deepcopy(manifest)
+        legacy.update(schema_version=1, runtime={"version": "1.24.2"})
+        with self.assertRaisesRegex(ValueError, "schema 1 archives packaged ONNX Runtime"):
+            package.check_manifest(legacy)
+        smuggled = copy.deepcopy(manifest)
+        smuggled["files"]["libonnxruntime.so"] = {"sha256": "c" * 64, "bytes": 1}
+        with self.assertRaisesRegex(ValueError, "never packaged"):
+            package.check_manifest(smuggled)
 
     def test_only_reviewed_offline_locked_production_argv_admitted(self):
         for target in package.TARGETS:
@@ -275,11 +282,9 @@ class ArchiveTests(unittest.TestCase):
                 with self.subTest(target=target, command=index):
                     root = self.root / f"{target}-{index}"
                     root.mkdir()
-                    inputs, build, runtime, contract, schema, output = fixture(root, target)
+                    inputs, build, contract, schema, output = fixture(root, target)
                     build["command"] = argv
-                    manifest, digest = package.assemble(
-                        inputs, build, runtime, contract, schema, output
-                    )
+                    manifest, digest = package.assemble(inputs, build, contract, schema, output)
                     observed = package.extract_verified(output, digest, root / "consumer")
                     self.assertEqual(observed["build"]["command"], argv)
                     self.assertEqual(manifest["qualification"], "unverified_candidate")
@@ -294,7 +299,7 @@ class ArchiveTests(unittest.TestCase):
             with self.subTest(rejected=name):
                 root = self.root / name
                 root.mkdir()
-                inputs, build, runtime, contract, schema, output = fixture(root)
+                inputs, build, contract, schema, output = fixture(root)
                 if name == "extra_secret":
                     build["command"].append("--dummy-secret=DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL")
                 elif name in ("missing_offline", "missing_locked"):
@@ -308,11 +313,11 @@ class ArchiveTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     ValueError, "reviewed offline locked production command"
                 ):
-                    package.assemble(inputs, build, runtime, contract, schema, output)
+                    package.assemble(inputs, build, contract, schema, output)
                 self.assertFalse(output.exists())
 
     def test_actual_cargo_json_build_command_preserved_verbatim(self):
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
+        inputs, build, contract, schema, output = fixture(self.root)
         actual = [
             "cargo",
             "build",
@@ -333,42 +338,37 @@ class ArchiveTests(unittest.TestCase):
             "--message-format=json-render-diagnostics",
         ]
         build["command"] = actual
-        _, digest = package.assemble(inputs, build, runtime, contract, schema, output)
+        _, digest = package.assemble(inputs, build, contract, schema, output)
         observed = package.extract_verified(output, digest, self.root / "consumer")
         self.assertEqual(observed["build"]["command"], actual)
 
     def test_exported_metadata_strings_and_types_are_bounded(self):
         cases = {
-            "build_id": lambda build, runtime, contract: contract["expected"].update(
-                build_id="x" * 129
-            ),
-            "toolchain_canary": lambda build, runtime, contract: build.update(
+            "build_id": lambda build, contract: contract["expected"].update(build_id="x" * 129),
+            "toolchain_canary": lambda build, contract: build.update(
                 rustc=build["rustc"] + " DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
             ),
-            "provisional_request": lambda build, runtime, contract: contract.update(
+            "provisional_request": lambda build, contract: contract.update(
                 requests=[{"path": "/fixture-handshake", "bindings": {}}]
             ),
-            "feature": lambda build, runtime, contract: contract["expected"]["build_info"].update(
+            "feature": lambda build, contract: contract["expected"]["build_info"].update(
                 compiled_features=["x" * 129]
             ),
-            "protocol": lambda build, runtime, contract: contract["expected"]["build_info"][
-                "protocols"
-            ][0].update(versions=[True]),
-            "runtime_item_type": lambda build, runtime, contract: runtime["files"][
-                "libonnxruntime.so"
-            ].update(bytes=True),
-            "extra_feature": lambda build, runtime, contract: contract["expected"][
-                "features"
-            ].append("unreviewed_feature"),
+            "protocol": lambda build, contract: contract["expected"]["build_info"]["protocols"][
+                0
+            ].update(versions=[True]),
+            "extra_feature": lambda build, contract: contract["expected"]["features"].append(
+                "unreviewed_feature"
+            ),
         }
         for name, mutate in cases.items():
             with self.subTest(name=name):
                 root = self.root / name
                 root.mkdir()
-                inputs, build, runtime, contract, schema, output = fixture(root)
-                mutate(build, runtime, contract)
+                inputs, build, contract, schema, output = fixture(root)
+                mutate(build, contract)
                 with self.assertRaises(ValueError):
-                    package.assemble(inputs, build, runtime, contract, schema, output)
+                    package.assemble(inputs, build, contract, schema, output)
                 self.assertFalse(output.exists())
 
     def test_checksum_inventory_is_host_independent(self):
@@ -391,11 +391,9 @@ class ArchiveTests(unittest.TestCase):
             with self.subTest(target=target):
                 root = self.root / target
                 root.mkdir()
-                inputs, build, runtime, contract, schema, output = fixture(root, target)
+                inputs, build, contract, schema, output = fixture(root, target)
                 (root / "credentials-not-an-input").write_text("must never be copied")
-                manifest, digest = package.assemble(
-                    inputs, build, runtime, contract, schema, output
-                )
+                manifest, digest = package.assemble(inputs, build, contract, schema, output)
                 extracted = root / "consumer"
                 observed = package.extract_verified(output, digest, extracted)
                 self.assertEqual(manifest, observed)
@@ -405,42 +403,37 @@ class ArchiveTests(unittest.TestCase):
                 )
                 self.assertEqual(observed["qualification"], "unverified_candidate")
 
-    def test_feature_revision_schema_runtime_and_content_mismatches_refused(self):
+    def test_feature_revision_schema_and_content_mismatches_refused(self):
         cases = [
-            ("features", lambda build, runtime, contract: build.update(features=["s3"])),
-            ("source", lambda build, runtime, contract: build["source"].update(head="d" * 40)),
-            ("runtime", lambda build, runtime, contract: runtime.update(version="1.24.3")),
+            ("features", lambda build, contract: build.update(features=["s3"])),
+            ("source", lambda build, contract: build["source"].update(head="d" * 40)),
             (
                 "inference",
-                lambda build, runtime, contract: contract["expected"].update(
-                    inference_enabled=False
-                ),
+                lambda build, contract: contract["expected"].update(inference_enabled=False),
             ),
             (
                 "schema",
-                lambda build, runtime, contract: contract["expected"].update(
-                    schema_sha256="e" * 64
-                ),
+                lambda build, contract: contract["expected"].update(schema_sha256="e" * 64),
             ),
-            ("binary", lambda build, runtime, contract: build.update(binary_sha256="f" * 64)),
+            ("binary", lambda build, contract: build.update(binary_sha256="f" * 64)),
         ]
         for name, mutate in cases:
             with self.subTest(name=name):
                 root = self.root / name
                 root.mkdir()
-                inputs, build, runtime, contract, schema, output = fixture(root)
-                mutate(build, runtime, contract)
+                inputs, build, contract, schema, output = fixture(root)
+                mutate(build, contract)
                 with self.assertRaises(ValueError):
-                    package.assemble(inputs, build, runtime, contract, schema, output)
+                    package.assemble(inputs, build, contract, schema, output)
                 self.assertFalse(output.exists())
 
     def test_missing_extra_symlink_and_case_collision_inputs_refused(self):
         for name in ["missing", "extra", "symlink", "case", "reserved"]:
             root = self.root / name
             root.mkdir()
-            inputs, build, runtime, contract, schema, output = fixture(root)
+            inputs, build, contract, schema, output = fixture(root)
             if name == "missing":
-                del inputs["libonnxruntime.so"]
+                del inputs["LICENSE.txt"]
             elif name == "extra":
                 inputs["unexpected.dll"] = inputs["pumas-rpc"]
             elif name == "case":
@@ -452,7 +445,7 @@ class ArchiveTests(unittest.TestCase):
                 link.symlink_to(inputs["pumas-rpc"])
                 inputs["pumas-rpc"] = link
             with self.subTest(name=name), self.assertRaises(ValueError):
-                package.assemble(inputs, build, runtime, contract, schema, output)
+                package.assemble(inputs, build, contract, schema, output)
 
     def test_trusted_hash_and_archive_hash_mismatch_before_execution(self):
         path = self.root / "record.json"
@@ -462,8 +455,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(
             package.read_pinned_json(path, package.sha256(path)), {"schema_version": 1}
         )
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
-        package.assemble(inputs, build, runtime, contract, schema, output)
+        inputs, build, contract, schema, output = fixture(self.root)
+        package.assemble(inputs, build, contract, schema, output)
         with self.assertRaisesRegex(ValueError, "archive SHA256 mismatch"):
             package.extract_verified(output, "0" * 64, self.root / "consumer")
         self.assertFalse((self.root / "consumer").exists())
@@ -500,16 +493,16 @@ class ArchiveTests(unittest.TestCase):
             package.decode(b'{"value":NaN}')
 
     def test_checksum_collision_and_invalid_schema_refused(self):
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
+        inputs, build, contract, schema, output = fixture(self.root)
         checksum = output.with_name(output.name + ".sha256")
         checksum.write_text("existing trusted checksum")
         with self.assertRaisesRegex(ValueError, "overwrite archive checksum"):
-            package.assemble(inputs, build, runtime, contract, schema, output)
+            package.assemble(inputs, build, contract, schema, output)
         self.assertFalse(output.exists())
         self.assertEqual(checksum.read_text(), "existing trusted checksum")
         checksum.unlink()
         with self.assertRaises(json.JSONDecodeError):
-            package.assemble(inputs, build, runtime, contract, b"invalid schema", output)
+            package.assemble(inputs, build, contract, b"invalid schema", output)
         self.assertFalse(output.exists())
 
     def test_member_count_and_provisional_projection_refused(self):
@@ -521,7 +514,7 @@ class ArchiveTests(unittest.TestCase):
                 stream.addfile(member, io.BytesIO(b"x"))
         with self.assertRaisesRegex(ValueError, "bounded archive member count"):
             package.extract_verified(archive, package.sha256(archive), self.root / "consumer")
-        _, _, _, contract, _, _ = fixture(self.root)
+        _, _, contract, _, _ = fixture(self.root)
         contract["requests"] = [{"path": "/fixture-handshake", "bindings": {}}]
         with self.assertRaisesRegex(ValueError, "compatibility contract fields"):
             package.validate_contract(contract)
@@ -542,8 +535,8 @@ class ArchiveTests(unittest.TestCase):
         if os.name == "nt":
             # Windows denies replacing an open archive. POSIX permits this race.
             return
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
-        _, digest = package.assemble(inputs, build, runtime, contract, schema, output)
+        inputs, build, contract, schema, output = fixture(self.root)
+        _, digest = package.assemble(inputs, build, contract, schema, output)
         file_digest = hashlib.file_digest
         replaced = False
 
@@ -582,8 +575,8 @@ class ArchiveTests(unittest.TestCase):
             package.extract_verified(archive, package.sha256(archive), self.root / "consumer")
 
     def test_payload_mutation_even_with_new_outer_digest_refused(self):
-        inputs, build, runtime, contract, schema, output = fixture(self.root, "windows-x86_64")
-        package.assemble(inputs, build, runtime, contract, schema, output)
+        inputs, build, contract, schema, output = fixture(self.root, "windows-x86_64")
+        package.assemble(inputs, build, contract, schema, output)
         changed = self.root / "changed.zip"
         with zipfile.ZipFile(output) as source, zipfile.ZipFile(changed, "w") as sink:
             for name in source.namelist():
@@ -634,7 +627,7 @@ class ConsumerProcessTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
 
     def prepare(self, mutation=None, mode=0):
-        inputs, build, runtime, contract, schema, output = fixture(self.root)
+        inputs, build, contract, schema, output = fixture(self.root)
         response = description_fixture(contract)
         if mutation:
             mutation(response)
@@ -658,7 +651,7 @@ class ConsumerProcessTests(unittest.TestCase):
             capture_output=True,
         )
         build["binary_sha256"] = package.sha256(binary)
-        manifest, digest = package.assemble(inputs, build, runtime, contract, schema, output)
+        manifest, digest = package.assemble(inputs, build, contract, schema, output)
         extracted = self.root / "consumer"
         package.extract_verified(output, digest, extracted)
         return extracted, manifest, contract
@@ -789,7 +782,7 @@ class OwnerContractTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
-        _, _, _, contract, _, _ = fixture(self.root)
+        _, _, contract, _, _ = fixture(self.root)
         self.expected = contract["expected"]
         self.description = description_fixture(contract)
         self.description["instance"]["library_root"] = str(self.root)

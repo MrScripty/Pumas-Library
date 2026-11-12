@@ -475,9 +475,9 @@ console.log(JSON.stringify([...seen.values()]));
             LICENSES / "onnxruntime-ThirdPartyNotices.txt",
             LICENSES / "pyke-ort-artifacts-LICENSE",
         ],
-        "Native runtime downloaded by Pumas into its version manager, not bundled in "
-        "desktop packages; packaged only in headless inference archives. Upstream notice "
-        "superset, downstream archive provenance tracked separately",
+        "Native runtime downloaded by Pumas into its version manager from official "
+        "microsoft/onnxruntime releases; not bundled in any Pumas package. Upstream "
+        "notice text reviewed at this version",
     )
     managed_python, managed_inputs, uv_version = collect_managed_python(add)
     add(
@@ -517,10 +517,10 @@ Rust normal/build dependencies across desktop targets and the JavaScript product
 closure are conservative supersets, not assertions that all listed code is linked.
 Electron also supplies LICENSE.electron.txt and LICENSES.chromium.html beside the
 application executable. Those files are part of this attribution and must be retained.
-ONNX upstream notices are included in full. Desktop packages download ONNX Runtime
-at runtime rather than bundling it; headless inference archives package it, and
-their native closure verification is recorded in the release attribution report.
-The uv notice covers a runtime executable downloaded by Pumas, not a bundled binary.
+ONNX upstream notices are included in full. No Pumas package bundles an inference
+runtime: Pumas downloads ONNX Runtime, llama.cpp and Torch into its version manager
+on request. The ONNX Runtime and uv notices cover runtimes downloaded by Pumas,
+not bundled binaries.
 Managed CPython full-archive notices are target-scoped supersets for separately
 selected install-only distributions; each archive identity is recorded below.
 Where a CPython PYTHON.json declares a license file that its full archive omits,

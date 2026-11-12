@@ -46,30 +46,11 @@ def write_metadata(directory, build_id, source, repository=ROOT):
             raise ValueError("release attribution text changed")
         inventories[profile] = inventory
         notices.append(text.read_bytes())
-    pins = json.loads((repository / "scripts/release/onnx-runtime-pins.json").read_text())
-    for name, member in (
-        ("onnxruntime-LICENSE", "ONNX-LICENSE.txt"),
-        ("onnxruntime-ThirdPartyNotices.txt", "ONNX-NOTICES.txt"),
-    ):
-        path = repository / "scripts/release/licenses" / name
-        expected = {
-            (target["notices"][member]["bytes"], target["notices"][member]["sha256"])
-            for target in pins["targets"].values()
-        }
-        # Upstream Windows uses CRLF for these same texts. Emit only exact
-        # byte representations independently authenticated by every target pin;
-        # never assume one target's notice covers another target's notice role.
-        lf = path.read_bytes().replace(b"\r\n", b"\n")
-        variants = {
-            (len(data), hashlib.sha256(data).hexdigest()): data
-            for data in (lf, lf.replace(b"\n", b"\r\n"))
-        }
-        if not expected <= variants.keys():
-            raise ValueError("native notice differs from reviewed runtime authority")
-        notices.extend(variants[key] for key in sorted(expected))
+    # No artifact bundles an inference runtime: Pumas downloads ONNX Runtime,
+    # llama.cpp and Torch on request, so SBOMs list none and the collected
+    # notices already describe them as downloaded, not bundled.
     created = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     subjects = []
-    targets = {entry["id"]: entry for entry in plan["desktop_targets"] + plan["headless_targets"]}
     for filename, artifact in sorted(artifacts.items()):
         sha = digest(directory / filename)
         subjects.append({"name": filename, "digest": {"sha256": sha}})
@@ -95,38 +76,6 @@ def write_metadata(directory, build_id, source, repository=ROOT):
                 "relatedSpdxElement": "SPDXRef-Pumas",
             }
         ]
-        # Desktop packages download ONNX Runtime at runtime; only headless
-        # inference archives still package the pinned runtime input.
-        if artifact.get("variant", "full") == "headless-inference":
-            runtime = next(
-                entry
-                for entry in pins["targets"].values()
-                if entry["target"] == targets[artifact["target"]]["rust_target"]
-            )
-            packages.append(
-                {
-                    "SPDXID": "SPDXRef-ORT",
-                    "name": "onnxruntime-cpu",
-                    "versionInfo": pins["version"],
-                    "downloadLocation": runtime["url"],
-                    "filesAnalyzed": False,
-                    "licenseDeclared": "MIT",
-                    "licenseConcluded": "NOASSERTION",
-                    "copyrightText": "NOASSERTION",
-                    "checksums": [
-                        {"algorithm": "SHA256", "checksumValue": runtime["archive_sha256"]}
-                    ],
-                    "sourceInfo": "Reviewed native runtime input archive; package inspection and execution acceptance remain separate.",
-                }
-            )
-            relationships.append(
-                {
-                    "spdxElementId": "SPDXRef-Pumas",
-                    "relationshipType": "OTHER",
-                    "relatedSpdxElement": "SPDXRef-ORT",
-                    "comment": "Pinned runtime input for this artifact target.",
-                }
-            )
         for index, dependency in enumerate(inventories[profile]["packages"]):
             ident = f"SPDXRef-Dependency-{index}"
             packages.append(
@@ -185,9 +134,6 @@ def write_metadata(directory, build_id, source, repository=ROOT):
                     ),
                     "rust_lock_sha256": digest(repository / "rust/Cargo.lock"),
                     "pnpm_lock_sha256": digest(repository / "pnpm-lock.yaml"),
-                    "runtime_pins_sha256": digest(
-                        repository / "scripts/release/onnx-runtime-pins.json"
-                    ),
                     "attribution_input_profiles": {
                         profile or "default": {
                             "input_sha256": inventory["input_sha256"],

@@ -101,8 +101,11 @@ newer; 1.24.2 is the verified combination). The desktop installs one from the
 ONNX Runtime versions, which download official release archives through the
 shared acquisition service and verify their publisher SHA-256; the provider
 loads the active version. A developer may instead select an absolute library
-file through `ORT_DYLIB_PATH`, and headless inference archives package it beside
-the executable. Cargo never downloads it.
+file through `ORT_DYLIB_PATH`. No Pumas package bundles it, headless inference
+archives included: a headless consumer installs a version through the RPC's
+version manager (`get_available_versions`, `install_version` and
+`get_installation_progress` for app `onnx-runtime`) and may pin a managed profile
+to it with `runtime_version`. Cargo never downloads it.
 Also provide an explicitly selected compatible ONNX embedding model package,
 `tokenizer.json`, configuration with the required hidden-size metadata (its
 `max_position_embeddings` or `n_positions`, when present, bounds each input's

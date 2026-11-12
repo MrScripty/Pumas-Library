@@ -1268,6 +1268,29 @@ impl AcquisitionService {
                         "Existing file has no digest or custody receipt for its mutable source",
                     ));
                 }
+                // A final file published before an interruption carries no
+                // durable receipt. The fresh transfer below proves it by byte
+                // equality at publication. A partial left beside it by an
+                // earlier refused attempt is discarded only when the final
+                // already holds every one of its bytes.
+                let discard = workspace.clone();
+                let path = file.logical_path().to_owned();
+                owned(
+                    context,
+                    "discard duplicate acquisition partial",
+                    move || {
+                        if discard.file_len(&path, true)?.is_none_or(|bytes| bytes == 0)
+                            || discard.discard_part_duplicating_final(&path)?
+                        {
+                            return Ok(());
+                        }
+                        Err(PumasError::Validation {
+                            field: "download.integrity".into(),
+                            message: format!("Existing selected file {path} and its retained partial differ and neither has a verified receipt or supplied checksum; preserving both files for reconciliation"),
+                        })
+                    },
+                )
+                .await?;
                 true
             }
             None => false,
@@ -4306,8 +4329,13 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn promoted_digestless_file_without_receipt_is_preserved_for_reconciliation() {
+    /// Publish `payload.bin` from an immutable source, stop the service while
+    /// the acquisition is still Transferring (a pause), optionally replace the
+    /// promoted file and leave a partial beside it, then resume.
+    async fn resume_after_promoted_digestless_file(
+        existing: Option<&'static [u8]>,
+        leftover_part: Option<&'static [u8]>,
+    ) -> (tempfile::TempDir, Result<u64>) {
         let temp = tempfile::TempDir::new().unwrap();
         let stage = temp.path().join("stage");
         std::fs::create_dir(&stage).unwrap();
@@ -4368,9 +4396,13 @@ mod tests {
             AcquisitionPhase::Transferring
         ));
         drop(service);
+        if let Some(existing) = existing {
+            std::fs::write(stage.join("payload.bin"), existing).unwrap();
+        }
+        if let Some(part) = leftover_part {
+            std::fs::write(stage.join("payload.bin.part"), part).unwrap();
+        }
 
-        // No durable receipt or supplied checksum authorizes the promoted file.
-        // Reacquisition must not manufacture verification by comparing local hashes.
         let reopened = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
             temp.path(),
         ))));
@@ -4380,7 +4412,6 @@ mod tests {
             .unwrap();
         let owner = reopened.clone();
         let use_stage = stage.clone();
-        let use_demand = demand.clone();
         let (url, server) = serve(b"DATA").await;
         let result = scope
             .run_invocation(move |context| async move {
@@ -4388,7 +4419,7 @@ mod tests {
                 let operation = owner
                     .begin(
                         &context,
-                        use_demand,
+                        demand,
                         manifest("payload.bin"),
                         grant.identity().clone(),
                         None,
@@ -4406,31 +4437,76 @@ mod tests {
                         &retry(),
                         &mut Host,
                     )
-                    .await?;
-                Ok(())
+                    .await
             })
             .await;
-        assert!(
-            matches!(result, Err(PumasError::Validation { field, message })
-            if field == "download.integrity" && message.contains("preserving both files"))
-        );
-        server.await.unwrap();
+        // A refusal before transfer never connects to the fixture.
+        server.abort();
         scope.shutdown().await.unwrap();
-        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
-        assert_eq!(
-            std::fs::read(stage.join("payload.bin.part")).unwrap(),
-            b"DATA"
-        );
         let records = reopened.store.acquisitions().unwrap();
         assert_eq!(records.len(), 1);
         let record = records.values().next().unwrap();
         assert!(matches!(record.phase, AcquisitionPhase::Transferring));
         assert!(record.files.is_empty());
-        assert!(reopened
-            .store
-            .consumer_receipt(record.id)
-            .unwrap()
-            .is_none());
+        (temp, result)
+    }
+
+    #[tokio::test]
+    async fn promoted_digestless_file_is_proven_by_fresh_transfer_on_resume() {
+        // A paused download keeps the regular files it already published. The
+        // resumed operation transfers the immutable source again and adopts
+        // the existing file only because it is byte-identical.
+        let (temp, result) = resume_after_promoted_digestless_file(None, None).await;
+        assert_eq!(result.unwrap(), 4);
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert!(!stage.join("payload.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn duplicate_partial_from_a_refused_resume_is_discarded_and_resume_completes() {
+        // An earlier build refused publication and left the fresh copy as a
+        // partial. Every one of its bytes is in the final file, so discarding
+        // it loses nothing; the new transfer still proves the final file.
+        for leftover in [b"DATA".as_slice(), b"DA".as_slice()] {
+            let (temp, result) = resume_after_promoted_digestless_file(None, Some(leftover)).await;
+            assert_eq!(result.unwrap(), 4);
+            let stage = temp.path().join("stage");
+            assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+            assert!(!stage.join("payload.bin.part").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn different_existing_digestless_file_is_preserved_for_reconciliation() {
+        let (temp, result) = resume_after_promoted_digestless_file(Some(b"EVIL"), None).await;
+        assert!(
+            matches!(result, Err(PumasError::Validation { field, message })
+            if field == "download.integrity"
+                && message.contains("differs from the fresh immutable-source transfer")
+                && message.contains("preserving both files"))
+        );
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"EVIL");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+    }
+
+    #[tokio::test]
+    async fn differing_partial_beside_unreceipted_file_is_preserved_for_reconciliation() {
+        let (temp, result) = resume_after_promoted_digestless_file(None, Some(b"EV")).await;
+        assert!(
+            matches!(result, Err(PumasError::Validation { field, message })
+            if field == "download.integrity" && message.contains("retained partial differ"))
+        );
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"EV"
+        );
     }
 
     #[tokio::test]

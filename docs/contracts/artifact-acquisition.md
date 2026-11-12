@@ -431,9 +431,15 @@ for an explicit integrity-verification request. An installed file may legitimate
 differ from the acquired artifact. Ownership checks still require regular files,
 current physical/path bindings, required-member closure, recorded lengths and
 valid receipt state; a checksum does not grant ownership. Pending or missing
-receipts cannot be promoted by observing matching files. Unknown pre-existing
-files without a supplied checksum or verified receipt remain unresolved and are
-preserved for reconciliation. An owned rewrite invalidates prior acquisition
+receipts cannot be promoted by observing matching files. A pre-existing final
+file without a supplied checksum or verified receipt (for example a regular Git
+file published by the same operation before a pause) is admitted only during
+unfinished acquisition from an immutable revision, and only when it is
+byte-identical to a complete fresh transfer of that file; the duplicate staged
+copy is then discarded. A retained partial beside such a file is discarded
+before that transfer only when every one of its bytes is already in the final
+file. Any difference keeps both files unresolved, preserved for reconciliation,
+with a refusal naming both lengths and SHA-256 values. An owned rewrite invalidates prior acquisition
 verification before a new download can succeed. Partial-transfer checkpoint
 checks belong to unfinished acquisition, not post-download use.
 

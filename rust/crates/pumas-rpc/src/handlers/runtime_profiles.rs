@@ -49,6 +49,15 @@ struct StopRuntimeProfileParams {
     profile_id: RuntimeProfileId,
 }
 
+/// The registered runtime providers, each with the runtime app a managed
+/// profile launches and whether this server version-manages that app.
+pub async fn get_runtime_providers(state: &AppState) -> crate::contract::RuntimeProvidersOutcome {
+    let managers = state.version_managers.read().await;
+    crate::contract::RuntimeProvidersOutcome::from_registry(&state.provider_registry, |app_id| {
+        managers.contains_key(app_id)
+    })
+}
+
 pub async fn get_runtime_profiles_snapshot(
     state: &AppState,
     _params: &Value,
@@ -463,6 +472,56 @@ mod tests {
             .await
             .insert(AppId::LlamaCpp.as_str().to_owned(), manager.clone());
         manager
+    }
+
+    #[tokio::test]
+    async fn runtime_providers_report_registry_facts_and_held_version_managers() {
+        let temp_dir = TempDir::new().unwrap();
+        let state = crate::handlers::test_support::build_test_app_state(temp_dir.path()).await;
+
+        let before = serde_json::to_value(get_runtime_providers(&state).await).unwrap();
+        assert_eq!(before["success"], true);
+        let providers = before["providers"].as_array().unwrap();
+        let pairs: Vec<_> = providers
+            .iter()
+            .map(|provider| {
+                (
+                    provider["provider"].as_str().unwrap(),
+                    provider["app_id"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("ollama", "ollama"),
+                ("llama_cpp", "llama-cpp"),
+                ("onnx_runtime", "onnx-runtime"),
+                ("torch", "torch"),
+            ]
+        );
+        assert!(providers
+            .iter()
+            .all(|provider| provider["version_managed"] == false));
+        let onnx = &providers[2];
+        assert_eq!(
+            onnx["device_modes"],
+            serde_json::json!(["auto", "cpu", "gpu"])
+        );
+        assert_eq!(onnx["provider_modes"], serde_json::json!(["onnx_serve"]));
+        assert_eq!(onnx["supports_managed_profiles"], true);
+        assert_eq!(onnx["supports_external_profiles"], false);
+
+        llama_cpp_manager_with_installed(&state, temp_dir.path(), &[]).await;
+        let after = serde_json::to_value(get_runtime_providers(&state).await).unwrap();
+        let managed: Vec<_> = after["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|provider| provider["version_managed"] == true)
+            .map(|provider| provider["app_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(managed, ["llama-cpp"]);
     }
 
     #[tokio::test]

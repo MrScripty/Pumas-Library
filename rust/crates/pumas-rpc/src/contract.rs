@@ -37,11 +37,15 @@ use std::path::Path;
 #[cfg_attr(not(feature = "s3"), allow(dead_code))]
 mod s3;
 pub(crate) use s3::*;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+mod runtime_providers;
 #[cfg_attr(not(feature = "s3"), allow(dead_code))]
 mod s3_discovery;
 mod s3_persisted;
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
 mod torch_runtime;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+pub(crate) use runtime_providers::*;
 pub(crate) use s3_discovery::*;
 pub(crate) use s3_persisted::*;
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -350,6 +354,8 @@ pub(crate) enum RpcCommand {
         preview_id: Option<String>,
     },
     #[cfg(feature = "inference-plugins")]
+    GetRuntimeProviders,
+    #[cfg(feature = "inference-plugins")]
     GetTorchRuntimeOptions,
     #[cfg(feature = "inference-plugins")]
     GetTorchReleaseOptions {
@@ -595,6 +601,8 @@ impl RpcCommand {
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion { .. } => "install_version",
             #[cfg(feature = "inference-plugins")]
+            Self::GetRuntimeProviders => "get_runtime_providers",
+            #[cfg(feature = "inference-plugins")]
             Self::GetTorchRuntimeOptions => "get_torch_runtime_options",
             #[cfg(feature = "inference-plugins")]
             Self::GetTorchReleaseOptions { .. } => "get_torch_release_options",
@@ -756,6 +764,8 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
     #[cfg(feature = "inference-plugins")]
+    RuntimeProviders(RuntimeProvidersOutcome),
+    #[cfg(feature = "inference-plugins")]
     TorchRuntimeOptions(TorchRuntimeOptionsOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchReleaseOptions(TorchReleaseOptionsOutcome),
@@ -883,6 +893,8 @@ impl RpcOutcome {
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::RuntimeProviders(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::TorchRuntimeOptions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -7022,6 +7034,8 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                 preview_id: params.preview_id,
             })
         }
+        #[cfg(feature = "inference-plugins")]
+        "get_runtime_providers" => empty().map(|()| RpcCommand::GetRuntimeProviders),
         #[cfg(feature = "inference-plugins")]
         "get_torch_runtime_options" => empty().map(|()| RpcCommand::GetTorchRuntimeOptions),
         #[cfg(feature = "inference-plugins")]

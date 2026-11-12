@@ -121,6 +121,29 @@ test('Torch runtime options require verified records and an offered default adap
   }
 });
 
+test('runtime provider discovery sends no parameters and rejects malformed descriptors', async () => {
+  const harness = loadCompiledPreload();
+  const onnx = {
+    provider: 'onnx_runtime', app_id: 'onnx-runtime', version_managed: true,
+    provider_modes: ['onnx_serve'], device_modes: ['auto', 'cpu', 'gpu'],
+    supports_managed_profiles: true, supports_external_profiles: false,
+  };
+  const valid = { success: true, providers: [onnx] };
+  harness.respondWith(valid);
+  assert.deepEqual(toPlainValue(await harness.api.get_runtime_providers()), valid);
+  assert.equal(harness.invocations.at(-1)?.[1], 'get_runtime_providers');
+  for (const invalid of [
+    { ...valid, providers: [{ ...onnx, app_id: undefined }] },
+    { ...valid, providers: [{ ...onnx, device_modes: ['quantum'] }] },
+    { ...valid, success: false },
+  ]) {
+    harness.respondWith(invalid);
+    await assert.rejects(harness.api.get_runtime_providers(), {
+      name: 'DesktopContractError', status: 'invalid',
+    });
+  }
+});
+
 test('Torch preview decodes ready and all typed rejection outcomes without reading message wording', async () => {
   const harness = loadCompiledPreload();
   const request = { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'none' };

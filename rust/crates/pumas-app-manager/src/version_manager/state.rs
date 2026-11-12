@@ -1050,9 +1050,10 @@ impl VersionState {
                 }
                 return Self::contains_llama_cpp_server_binary(version_path).await;
             }
+            // The sidecar comes from the running Pumas; a runtime is its
+            // environment and records. Copies left by earlier installs are unused.
             AppId::Torch => vec![
                 version_path.join("runtime.json"),
-                version_path.join("serve.py"),
                 pumas_library::platform::paths::venv_python(version_path),
                 version_path.join("requirements.txt"),
             ],

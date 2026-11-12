@@ -1036,6 +1036,10 @@
       "version": "0.7.1"
     },
     {
+      "name": "sha1",
+      "version": "0.11.0"
+    },
+    {
       "name": "sha2",
       "version": "0.10.9"
     },
@@ -5782,6 +5786,23 @@
       ]
     },
     {
+      "name": "sha1",
+      "version": "0.11.0",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/sha1/0.11.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25"
+        }
+      ]
+    },
+    {
       "name": "sha2",
       "version": "0.10.9",
       "license_declared": "MIT OR Apache-2.0",
@@ -8592,11 +8613,11 @@
     "electron/package.json": "252c3b590a3f3fe03b313e590bb483ae45f95e680b59b98b87f3664072228d9a",
     "frontend/package.json": "40efa0eda6eb46b604188b751f0b9c4045ce00d3a101329ea33098c2193f20b7",
     "pnpm-lock.yaml": "32aceb7112faace4a0beb1783fc7ed3c42a86015f86711fbe5f7672f242e8435",
-    "rust/Cargo.lock": "098bce7d6b6820ebbccd24817105d41e9aab184fc4735cde039eb8a9a7d7cba3",
-    "rust/Cargo.toml": "5ac4729864ac1ee314db5319c80e809dc3ba702788cc123d81366be8cce86b7e",
+    "rust/Cargo.lock": "10b12162342efffe34f3d353eaaec29f5354e45f35b9445f1837f7fe6a1a4148",
+    "rust/Cargo.toml": "85069328aa9cda682bd699a44485c37054e79050fa040bfb9e1e71b6587c3d35",
     "rust/crates/pumas-app-manager/Cargo.toml": "8d55ad10dc876828f6290f1148a72202d4428906b9705cdddba141028eb1aafe",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "f39cc48ba0350d63a65521adf5a53bd91e084ac1f6741b68a7a87b1142bfbdc4",
-    "rust/crates/pumas-core/Cargo.toml": "b488c9be2ce38b4ad41a4422c41a1625e774ac5510fd7cf9f8384ab02e5da7b9",
+    "rust/crates/pumas-core/Cargo.toml": "513e373ec0a6c7d6d9ddde0def95c2867483702f7cb51e4634fdf486a8b77eb2",
     "rust/crates/pumas-rpc/Cargo.toml": "2a5c01cc72dcd3fc4d58e650430cb8f0d6c63771eaf06f8064c6611fd23e8fd1",
     "scripts/release/artifact-plan.json": "66348a507f00ffdc74741fc7d70eab02f4a0eed4d3655354784cea2971662064",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
@@ -8606,5 +8627,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "35e706771de620c2bfefe5770b2832c0086bd827012b2b1e464a005dd01b1551"
+  "notices_sha256": "094ca462fd1a95f3a377672192bcc2cf5c7c649130ba5cf67d75d1f76f5c80fe"
 }

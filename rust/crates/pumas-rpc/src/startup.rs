@@ -12,7 +12,7 @@ use std::{path::PathBuf, sync::Arc};
 #[cfg(feature = "inference-plugins")]
 use {
     pumas_app_manager::{SizeCalculator, VersionManager},
-    pumas_library::{AppId, PluginLoader},
+    pumas_library::PluginLoader,
     std::collections::HashMap,
     tracing::warn,
 };
@@ -118,7 +118,7 @@ pub(crate) async fn start(
     let mut managers = HashMap::new();
     #[cfg(feature = "inference-plugins")]
     for app in crate::VERSION_MANAGED_APPS {
-        let initialized = if *app == AppId::LlamaCpp {
+        let initialized = if app.uses_native_archive_installer() {
             VersionManager::new_with_acquisition(&root, *app, api.acquisition().clone()).await
         } else {
             VersionManager::new(&root, *app).await

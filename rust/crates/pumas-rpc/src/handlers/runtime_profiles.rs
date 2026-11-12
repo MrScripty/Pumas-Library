@@ -159,6 +159,17 @@ pub async fn launch_runtime_profile(
                 ProviderManagedLaunchTarget::InProcessRuntime(_)
             )
     }) {
+        if profile.provider == RuntimeProviderId::OnnxRuntime {
+            if let Some(refusal) =
+                onnx_runtime_launch_refusal(state, command.tag.as_deref()).await?
+            {
+                return Ok(serde_json::json!({
+                    "success": false,
+                    "error": refusal,
+                    "ready": false
+                }));
+            }
+        }
         return Ok(serde_json::to_value(
             state
                 .api
@@ -215,6 +226,29 @@ pub async fn launch_runtime_profile(
     )?)
 }
 
+/// ONNX Runtime executes in-process with the library of the active installed
+/// version, so a profile can only run when that library is available. Returns
+/// the reason a launch is refused, or `None` when it may proceed.
+async fn onnx_runtime_launch_refusal(
+    state: &AppState,
+    requested_tag: Option<&str>,
+) -> pumas_library::Result<Option<String>> {
+    let library = super::serving_onnx::active_onnx_runtime_library(state).await?;
+    if let Some(requested) = requested_tag {
+        if library.as_ref().map(|library| library.version_tag()) != Some(requested) {
+            return Ok(Some(format!(
+                "ONNX Runtime runs the active installed version; make {requested} the active \
+                 ONNX Runtime version to use it"
+            )));
+        }
+    }
+    Ok(
+        pumas_library::onnx_runtime::ensure_runtime_library_available(library.as_ref())
+            .err()
+            .map(|error| error.message),
+    )
+}
+
 pub async fn stop_runtime_profile(
     state: &AppState,
     params: &Value,
@@ -230,14 +264,11 @@ mod tests {
     use pumas_library::models::{
         RuntimeDeviceSettings, RuntimeLifecycleState, RuntimeManagementMode, RuntimeProviderMode,
     };
+    use pumas_library::AppId;
     use tempfile::TempDir;
 
-    #[tokio::test]
-    async fn launch_in_process_onnx_profile_does_not_require_version_manager() {
-        let temp_dir = TempDir::new().unwrap();
-        let state = crate::handlers::test_support::build_test_app_state(temp_dir.path()).await;
+    async fn onnx_profile(state: &AppState) -> RuntimeProfileId {
         let profile_id = RuntimeProfileId::parse("onnx-smoke").unwrap();
-
         state
             .api
             .upsert_runtime_profile(RuntimeProfileConfig {
@@ -254,19 +285,104 @@ mod tests {
             })
             .await
             .unwrap();
+        profile_id
+    }
+
+    /// Register an ONNX Runtime version manager with one installed, active
+    /// version whose library is a fixture file. Nothing is downloaded.
+    async fn install_active_onnx_runtime_fixture(state: &AppState, root: &std::path::Path) {
+        let tag = "v1.24.2+cpu";
+        let version_dir = root.join(AppId::OnnxRuntime.versions_dir_name()).join(tag);
+        let library =
+            version_dir.join(pumas_library::onnx_runtime_distribution::library_relative_path());
+        std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+        std::fs::write(&library, b"installed library fixture").unwrap();
+        pumas_library::metadata::MetadataManager::new(root)
+            .update_installed_version(
+                tag,
+                pumas_library::metadata::InstalledVersionMetadata {
+                    path: tag.into(),
+                    installed_date: "2026-11-12T00:00:00Z".into(),
+                    release_tag: tag.into(),
+                    python_version: None,
+                    git_commit: None,
+                    release_date: None,
+                    release_notes: None,
+                    download_url: None,
+                    size: None,
+                    requirements_hash: None,
+                    dependencies_installed: Some(true),
+                },
+                Some(AppId::OnnxRuntime),
+            )
+            .unwrap();
+        let manager = pumas_app_manager::VersionManager::new(root, AppId::OnnxRuntime)
+            .await
+            .unwrap();
+        assert!(manager.set_active_version(tag).await.unwrap());
+        state
+            .version_managers
+            .write()
+            .await
+            .insert(AppId::OnnxRuntime.as_str().to_owned(), manager);
+    }
+
+    #[tokio::test]
+    async fn launch_onnx_profile_without_an_installed_runtime_is_refused_with_a_reason() {
+        if std::env::var_os("ORT_DYLIB_PATH").is_some() {
+            return; // A developer override would satisfy the launch.
+        }
+        let temp_dir = TempDir::new().unwrap();
+        let state = crate::handlers::test_support::build_test_app_state(temp_dir.path()).await;
+        let profile_id = onnx_profile(&state).await;
 
         let response = launch_runtime_profile(
             &state,
-            &serde_json::json!({
-                "profile_id": profile_id.as_str()
-            }),
+            &serde_json::json!({ "profile_id": profile_id.as_str() }),
         )
         .await
         .unwrap();
 
-        assert_eq!(response["success"], true);
-        assert_eq!(response["ready"], true);
+        assert_eq!(response["success"], false);
+        let error = response["error"].as_str().unwrap();
+        assert!(
+            error.contains("no ONNX Runtime version is installed and active"),
+            "{error}"
+        );
+        assert!(
+            error.contains("install a compatible ONNX Runtime version"),
+            "{error}"
+        );
+    }
 
+    #[tokio::test]
+    async fn launch_onnx_profile_uses_the_active_installed_runtime() {
+        let temp_dir = TempDir::new().unwrap();
+        let state = crate::handlers::test_support::build_test_app_state(temp_dir.path()).await;
+        let profile_id = onnx_profile(&state).await;
+        install_active_onnx_runtime_fixture(&state, temp_dir.path()).await;
+
+        let other_version = launch_runtime_profile(
+            &state,
+            &serde_json::json!({ "profile_id": profile_id.as_str(), "tag": "v1.25.0+cpu" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(other_version["success"], false);
+        assert!(other_version["error"]
+            .as_str()
+            .unwrap()
+            .contains("make v1.25.0+cpu the active ONNX Runtime version"));
+
+        let response = launch_runtime_profile(
+            &state,
+            &serde_json::json!({ "profile_id": profile_id.as_str() }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["success"], true, "{response}");
+        assert_eq!(response["ready"], true);
         let snapshot = state.api.get_runtime_profiles_snapshot().await.unwrap();
         let status = snapshot
             .snapshot

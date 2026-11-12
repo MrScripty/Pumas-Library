@@ -8,6 +8,7 @@ pub(crate) use import_custody::{
     IMPORT_DOCUMENT_MAX_BYTES, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS, IMPORT_RECEIPT,
 };
 pub(crate) use import_permissions::ImportDirectoryPermissions;
+pub(crate) use volume_identity::stable_volume;
 
 use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};

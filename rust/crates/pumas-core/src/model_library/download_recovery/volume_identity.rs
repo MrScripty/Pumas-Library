@@ -24,7 +24,7 @@ pub(super) const STABLE_VOLUME: u64 = 1 << 63;
 
 /// The stable volume for a device number, or the device number itself when
 /// its filesystem has no UUID to name it by.
-pub(super) fn stable_volume(device: u64) -> u64 {
+pub(crate) fn stable_volume(device: u64) -> u64 {
     if device & STABLE_VOLUME != 0 {
         return device;
     }

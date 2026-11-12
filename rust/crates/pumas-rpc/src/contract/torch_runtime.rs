@@ -19,9 +19,16 @@ pub(crate) struct TorchRuntimeOptionsOutcome {
     builds: Vec<String>,
     default_build: String,
     pythons: Vec<TorchPythonChoice>,
+    /// Accepted for older callers: `none` (the general install) plus the
+    /// offered extras. Use `modalities` and `extras` instead.
     adapters: Vec<String>,
     /// One of `adapters`.
     default_adapter: String,
+    /// General modalities every install resolves together.
+    modalities: Vec<String>,
+    /// Optional extras offered on this platform; an extra named in
+    /// `adapterRequirements` installs only on that selection.
+    extras: Vec<String>,
     /// Combinations verified on this platform. Evidence, not install pins:
     /// choosing one still resolves current package versions.
     verified: Vec<TorchVerifiedRuntime>,
@@ -56,7 +63,10 @@ pub(crate) struct TorchVerifiedRuntime {
     tag: String,
     build: String,
     python: String,
+    /// Former adapter names the record was made with.
     adapters: Vec<String>,
+    /// Optional extras the record verified; empty for a general install.
+    extras: Vec<String>,
     /// ISO date of the verification.
     verified_on: String,
     /// What the verification exercised.
@@ -80,7 +90,32 @@ pub(crate) struct TorchInstalledRuntime {
     build: Option<String>,
     python: Option<String>,
     adapter: Option<String>,
+    /// Optional extras the runtime installed; null when it records none.
+    extras: Option<Vec<String>>,
+    /// What the install-time probe found importable, per capability.
+    capabilities: Vec<TorchRuntimeCapability>,
     qualification: super::TorchRuntimePreviewQualification,
+}
+
+/// One capability of an installed runtime. `unknown` marks a runtime probed
+/// before every install carried the general modalities.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchRuntimeCapability {
+    /// `text`, `image` or `audio`, or a model family such as `flux2_klein`.
+    name: String,
+    status: TorchRuntimeCapabilityStatus,
+    /// Why the capability is unavailable or unknown.
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum TorchRuntimeCapabilityStatus {
+    Available,
+    Unavailable,
+    Unknown,
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -98,6 +133,14 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
         {
             return Err(invalid_domain_outcome("Torch adapter requirement"));
         }
+        if options.modalities.is_empty()
+            || options
+                .extras
+                .iter()
+                .any(|extra| !options.adapters.contains(extra))
+        {
+            return Err(invalid_domain_outcome("Torch modalities and extras"));
+        }
         Ok(Self {
             builds: options.builds,
             default_build: options.default_build,
@@ -111,6 +154,8 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
                 .collect(),
             adapters: options.adapters,
             default_adapter: options.default_adapter,
+            modalities: options.modalities,
+            extras: options.extras,
             verified: options
                 .verified
                 .into_iter()
@@ -119,6 +164,7 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
                     build: record.build,
                     python: record.python,
                     adapters: record.adapters,
+                    extras: record.extras,
                     verified_on: record.verified_on,
                     scope: record.scope,
                     source_commit: record.source_commit,
@@ -150,6 +196,26 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
                     build: runtime.build,
                     python: runtime.python,
                     adapter: runtime.adapter,
+                    extras: runtime.extras,
+                    capabilities: runtime
+                        .capabilities
+                        .into_iter()
+                        .map(|capability| TorchRuntimeCapability {
+                            name: capability.name,
+                            status: match capability.status {
+                                domain::TorchCapabilityStatus::Available => {
+                                    TorchRuntimeCapabilityStatus::Available
+                                }
+                                domain::TorchCapabilityStatus::Unavailable => {
+                                    TorchRuntimeCapabilityStatus::Unavailable
+                                }
+                                domain::TorchCapabilityStatus::Unknown => {
+                                    TorchRuntimeCapabilityStatus::Unknown
+                                }
+                            },
+                            reason: capability.reason,
+                        })
+                        .collect(),
                     qualification: if runtime.qualified {
                         super::TorchRuntimePreviewQualification::Qualified
                     } else {
@@ -372,13 +438,16 @@ pub(crate) fn torch_runtime_fixtures() -> serde_json::Result<serde_json::Value> 
             id: "auto".into(),
             label: "Select automatically".into(),
         }],
-        adapters: vec!["none".into(), "flux2".into(), "nunchaku".into()],
+        adapters: vec!["none".into(), "nunchaku".into()],
         default_adapter: "none".into(),
+        modalities: vec!["text".into(), "image".into(), "audio".into()],
+        extras: vec!["nunchaku".into()],
         verified: vec![TorchVerifiedRuntime {
             tag: "v2.9.1".into(),
             build: "cu130".into(),
             python: "python3.12".into(),
-            adapters: vec!["flux2".into(), "nunchaku".into()],
+            adapters: vec!["nunchaku".into()],
+            extras: vec!["nunchaku".into()],
             verified_on: "2026-09-23".into(),
             scope: "CUDA execution and adapter imports; no model loaded".into(),
             source_commit: "5d373bf8791c43f1b995f4ba51a17da1610a6686".into(),
@@ -399,6 +468,23 @@ pub(crate) fn torch_runtime_fixtures() -> serde_json::Result<serde_json::Value> 
                 build: Some("cu130".into()),
                 python: Some("python3.12".into()),
                 adapter: Some("bundled".into()),
+                extras: Some(vec!["nunchaku".into()]),
+                capabilities: vec![
+                    TorchRuntimeCapability {
+                        name: "image".into(),
+                        status: TorchRuntimeCapabilityStatus::Available,
+                        reason: None,
+                    },
+                    TorchRuntimeCapability {
+                        name: "audio".into(),
+                        status: TorchRuntimeCapabilityStatus::Unknown,
+                        reason: Some(
+                            "Probed before every Torch install carried text, image and audio \
+                             packages; reinstall it to add and check them"
+                                .into(),
+                        ),
+                    },
+                ],
                 qualification: super::TorchRuntimePreviewQualification::Qualified,
             },
             TorchInstalledRuntime {
@@ -406,6 +492,12 @@ pub(crate) fn torch_runtime_fixtures() -> serde_json::Result<serde_json::Value> 
                 build: None,
                 python: None,
                 adapter: None,
+                extras: None,
+                capabilities: vec![TorchRuntimeCapability {
+                    name: "text".into(),
+                    status: TorchRuntimeCapabilityStatus::Unavailable,
+                    reason: Some("No module named 'jinja2'".into()),
+                }],
                 qualification: super::TorchRuntimePreviewQualification::Unverified,
             },
         ],
@@ -509,11 +601,14 @@ mod tests {
             pythons: Vec::new(),
             adapters: vec!["none".into()],
             default_adapter: "none".into(),
+            modalities: vec!["text".into(), "image".into(), "audio".into()],
+            extras: Vec::new(),
             verified: vec![domain::TorchVerifiedRuntime {
                 tag: "v2.9.1".into(),
                 build: "cu130".into(),
                 python: "python3.12".into(),
                 adapters: vec!["nunchaku".into()],
+                extras: vec!["nunchaku".into()],
                 verified_on: "2026-09-23".into(),
                 scope: "adapter imports".into(),
                 source_commit: "5d373bf8".into(),
@@ -528,6 +623,12 @@ mod tests {
                 build: None,
                 python: None,
                 adapter: None,
+                extras: None,
+                capabilities: vec![domain::TorchRuntimeCapability {
+                    name: "text".into(),
+                    status: domain::TorchCapabilityStatus::Unavailable,
+                    reason: Some("No module named 'jinja2'".into()),
+                }],
                 qualified: false,
             }],
         };
@@ -540,6 +641,35 @@ mod tests {
         assert_eq!(wire["verified"][0]["verifiedOn"], "2026-09-23");
         assert_eq!(wire["verified"][0]["sourceCommit"], "5d373bf8");
         assert_eq!(wire["verified"][0]["packages"][0]["version"], "12.1.0");
+        assert_eq!(
+            wire["verified"][0]["extras"],
+            serde_json::json!(["nunchaku"])
+        );
+        assert_eq!(
+            wire["modalities"],
+            serde_json::json!(["text", "image", "audio"])
+        );
+        assert_eq!(wire["extras"], serde_json::json!([]));
+        assert!(wire["installed"][0]["extras"].is_null());
+        assert_eq!(
+            wire["installed"][0]["capabilities"][0],
+            serde_json::json!({
+                "name": "text",
+                "status": "unavailable",
+                "reason": "No module named 'jinja2'",
+            })
+        );
+        // An extra must also be accepted as an adapter by older callers.
+        let unlisted_extra = domain::TorchRuntimeOptions {
+            extras: vec!["nunchaku".into()],
+            ..options.clone()
+        };
+        assert!(TorchRuntimeOptionsOutcome::try_from(unlisted_extra).is_err());
+        let no_modalities = domain::TorchRuntimeOptions {
+            modalities: Vec::new(),
+            ..options.clone()
+        };
+        assert!(TorchRuntimeOptionsOutcome::try_from(no_modalities).is_err());
 
         let unoffered = domain::TorchRuntimeOptions {
             default_adapter: "flux2".into(),

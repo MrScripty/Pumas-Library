@@ -23,6 +23,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   its running profiles; they keep the version they started from, and the
   change applies to new launches. Removing a version is refused only while an
   instance runs that version, and the refusal names the profiles to stop.
+- Torch runtime wheels now download through Pumas's shared acquisition
+  owner, the one llama.cpp archives use, instead of through pip. A dropped
+  connection resumes from the bytes already received, and a failed install
+  keeps those bytes so the next install continues them. Each wheel is checked
+  against the SHA-256 its index publishes before pip installs it offline from
+  the local file. The resolver still chooses every version. Previously, pip
+  discarded a partial wheel when its retries ran out, as it did with 415 MB of
+  a 540 MB Torch wheel during a DNS outage.
+- A Torch install that cannot use shared acquisition keeps pip's downloads
+  and writes the reason in its installation log.
+- Every Torch install now carries all general modalities: the text (with
+  Jinja), image and audio packages resolve together at current releases.
+  Image generation, Cohere ASR and text models no longer depend on which
+  adapter was picked at install time. Nunchaku is the only optional extra,
+  because its wheel is qualified to one Torch and Python pair. A modality
+  whose packages have no compatible wheel is left out with its reason instead
+  of failing the install; the Cohere ASR Transformers floor is a floor, not a
+  pin, and yields to an older Torch or a chosen tested combination.
+- Installed Torch runtimes report capabilities from what their install probe
+  could import, each available, unavailable (with the reason) or unknown for
+  runtimes probed before this change. The install dialog shows the general
+  modalities and extras the backend reports, and "verified combinations" are
+  shown as tested-as-working evidence.
+
+### Deprecated
+
+- The `adapter` parameter of `preview_torch_runtime` is still accepted and
+  mapped (`none`, `flux2` and `cohere-asr` select the general install,
+  `nunchaku` the Nunchaku extra). Send `extras` instead; a removal will be
+  announced separately.
 
 ## [0.8.0] - 2026-11-08
 
@@ -229,6 +259,15 @@ the 2026-11-02 audit
 
 ### Security
 
+- Third-party telemetry is disabled in every runtime and conversion process
+  Pumas starts (`HF_HUB_DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`, which cover
+  huggingface_hub, Transformers, Diffusers and sentence-transformers, and
+  `ORT_DISABLE_TELEMETRY=1` for ONNX Runtime), even when the user's
+  environment enables it.
+- Runtime and conversion processes run with `HF_HUB_OFFLINE=1`, so Hugging
+  Face libraries read only the files Pumas downloaded into the library and
+  never fetch missing ones into their own cache. The Sherry conversion script
+  now also loads with `local_files_only=True` and without remote code.
 - The desktop keeps every renderer on the bundled app: child windows,
   off-app navigation, webviews and browser permissions are denied, links open
   in the system browser, and every IPC handler checks its sender. Packaged

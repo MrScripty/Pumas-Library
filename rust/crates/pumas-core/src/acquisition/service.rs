@@ -1988,6 +1988,75 @@ impl AcquisitionConsumer {
             .await
     }
 
+    /// Observe the records this consumer retains in the shared store, so it can
+    /// choose an exact demand to resume or settle. Observation grants no
+    /// filesystem, transfer, or settlement authority.
+    pub async fn retained_acquisitions(&self) -> Result<Vec<AcquisitionRecord>> {
+        let store = self.service.store.clone();
+        let owner = self.owner.clone();
+        self.run_blocking("observe retained consumer acquisitions", move || {
+            Ok(store
+                .acquisitions()?
+                .into_values()
+                .filter(|record| record.demand.consumer == owner)
+                .collect())
+        })
+        .await
+    }
+
+    /// Withdraw a retained `Using` lease that never received a completion
+    /// receipt, for a consumer whose output under that lease is disposable.
+    ///
+    /// The held workspace must match the exact retained selection and its
+    /// verified-file receipts. `cleanup` runs only after that check and must
+    /// revoke and reclaim whatever the interrupted consumer produced; only its
+    /// success permits withdrawal. A receipted use is refused (reconcile it
+    /// instead), and so is a terminal record. Returns `false` when the demand
+    /// has no record or only an unfinished transfer. Input files are not
+    /// removed unless `cleanup` removes them.
+    pub async fn withdraw_unreceipted_use(
+        &self,
+        demand: AcquisitionDemand,
+        manifest: ArtifactManifest,
+        workspace: AcquisitionWorkspace,
+        cleanup: impl FnOnce() -> Result<()> + Send + 'static,
+    ) -> Result<bool> {
+        if demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        let service = self.service.clone();
+        self.scope
+            .run_worker_invocation(move |context| async move {
+                service.require_schema(&context).await?;
+                let Some(proof) = service
+                    .reopen_using(&context, &demand, &manifest, &workspace)
+                    .await?
+                else {
+                    return Ok(false);
+                };
+                let record = proof.record().clone();
+                let AcquisitionPhase::Using { lease } = record.phase else {
+                    return Err(invalid("Retained consumer use has no exact lease"));
+                };
+                let use_handle = AcquiredArtifactUse {
+                    store: service.store.clone(),
+                    context: context.clone(),
+                    lease: AcquisitionUseLease {
+                        operation: AcquisitionOperation {
+                            record,
+                            context: context.clone(),
+                        },
+                        workspace,
+                        lease,
+                        context: context.clone(),
+                    },
+                };
+                use_handle.withdraw_after_cleanup(cleanup).await?;
+                Ok(true)
+            })
+            .await
+    }
+
     /// Revalidate a retained consumer receipt under the supplied held
     /// workspace and exact source selection. The callback owns interpretation
     /// of its payload and must verify its durable output before returning.
@@ -4715,6 +4784,121 @@ mod tests {
     #[tokio::test]
     async fn cleanup_failure_retains_using_record_and_verified_file() {
         withdrawal_waits_for_consumer_effect(true).await;
+    }
+
+    #[tokio::test]
+    async fn cold_unreceipted_use_is_withdrawn_only_after_consumer_cleanup() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "interrupted-disposable-use".into(),
+        };
+        {
+            // An interrupted consumer leaves a receiptless Using row behind.
+            let store = Arc::new(AcquisitionStore::new(temp.path()));
+            let service = Arc::new(AcquisitionService::new(store));
+            let consumer = service.open_consumer("fixture").unwrap();
+            let (url, server) = serve(b"DATA").await;
+            let result = consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: demand.clone(),
+                        manifest: manifest("payload.bin"),
+                        workspace: workspace(&stage),
+                        sources: vec![AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    |_use_handle| async move {
+                        Err::<((), Value), PumasError>(PumasError::Other("interrupted".into()))
+                    },
+                    |(), _receipt| async move { Ok::<(), PumasError>(()) },
+                )
+                .await;
+            assert!(matches!(result, Err(PumasError::Other(message)) if message == "interrupted"));
+            server.await.unwrap();
+            consumer.shutdown().await.unwrap();
+            service.shutdown().await.unwrap();
+        }
+
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let other = service.open_consumer("other").unwrap();
+        let retained = consumer.retained_acquisitions().await.unwrap();
+        assert_eq!(retained.len(), 1);
+        assert!(matches!(retained[0].phase, AcquisitionPhase::Using { .. }));
+        assert!(other.retained_acquisitions().await.unwrap().is_empty());
+        assert!(other
+            .withdraw_unreceipted_use(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Ok(())
+            )
+            .await
+            .is_err());
+
+        // Failed consumer cleanup keeps the retained lease and its input.
+        let failed = consumer
+            .withdraw_unreceipted_use(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Err(PumasError::Other("output still present".into())),
+            )
+            .await;
+        assert!(failed.is_err());
+        assert!(matches!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Using { .. }
+        ));
+
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let observed = cleaned.clone();
+        assert!(consumer
+            .withdraw_unreceipted_use(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                move || {
+                    observed.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap());
+        assert!(cleaned.load(Ordering::SeqCst));
+        let records = consumer.retained_acquisitions().await.unwrap();
+        assert_eq!(records[0].phase, AcquisitionPhase::Withdrawn);
+        // Withdrawal releases custody; it does not reclaim unremoved input bytes.
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        // A terminal row cannot be withdrawn again.
+        assert!(consumer
+            .withdraw_unreceipted_use(
+                demand,
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Ok(())
+            )
+            .await
+            .is_err());
+        // The failed consumer cleanup stays visible to the scope owner.
+        assert!(matches!(
+            consumer.shutdown().await,
+            Err(PumasError::DownloadShutdownFailed { failures: 1 })
+        ));
+        other.shutdown().await.unwrap();
+        assert!(matches!(
+            service.shutdown().await,
+            Err(PumasError::DownloadShutdownFailed { failures: 1 })
+        ));
     }
 
     #[tokio::test]

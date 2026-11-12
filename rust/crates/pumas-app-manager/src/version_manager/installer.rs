@@ -7,11 +7,13 @@ mod native_archive_tests;
 mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
+mod torch_wheels;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;
 pub(crate) use torch::TorchVersionsLock;
+pub(crate) use torch_wheels::TORCH_WHEEL_CONSUMER;
 
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use chrono::Utc;

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Torch runtime wheels now download through Pumas's shared acquisition
+  owner, the one llama.cpp archives use, instead of through pip. A dropped
+  connection resumes from the bytes already received, and a failed install
+  keeps those bytes so the next install continues them. Each wheel is checked
+  against the SHA-256 its index publishes before pip installs it offline from
+  the local file. The resolver still chooses every version. Previously, pip
+  discarded a partial wheel when its retries ran out, as it did with 415 MB of
+  a 540 MB Torch wheel during a DNS outage.
+- A Torch install that cannot use shared acquisition keeps pip's downloads
+  and writes the reason in its installation log.
+
 ## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,

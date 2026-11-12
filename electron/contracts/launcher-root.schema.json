@@ -71,7 +71,7 @@
           "description": "The library's instance entry left by a Pumas process that is no longer running, as the backend reported it. Releasing it requires the user's confirmation of exactly this entry.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["pid", "startedAt", "leaseChecked"],
+          "required": ["pid", "startedAt", "leaseChecked", "survivingProcesses"],
           "properties": {
             "pid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
             "startedAt": {"type": "string", "minLength": 1, "maxLength": 64},
@@ -79,6 +79,20 @@
             "leaseChecked": {
               "description": "Whether a free lock on the library backs the finding (false on Windows, where only the process check does).",
               "type": "boolean"
+            },
+            "survivingProcesses": {
+              "description": "Processes the old Pumas started (runtime profiles, launched apps) that are still running. The release is refused while any is.",
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["pid", "record"],
+                "properties": {
+                  "pid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+                  "record": {"type": "string", "minLength": 1, "maxLength": 96}
+                }
+              }
             }
           }
         }

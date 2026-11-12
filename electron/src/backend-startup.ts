@@ -72,6 +72,7 @@ export class BackendStartupFailureReader {
           startedAt: stale.started_at,
           ...(typeof stale.version === 'string' ? { version: stale.version } : {}),
           leaseChecked: stale.lease_checked,
+          survivingProcesses: stale.surviving_processes.map(({ pid, record }) => ({ pid, record })),
         }
       : undefined;
   }

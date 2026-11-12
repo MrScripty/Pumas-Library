@@ -19,5 +19,5 @@ pub mod library_registry;
 
 pub use library_registry::{
     InstanceClaimResult, InstanceEntry, InstanceStatus, LibraryEntry, LibraryRegistry,
-    LocalInstanceTransportKind, PrimaryInstanceClaim, StaleInstance,
+    LocalInstanceTransportKind, PrimaryInstanceClaim, StaleInstance, SurvivingProcess,
 };

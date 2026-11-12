@@ -138,10 +138,10 @@ describe('LauncherRootRecoveryProvider', () => {
     expect(text).toHaveTextContent('Reason: launcher root /missing/library does not exist');
   });
 
-  const staleState = (leaseChecked: boolean) => ({
+  const staleState = (leaseChecked: boolean, survivingProcesses: Array<{ pid: number; record: string }> = []) => ({
     status: 'recovery-required', reason: 'stale-instance', authoritySource: 'persisted', action: 'select-library',
     detail: 'The library is registered as open by Pumas process 4242, which is no longer running.',
-    staleInstance: { pid: 4242, startedAt: '2026-11-10T19:40:23Z', version: '0.8.0', leaseChecked },
+    staleInstance: { pid: 4242, startedAt: '2026-11-10T19:40:23Z', version: '0.8.0', leaseChecked, survivingProcesses },
   });
 
   it('releases a stale entry only after confirming that exact entry, then opens the library', async () => {
@@ -164,6 +164,17 @@ describe('LauncherRootRecoveryProvider', () => {
     expect(screen.queryByText('Library content')).not.toBeInTheDocument();
     await act(async () => pending.resolve({ status: 'ready', state: { status: 'ready', selectionAction: 'select-library', libraryScopeId: null } }));
     expect(await screen.findByText('Library content')).toBeVisible();
+  });
+
+  it('names what to check and lists recorded processes that still run', async () => {
+    installElectronBridge(async () => staleState(true, [
+      { pid: 777, record: 'launcher-data/runtime-profiles/llama-cpp/default/runtime.pid' },
+    ]));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Release Entry' }));
+    expect(screen.getByText(/llama.cpp servers/)).toBeVisible();
+    expect(screen.getByText(/Process 777 \(launcher-data\/runtime-profiles\/llama-cpp\/default\/runtime.pid\)/)).toBeVisible();
+    expect(screen.getByText(/will not release the entry until they stop/)).toBeVisible();
   });
 
   it('shows why a release was refused and changes nothing else', async () => {

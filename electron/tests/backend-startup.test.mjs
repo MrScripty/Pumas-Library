@@ -52,10 +52,11 @@ test('a backend from another build is read tolerantly', () => {
 
 test('a stale instance entry is carried to recovery, and only with its details', () => {
   const reader = new BackendStartupFailureReader();
-  reader.push('PUMAS_STARTUP_FAILURE={"version":1,"reason":"stale-instance","detail":"Pumas process 42 is gone.","stale_instance":{"pid":42,"started_at":"2026-11-10T19:40:23Z","version":"0.8.0","lease_checked":true}}\n');
+  reader.push('PUMAS_STARTUP_FAILURE={"version":1,"reason":"stale-instance","detail":"Pumas process 42 is gone.","stale_instance":{"pid":42,"started_at":"2026-11-10T19:40:23Z","version":"0.8.0","lease_checked":true,"surviving_processes":[{"pid":77,"record":"launcher-data/runtime-profiles/llama-cpp/default/runtime.pid"}]}}\n');
   assert.equal(reader.reason, 'stale-instance');
   assert.equal(reader.detail, 'Pumas process 42 is gone.');
-  assert.deepEqual(reader.staleInstance, { pid: 42, startedAt: '2026-11-10T19:40:23Z', version: '0.8.0', leaseChecked: true });
+  assert.deepEqual(reader.staleInstance, { pid: 42, startedAt: '2026-11-10T19:40:23Z', version: '0.8.0', leaseChecked: true,
+    survivingProcesses: [{ pid: 77, record: 'launcher-data/runtime-profiles/llama-cpp/default/runtime.pid' }] });
   // A stale-instance reason without the entry cannot be acted on.
   const bare = new BackendStartupFailureReader();
   bare.push('PUMAS_STARTUP_FAILURE={"version":1,"reason":"stale-instance","detail":"gone"}\n');

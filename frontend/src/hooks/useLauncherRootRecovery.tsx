@@ -506,6 +506,22 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
               <p>{stale.leaseChecked
                 ? 'No process holds this library’s lock, and process ' + String(stale.pid) + ' is not running.'
                 : 'Process ' + String(stale.pid) + ' is not running. Pumas cannot check the library’s lock on this system, so make sure no Pumas window or backend is open.'}</p>
+              {stale.survivingProcesses.length > 0 ? (
+                <div role="alert">
+                  <p>These processes the old Pumas started are still running. Pumas will not release the entry until they stop:</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {stale.survivingProcesses.map((process) => (
+                      <li key={process.record}>Process {process.pid} ({process.record})</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              <p>
+                Before releasing, make sure nothing the old Pumas started is still running: llama.cpp servers
+                (llama-server), the Torch server (serve.py), conversion workers, and apps it launched. Check your
+                system’s task manager or Activity Monitor, or run <code>ps aux | grep -i -E &quot;llama|pumas|serve.py&quot;</code>,
+                and stop any you find.
+              </p>
               <label className="flex items-start gap-2">
                 <input type="checkbox" checked={releaseConfirmed} onChange={(event) => setReleaseConfirmed(event.target.checked)} />
                 No Pumas window, backend, or other tool is still using this library.

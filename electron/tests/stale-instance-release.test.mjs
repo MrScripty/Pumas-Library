@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { StaleInstanceReleaseCoordinator, runStaleInstanceRelease } from '../dist/stale-instance-release.js';
 
-const staleInstance = { pid: 42, startedAt: '2026-11-10T19:40:23Z', version: '0.8.0', leaseChecked: true };
+const staleInstance = { pid: 42, startedAt: '2026-11-10T19:40:23Z', version: '0.8.0', leaseChecked: true, survivingProcesses: [] };
 const confirmation = { pid: 42, startedAt: '2026-11-10T19:40:23Z', confirmed: true };
 const target = { launcherRoot: '/selected library', rustBinaryPath: '/packaged/pumas-rpc', staleInstance };
 const state = { status: 'ready', selectionAction: 'select-library', libraryScopeId: null };

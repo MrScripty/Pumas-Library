@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 5030810a1915adaa4604696aa87d4d33e169ec26fd1a98712cfdf1a7b271fce4. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 8dcb316e1e803b82d55d59c3914834a9eaa6babe5f845fe8d7216c617d0d6243. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -93,7 +93,7 @@ export type LauncherRootRecoveryDetail = string;
 export type LauncherRootRecoveryReason = "invalid" | "unavailable" | "migration-required" | "backend-unavailable" | "stale-instance";
 export type LauncherRootSelectionAction = "select-library" | "correct-launch-input";
 export type LauncherRootSelectionResult = ({ "status": "cancelled" }) | ({ "status": "restarting" }) | ({ "status": "not-selectable"; "action": "correct-launch-input" }) | ({ "status": "recovery-required"; "reason": "invalid-selection" | "chooser-unavailable"; "authorityState": "unchanged" }) | ({ "status": "recovery-required"; "reason": "persistence-unavailable"; "authorityState": LauncherRootAuthorityState }) | ({ "status": "recovery-required"; "reason": "restart-unavailable"; "authorityState": "published" });
-export type LauncherRootStaleInstance = { "pid": number; "startedAt": string; "version"?: string; "leaseChecked": boolean };
+export type LauncherRootStaleInstance = { "pid": number; "startedAt": string; "version"?: string; "leaseChecked": boolean; "survivingProcesses": ReadonlyArray<{ "pid": number; "record": string }> };
 export type LauncherRootStartupState = ({ "status": "initializing" }) | (LauncherRootReadyState) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "persisted" | "default"; "action": "select-library"; "detail"?: LauncherRootRecoveryDetail; "staleInstance"?: LauncherRootStaleInstance }) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "environment" | "argument"; "action": "correct-launch-input"; "detail"?: LauncherRootRecoveryDetail; "staleInstance"?: LauncherRootStaleInstance });
 export type LibraryModelMetadataOutcome = { "component_manifest"?: ReadonlyArray<BundleComponentManifestEntry>; "effective_metadata"?: { readonly [key: string]: DesktopJsonValue }; "embedded_metadata"?: EmbeddedMetadataResponse; "model_id": string; "primary_file"?: string; "stored_metadata"?: { readonly [key: string]: DesktopJsonValue }; "success": true };
 export type LibraryStatusResponse = { "deep_scan_in_progress": boolean; "deep_scan_progress"?: (DeepScanProgress) | (null); "error"?: string | null; "indexing": boolean; "model_count": number; "pending_lookups"?: number | null; "success": boolean };
@@ -209,7 +209,7 @@ export type ServingStatusUpdateFeed = { "cursor": string; "events": ReadonlyArra
 export type SetDefaultVersionOutcome = { "success": boolean };
 export type SetDefaultVersionParams = ({ "app_id": string; "tag"?: string | null }) | ({ "appId": string; "tag"?: string | null });
 export type SetHfTokenParams = { "token": string };
-export type StaleInstanceFrame = { "lease_checked": boolean; "pid": number; "started_at": string; "version"?: string | null };
+export type StaleInstanceFrame = { "lease_checked": boolean; "pid": number; "started_at": string; "surviving_processes": ReadonlyArray<SurvivingProcessFrame>; "version"?: string | null };
 export type StaleInstanceReleaseConfirmation = { "pid": number; "startedAt": string; "confirmed": true };
 export type StaleInstanceReleaseResult = ({ "status": "unavailable" }) | ({ "status": "failed"; "stage": "release" | "open"; "message"?: string }) | ({ "status": "ready"; "state": LauncherRootReadyState });
 export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previous_operation_id"?: string | null };
@@ -222,6 +222,7 @@ export type StopRuntimeProfileGenerationOutcome = { "stopped": boolean; "success
 export type StopRuntimeProfileGenerationParams = ({ "generation": string; "profile_id": string }) | ({ "generation": string; "profileId": string });
 export type SuccessOutcome = { "success": true };
 export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
+export type SurvivingProcessFrame = { "pid": number; "record": string };
 export type SwitchVersionOutcome = { "success": boolean };
 export type SwitchVersionParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
 export type SystemResources = { "cpu": CpuResources; "disk": DiskResources; "gpu": GpuResources; "ram": RamResources };

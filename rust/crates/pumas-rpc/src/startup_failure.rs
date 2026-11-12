@@ -52,7 +52,22 @@ pub(crate) struct StaleInstanceFrame {
     /// Whether a free store lease backs the finding (false on Windows, where
     /// only the process check does).
     pub(crate) lease_checked: bool,
+    /// Processes the old Pumas started that still run; the release refuses
+    /// while any does. At most [`MAX_SURVIVORS`] are listed.
+    pub(crate) surviving_processes: Vec<SurvivingProcessFrame>,
 }
+
+/// A process the old Pumas started that is still running.
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct SurvivingProcessFrame {
+    pub(crate) pid: u32,
+    /// Its PID record, relative to the library root.
+    #[cfg_attr(feature = "export-contract", schemars(length(min = 1, max = 96)))]
+    pub(crate) record: String,
+}
+
+const MAX_SURVIVORS: usize = 4;
 
 pub(crate) const MIGRATION_REQUIRED: &str = "migration-required";
 pub(crate) const BACKEND_UNAVAILABLE: &str = "backend-unavailable";
@@ -113,6 +128,15 @@ impl StartupFailureFrame {
                 started_at: bounded(&stale.started_at, 64),
                 version: stale.version.as_deref().map(|version| bounded(version, 64)),
                 lease_checked: stale.lease_checked,
+                surviving_processes: stale
+                    .surviving_processes
+                    .iter()
+                    .take(MAX_SURVIVORS)
+                    .map(|process| SurvivingProcessFrame {
+                        pid: process.pid,
+                        record: bounded(&process.record.to_string_lossy(), 96),
+                    })
+                    .collect(),
             });
         }
         frame
@@ -179,6 +203,16 @@ mod tests {
             started_at: "2026-11-10T19:40:23Z".into(),
             version: Some("0.8.0".into()),
             lease_checked: true,
+            surviving_processes: (0..10)
+                .map(|n| pumas_library::registry::SurvivingProcess {
+                    pid: 100 + n,
+                    record: format!(
+                        "launcher-data/runtime-profiles/llama-cpp/profile-{n}/runtime.pid"
+                    )
+                    .into(),
+                    executable: Some("/usr/bin/llama-server".into()),
+                })
+                .collect(),
         };
         let frame = StartupFailureFrame::for_error_at(&error, Some(&stale));
         assert_eq!(frame.reason, STALE_INSTANCE);
@@ -189,7 +223,8 @@ mod tests {
             .contains("process 42, which is no longer running"));
         assert_eq!(
             serde_json::to_value(&frame).unwrap()["stale_instance"],
-            serde_json::json!({"pid": 42, "started_at": "2026-11-10T19:40:23Z", "version": "0.8.0", "lease_checked": true})
+            serde_json::json!({"pid": 42, "started_at": "2026-11-10T19:40:23Z", "version": "0.8.0", "lease_checked": true,
+                "surviving_processes": (0..4).map(|n| serde_json::json!({"pid": 100 + n, "record": format!("launcher-data/runtime-profiles/llama-cpp/profile-{n}/runtime.pid")})).collect::<Vec<_>>()})
         );
         // A required migration keeps its own flow even with a stale entry.
         let migration = anyhow::Error::from(PumasError::Validation {

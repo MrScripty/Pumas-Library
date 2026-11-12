@@ -15,7 +15,7 @@ pub(crate) mod catalog_recovery;
 pub(crate) mod local_enumeration;
 pub(crate) mod pending_recovery;
 mod stale_instance;
-pub use stale_instance::StaleInstance;
+pub use stale_instance::{StaleInstance, SurvivingProcess};
 
 /// Create `dir` and missing parents; on Unix the created directories are
 /// owner-only (0700). Existing directories keep their mode.

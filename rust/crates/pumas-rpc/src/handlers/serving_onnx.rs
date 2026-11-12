@@ -114,7 +114,7 @@ pub(super) async fn serve_onnx_model(
                 state,
                 serving_error(
                     ModelServeErrorCode::ProviderLoadFailed,
-                    &onnx_load_failure_message(&error),
+                    onnx_load_failure_message(&error),
                     &request,
                 ),
             )

@@ -156,3 +156,21 @@ remains pending the reference safetensors and a served session.
   - **Pending live check after the next restart:** in-flight downloads keep
     their custody under the new volume IDs, and a graceful shutdown removes
     the registry row.
+- **A1 (2026-11-12): pass.** Qwen/Qwen3-Reranker-0.6B safetensors completed.
+  On the oracle pairs, the head derived from the headless mradermacher
+  Q8_0 GGUF agrees with sentence-transformers CrossEncoder (bf16, local
+  package) to within 0.24 in logit space (l_yes − l_no), in the same order
+  on every pair. Script: `scratchpad/oracle/a1_compare.py`.
+- **zerank-2 (A2, partial).** Its declarations come from
+  `zeroentropy/zerank-2-reranker@5eae30d5`: true token "Yes" 9454, no false
+  token, Identity. `gguf_to_ranking_gguf` completed on the Q4_K_M GGUF. On the
+  card's pairs ("What is 2+2?" against "4" and against "The answer is
+  definitely 1 million"), the derived head gives logits 4.42 and −4.46. The
+  card's bf16 values are 5.41 and −4.50. The order is correct, and the
+  negative pair is within 0.04. The positive pair is 1.0 low, which is
+  plausibly Q4_K_M quantization, but that has not been confirmed: the bf16
+  package exceeds the 4 GB testing limit. The true-token-only half of A2
+  (the 0.6B against sentence-transformers) is still pending.
+- **Network outage (2026-11-11/12).** DNS failed for download-r2.pytorch.org
+  and the Torch v2.15.0 install stopped at 415/540 MB ("incomplete-download");
+  it was restarted. Model downloads continued.

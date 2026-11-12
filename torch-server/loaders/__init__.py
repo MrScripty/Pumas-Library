@@ -35,6 +35,7 @@ def load_model(
         return load_cohere_asr(path, device)
 
     _require_safetensors_weights(path)
+    _refuse_unexecuted_custom_code(path)
     if model_type == "dllm":
         from .dllm_loader import load_dllm
 
@@ -61,6 +62,57 @@ def _require_safetensors_weights(path: Path) -> None:
             "Torch text models must provide .safetensors weights; "
             "pickle checkpoints (.bin, .pt) are not loaded"
         )
+
+
+def _auto_map_modules(auto_map: dict) -> list[str]:
+    """Code files an ``auto_map`` names: ``module.Class`` or ``org/repo--module.Class``."""
+    references = []
+    for value in auto_map.values():
+        values = value if isinstance(value, list) else [value]
+        references.extend(reference for reference in values if isinstance(reference, str))
+    modules = set()
+    for reference in references:
+        local = reference.split("--", 1)[-1]
+        module = local.rsplit(".", 1)[0]
+        if module and module != local:
+            modules.add(f"{module.replace('.', '/')}.py")
+    return sorted(modules)
+
+
+def _refuse_unexecuted_custom_code(path: Path) -> None:
+    """Say so when a model needs repository code that Pumas never executes.
+
+    Pumas stores a model's ``*.py`` files for inspection only, and loaders keep
+    ``trust_remote_code=False``. A config whose ``auto_map`` names code for a
+    ``model_type`` this transformers build does not implement cannot load, so
+    the caller gets that reason instead of an opaque loader failure. Models whose
+    architecture transformers implements natively still load: transformers
+    ignores ``auto_map`` when remote code is not trusted.
+    """
+    from validation import ModelLoadRefusal
+
+    config_path = path / "config.json" if path.is_dir() else path.parent / "config.json"
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+    auto_map = config.get("auto_map") if isinstance(config, dict) else None
+    if not isinstance(auto_map, dict) or not auto_map:
+        return
+    model_type = config.get("model_type")
+    try:
+        from transformers import CONFIG_MAPPING
+    except ImportError:
+        return
+    if isinstance(model_type, str) and model_type in CONFIG_MAPPING:
+        return
+    modules = ", ".join(_auto_map_modules(auto_map)) or "its auto_map code"
+    raise ModelLoadRefusal(
+        f"This model's config.json auto_map requires custom code ({modules}) for "
+        f"model_type {model_type!r}, which this transformers build does not implement. "
+        "Pumas stores that code with the model for inspection but never executes it."
+    )
 
 
 def _detect_model_type(path: Path) -> str:

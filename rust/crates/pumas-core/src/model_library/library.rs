@@ -4509,6 +4509,18 @@ impl ModelLibrary {
     /// moved it) when its category or family changed, `None` if nothing changed.
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
         let model_dir = self.library_root.join(model_id);
+        #[cfg(windows)]
+        eprintln!(
+            "DIAGW reclassify {model_id} root={:?}\n{}",
+            self.library_root,
+            std::backtrace::Backtrace::force_capture()
+                .to_string()
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.contains("pumas_library::"))
+                .collect::<Vec<_>>()
+                .join(" <- ")
+        );
 
         if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {

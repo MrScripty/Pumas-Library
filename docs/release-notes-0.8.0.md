@@ -257,17 +257,16 @@ schema versions rather than matching product versions.
   ones; the router loads each model's projector and reports its modalities.
 - Ollama embedding models load through `/api/embed`.
 
-## Models tested with this release
+## Supported models
 
-These models were run end to end through Pumas, on the following runtimes:
-llama.cpp b12099 (CUDA 12), the Pumas-managed Torch runtime (Torch 2.15.0,
-Transformers 5.22.2), and ONNX Runtime 1.24.2 on CPU. Rerank results were
-checked against sentence-transformers, and embeddings against the same model
-on another runtime.
+These are the models supported in this release, on llama.cpp b12099 (CUDA 12),
+the Pumas-managed Torch runtime (Torch 2.15.0, Transformers 5.22.2) and ONNX
+Runtime 1.24.2. Rerank results were checked against sentence-transformers, and
+embeddings against the same model on another runtime.
 
 ### Decision models
 
-| Model | Format | Runtime | Tested |
+| Model | Format | Runtime | Use |
 | --- | --- | --- | --- |
 | `ggml-org/Kev-4B-GGUF` | GGUF Q8_0 | llama.cpp | choice, score and yes/no decisions |
 | `ggml-org/Laya-GGUF` | GGUF Q8_0 | llama.cpp | decisions, including inputs over 1,500 tokens |
@@ -276,7 +275,7 @@ on another runtime.
 
 ### Rerankers
 
-| Model | Format | Runtime | Tested |
+| Model | Format | Runtime | Use |
 | --- | --- | --- | --- |
 | `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` | GGUF Q8_0 | llama.cpp | order and `top_n` |
 | `mradermacher/Qwen3-Reranker-0.6B-GGUF` | GGUF Q8_0 | llama.cpp | with a derived ranking head; same order as sentence-transformers |
@@ -291,19 +290,38 @@ on another runtime.
 
 ### Embedders
 
-| Model | Format | Runtime | Tested |
+| Model | Format | Runtime | Use |
 | --- | --- | --- | --- |
 | `unsloth/embeddinggemma-2-GGUF` | GGUF Q8_0 + projector | llama.cpp | text and image embeddings, truncation to 256 dimensions |
 | `microsoft/harrier-oss-v1-270m` | Safetensors | Torch | text embeddings |
 | `mykor/harrier-oss-v1-270m-GGUF` | GGUF Q8_0 | llama.cpp | text embeddings, matching Torch |
 
+### Language models
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `LiquidAI/LFM3-1.7B-GGUF` | GGUF | llama.cpp | chat |
+
 ### Audio, vision-language and omni
 
-| Model | Format | Runtime | Tested |
+| Model | Format | Runtime | Use |
 | --- | --- | --- | --- |
+| `CohereLabs/cohere-transcribe-03-2026` | Safetensors | Torch | speech transcription in 14 languages |
 | `LiquidAI/LFM3-Audio-2B-GGUF` | GGUF Q4_0 + projector | llama.cpp | speech transcription through chat with audio |
 | `LiquidAI/LFM3-VL-2B-GGUF` | GGUF + projector | llama.cpp | image description |
 | `LiquidAI/LFM3-Omni-2B-GGUF` | GGUF + projector | llama.cpp | image questions and speech transcription |
+| Gemma 4 vision models | GGUF + projector | llama.cpp | chat with images, image-to-text |
+| Qwen3.5 vision models (for example `unsloth/Qwen3.5-35B-A3B-GGUF`) | GGUF + projector | llama.cpp | chat with images, image-to-text |
+
+### Image and video generation
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `Comfy-Org/flux2-dev`, `black-forest-labs/FLUX.2-klein-9b-kv-fp8` | Safetensors | Torch | text to image |
+| `Tongyi-MAI/Z-Image-Turbo` | Diffusers | Torch | text to image |
+| `nunchaku-ai/nunchaku-z-image-turbo` | Nunchaku | Torch with the Nunchaku extra | text to image |
+| `Qwen/Qwen-Image-2512`, `Qwen/Qwen-Image-Edit-2511`, `Qwen/Qwen-Image-Layered` | Diffusers | Torch | text to image, image editing |
+| `Lightricks/LTX-2.3` (fp8, nvfp4) | Safetensors | Torch | image to video |
 
 ## Upgrading an existing library
 

@@ -147,11 +147,11 @@
     },
     {
       "name": "axum",
-      "version": "0.7.9"
+      "version": "0.8.9"
     },
     {
       "name": "axum-core",
-      "version": "0.4.5"
+      "version": "0.5.6"
     },
     {
       "name": "base64",
@@ -803,7 +803,7 @@
     },
     {
       "name": "matchit",
-      "version": "0.7.3"
+      "version": "0.8.4"
     },
     {
       "name": "matrixmultiply",
@@ -2154,27 +2154,27 @@
     },
     {
       "name": "axum",
-      "version": "0.7.9",
+      "version": "0.8.9",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/axum/0.7.9/download",
+      "source": "https://crates.io/api/v1/crates/axum/0.8.9/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "c14b6ed9d732322af9bae1551f6ca373b3893d7ce6e9d46429fc378478d00dfb"
+          "sha256": "6a13bc24a100a6812f053879ec51b126b103af7cda6dbf48c4188722da44da9f"
         }
       ]
     },
     {
       "name": "axum-core",
-      "version": "0.4.5",
+      "version": "0.5.6",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/axum-core/0.4.5/download",
+      "source": "https://crates.io/api/v1/crates/axum-core/0.5.6/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
           "path": "LICENSE",
-          "sha256": "ab25eee08e7b6d209398f44e6f4a6f17c9446cd54b99fd64e041edadc96b6f9b"
+          "sha256": "008c87afcd2e626eaf564093250bed06dd7efb5732113264bba3dda8f1c556a1"
         }
       ]
     },
@@ -4866,9 +4866,9 @@
     },
     {
       "name": "matchit",
-      "version": "0.7.3",
+      "version": "0.8.4",
       "license_declared": "MIT AND BSD-3-Clause",
-      "source": "https://crates.io/api/v1/crates/matchit/0.7.3/download",
+      "source": "https://crates.io/api/v1/crates/matchit/0.8.4/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -9409,8 +9409,8 @@
     "electron/package.json": "3e902205adafb729cd89d4aaf4d30d47e1230d2a314f3e2419dcb0db5347d155",
     "frontend/package.json": "40efa0eda6eb46b604188b751f0b9c4045ce00d3a101329ea33098c2193f20b7",
     "pnpm-lock.yaml": "32aceb7112faace4a0beb1783fc7ed3c42a86015f86711fbe5f7672f242e8435",
-    "rust/Cargo.lock": "fff3e8cad5fe024c8f270f17723267fb02e2986439d5d92da27d11bc581c5a02",
-    "rust/Cargo.toml": "85069328aa9cda682bd699a44485c37054e79050fa040bfb9e1e71b6587c3d35",
+    "rust/Cargo.lock": "271c18142d67ba23e2d19000d0386520c93343a5be16f7cde279b0031b1369f3",
+    "rust/Cargo.toml": "1b64a618ac3f01551c566d66d230a64c1b961cac6a1ea76480b281f4215b0b0d",
     "rust/crates/pumas-app-manager/Cargo.toml": "6e6116d6f5396204cbb6abfed86f804ec4590e0a4935ea8ee9fe842a403a197a",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "f39cc48ba0350d63a65521adf5a53bd91e084ac1f6741b68a7a87b1142bfbdc4",
     "rust/crates/pumas-core/Cargo.toml": "513e373ec0a6c7d6d9ddde0def95c2867483702f7cb51e4634fdf486a8b77eb2",
@@ -9423,5 +9423,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "d45187a28b1852773850eddd47f64109847c20a3b1a994622bb5304e2b7a57e2"
+  "notices_sha256": "6dc47c3e356df8c93eaa64632dabacd9a9a37e0e2b63ec7c327f8356e47e500c"
 }

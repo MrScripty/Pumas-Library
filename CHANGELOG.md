@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `file:` URL and Pumas names it by its canonical path.
   On Windows the staged-package check also accepts a wheel RECORD that
   writes paths with the native `\` separator, as torchvision's Windows wheel
-  does; parent and absolute paths are still refused.
+  does, and the second row pip appends for such a file with `/`. Parent and
+  absolute paths, and any other duplicate, are still refused.
 
 ## [0.8.0] - 2026-11-13
 

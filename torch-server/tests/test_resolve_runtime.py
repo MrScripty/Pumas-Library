@@ -494,6 +494,41 @@ class ResolverTests(unittest.TestCase):
                     resolver.installed_file_manifest(
                         target, [{"name": "sympy", "version": "1.14.0"}]
                     )
+            # pip keeps the wheel's own '\\' row and appends a '/' row for the
+            # same installed file.
+            metadata_row = next(
+                line
+                for line in good_record.splitlines()
+                if line.startswith("sympy-1.14.0.dist-info/METADATA,")
+            )
+            aliased = (
+                metadata_row.replace("dist-info/METADATA", "dist-info\\METADATA")
+                + "\n"
+                + good_record
+            )
+            record.write_text(aliased, encoding="utf-8")
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                aliased_manifest = resolver.installed_file_manifest(
+                    target, [{"name": "sympy", "version": "1.14.0"}]
+                )
+            self.assertEqual(
+                [item["path"] for item in aliased_manifest["files"]],
+                [item["path"] for item in manifest["files"]],
+            )
+            for duplicate in (
+                good_record + metadata_row + "\n",
+                metadata_row.replace("dist-info/METADATA", "dist-info\\METADATA").replace(
+                    "sha256=", "sha256=x"
+                )
+                + "\n"
+                + good_record,
+            ):
+                record.write_text(duplicate, encoding="utf-8")
+                with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                    with self.assertRaisesRegex(ValueError, "Duplicate staged wheel file"):
+                        resolver.installed_file_manifest(
+                            target, [{"name": "sympy", "version": "1.14.0"}]
+                        )
             escaping = good_record.replace(
                 "../../share/man/man1/isympy.1", "..\\..\\share\\..\\..\\outside"
             )

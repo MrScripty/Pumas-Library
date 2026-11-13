@@ -264,6 +264,8 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 raise ValueError("Staged distribution identity differs from the pip report")
     claimed = set()
     recorded = {}
+    # The RECORD spelling that first claimed each file.
+    spellings = {}
     for record in records:
         if record.is_symlink() or record.parent.is_symlink():
             raise ValueError("Staged wheel RECORD is linked")
@@ -272,6 +274,7 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 if len(row) != 3:
                     raise ValueError("Malformed staged wheel RECORD")
                 name, recorded_hash, recorded_size = row
+                spelling = name
                 if RECORD_BACKSLASH_IS_SEPARATOR:
                     name = name.replace("\\", "/")
                 if name.startswith("../../"):
@@ -297,7 +300,21 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                         f"{record.parent.name} {name[:256]!r}"
                     )
                 if relative in claimed:
-                    raise ValueError("Duplicate staged wheel file")
+                    # pip rewrites RECORD with '/' rows for the files it
+                    # installed and keeps the wheel's own '\\' row for the same
+                    # file. Only that second spelling of one file is accepted,
+                    # and a digest it carries must agree with the first.
+                    algorithm, _, value = recorded_hash.partition("=")
+                    if (
+                        RECORD_BACKSLASH_IS_SEPARATOR
+                        and spellings[relative] != spelling
+                        and (not recorded_hash or (algorithm == "sha256" and value))
+                        and recorded.get(relative, value) == value
+                    ):
+                        if value:
+                            recorded[relative] = value
+                        continue
+                    raise ValueError(f"Duplicate staged wheel file: {relative[:256]!r}")
                 file = target / path
                 if relative.endswith(".pyc") and not recorded_hash and not recorded_size:
                     # pip compiles these during installation; the wheel provides no
@@ -312,6 +329,7 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 if file.is_symlink() or not file.is_file():
                     raise ValueError("Staged wheel RECORD names a missing or linked file")
                 claimed.add(relative)
+                spellings[relative] = spelling
                 if len(claimed) > 200_000:
                     raise ValueError("Staged package manifest is too large")
                 if file == record and (recorded_hash or recorded_size):

@@ -70,7 +70,7 @@ impl ImportFileIdentity {
             return Err(invalid_capability_path().into());
         }
         Ok(Self {
-            identity: filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?,
+            identity: filesystem_identity(&metadata).ok_or_else(|| invalid_capability_path())?,
             size,
             sha256,
         })
@@ -97,7 +97,7 @@ impl DownloadDestinationRoot {
     /// Observation only: unlike owning composition, never initializes markers.
     pub(crate) fn open_import_read_only(path: &Path) -> Result<Self> {
         Ok(Self(Arc::new(
-            RecoveryRoot::open(path)?.ok_or_else(invalid_capability_path)?,
+            RecoveryRoot::open(path)?.ok_or_else(|| invalid_capability_path())?,
         )))
     }
 }
@@ -111,7 +111,7 @@ impl DownloadRecoveryDestination {
         file: std::fs::File,
     ) -> Result<()> {
         let expected = filesystem_identity(&Metadata::from_file(&file)?)
-            .ok_or_else(invalid_capability_path)?;
+            .ok_or_else(|| invalid_capability_path())?;
         let directory = self.directory(false)?;
         let current = directory.symlink_metadata(name)?;
         if !current.is_file()
@@ -352,7 +352,7 @@ fn observe_directory(
         let path = relative.join(&name);
         let portable = path
             .to_str()
-            .ok_or_else(invalid_capability_path)?
+            .ok_or_else(|| invalid_capability_path())?
             .replace(std::path::MAIN_SEPARATOR, "/");
         let metadata = directory.symlink_metadata(&name)?;
         if metadata.is_symlink() {
@@ -386,7 +386,7 @@ fn observe_directory(
             if !metadata.is_file() || metadata.is_symlink() {
                 return Err(invalid_capability_path().into());
             }
-            let physical = filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?;
+            let physical = filesystem_identity(&metadata).ok_or_else(|| invalid_capability_path())?;
             identity.files.insert(
                 portable,
                 ImportFileIdentity {

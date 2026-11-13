@@ -442,7 +442,7 @@ impl DownloadDestinationRoot {
         }
         #[cfg(any(unix, windows))]
         {
-            let mut root = RecoveryRoot::open(path)?.ok_or_else(invalid_capability_path)?;
+            let mut root = RecoveryRoot::open(path)?.ok_or_else(|| invalid_capability_path())?;
             root.initialize_library_id()?;
             Ok(Self(Arc::new(root)))
         }
@@ -536,8 +536,12 @@ impl DownloadDestinationRoot {
                 }
             }
         }
-        let relative = relative.ok_or_else(invalid_capability_path)?;
-        let text = relative.to_str().ok_or_else(invalid_capability_path)?;
+        #[cfg(windows)]
+        if relative.is_none() {
+            eprintln!("DIAG resolve no root ancestor for {:?} (root {:?} {:?})", path, self.0.root_canonical_path, self.0.root_identity);
+        }
+        let relative = relative.ok_or_else(|| invalid_capability_path())?;
+        let text = relative.to_str().ok_or_else(|| invalid_capability_path())?;
         let text = if cfg!(windows) {
             text.replace('\\', "/")
         } else {
@@ -652,6 +656,10 @@ impl RecoveryRoot {
 
     fn require_physical_current(&self) -> io::Result<()> {
         let canonical = std::fs::canonicalize(&self.root_source_path)?;
+        #[cfg(windows)]
+        if canonical != self.root_canonical_path {
+            eprintln!("DIAG physical canonical {:?} != {:?} (source {:?})", canonical, self.root_canonical_path, self.root_source_path);
+        }
         if canonical != self.root_canonical_path {
             return Err(invalid_capability_path());
         }
@@ -905,7 +913,7 @@ impl DownloadRecoveryDestination {
                 identity,
             });
         }
-        let held = self.held.get().ok_or_else(invalid_capability_path)?;
+        let held = self.held.get().ok_or_else(|| invalid_capability_path())?;
         if held.identity != identity {
             return Err(invalid_capability_path());
         }
@@ -1059,7 +1067,7 @@ impl DownloadRecoveryDestination {
         parent.create_dir(&name)?;
         let directory = self
             .payload_directory_if_present(Path::new(relative), false)?
-            .ok_or_else(invalid_capability_path)?;
+            .ok_or_else(|| invalid_capability_path())?;
         sync_directory(&directory)?;
         sync_directory(&parent)
     }
@@ -1147,11 +1155,11 @@ impl DownloadRecoveryDestination {
         let parent_relative = self
             .model_relative
             .parent()
-            .ok_or_else(invalid_capability_path)?;
+            .ok_or_else(|| invalid_capability_path())?;
         let name = self
             .model_relative
             .file_name()
-            .ok_or_else(invalid_capability_path)?;
+            .ok_or_else(|| invalid_capability_path())?;
         let parent = open_directory_chain(&self.authority.root, parent_relative, false)?;
         let expected = directory_identity(&directory)?;
         if directory_identity(&open_directory_chain(&parent, Path::new(name), false)?)? != expected
@@ -1213,7 +1221,7 @@ impl DownloadRecoveryDestination {
                 &self.authority.root,
                 self.model_relative
                     .parent()
-                    .ok_or_else(invalid_capability_path)?,
+                    .ok_or_else(|| invalid_capability_path())?,
                 false,
             )?;
             let target_parent = open_directory_chain(
@@ -1221,17 +1229,17 @@ impl DownloadRecoveryDestination {
                 target
                     .model_relative
                     .parent()
-                    .ok_or_else(invalid_capability_path)?,
+                    .ok_or_else(|| invalid_capability_path())?,
                 true,
             )?;
             let source_name = self
                 .model_relative
                 .file_name()
-                .ok_or_else(invalid_capability_path)?;
+                .ok_or_else(|| invalid_capability_path())?;
             let target_name = target
                 .model_relative
                 .file_name()
-                .ok_or_else(invalid_capability_path)?;
+                .ok_or_else(|| invalid_capability_path())?;
             if directory_identity(&open_directory_chain(
                 &source_parent,
                 Path::new(source_name),
@@ -1374,7 +1382,7 @@ impl DownloadRecoveryDestination {
         let name = path
             .file_name()
             .and_then(|s| s.to_str())
-            .ok_or_else(invalid_capability_path)?;
+            .ok_or_else(|| invalid_capability_path())?;
         Ok(self
             .payload_directory_if_present(path.parent().unwrap_or(Path::new("")), create)?
             .map(|directory| (directory, name.to_owned())))
@@ -1509,7 +1517,7 @@ impl DownloadRecoveryDestination {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        let identity = filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?;
+        let identity = filesystem_identity(&metadata).ok_or_else(|| invalid_capability_path())?;
         let modified = metadata
             .modified()?
             .into_std()
@@ -1725,7 +1733,11 @@ impl DownloadRecoveryDestination {
 }
 
 pub(super) fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
-    filesystem_identity(&directory.dir_metadata()?).ok_or_else(invalid_capability_path)
+    #[cfg(windows)]
+    if filesystem_identity(&directory.dir_metadata()?).is_none() {
+        eprintln!("DIAG directory identity unavailable");
+    }
+    filesystem_identity(&directory.dir_metadata()?).ok_or_else(|| invalid_capability_path())
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1783,7 +1795,7 @@ fn validate_import_descendants(
             // Readdir spelling can differ on a Unicode-normalizing filesystem.
             // The observed bindings were checked above; match their held
             // physical identities rather than guessing filename equivalence.
-            let held = known.get(&identity).ok_or_else(invalid_capability_path)?;
+            let held = known.get(&identity).ok_or_else(|| invalid_capability_path())?;
             validate_import_descendants(&held.directory, known)?;
         }
     }
@@ -2232,7 +2244,14 @@ fn portable_native_path(path: &Path) -> String {
     }
 }
 
+#[track_caller]
 fn invalid_capability_path() -> io::Error {
+    #[cfg(windows)]
+    eprintln!(
+        "DIAG invalid_capability_path at {}\n{}",
+        std::panic::Location::caller(),
+        std::backtrace::Backtrace::force_capture()
+    );
     io::Error::new(
         io::ErrorKind::PermissionDenied,
         "download recovery path is outside its verified filesystem authority",

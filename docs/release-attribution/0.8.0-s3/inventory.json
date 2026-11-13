@@ -547,10 +547,6 @@
     },
     {
       "name": "getrandom",
-      "version": "0.2.17"
-    },
-    {
-      "name": "getrandom",
       "version": "0.3.4"
     },
     {
@@ -559,7 +555,7 @@
     },
     {
       "name": "governor",
-      "version": "0.7.0"
+      "version": "0.10.4"
     },
     {
       "name": "h2",
@@ -870,10 +866,6 @@
       "version": "0.31.3"
     },
     {
-      "name": "no-std-compat",
-      "version": "0.4.1"
-    },
-    {
       "name": "nom",
       "version": "7.1.3"
     },
@@ -1039,15 +1031,7 @@
     },
     {
       "name": "rand",
-      "version": "0.8.6"
-    },
-    {
-      "name": "rand",
       "version": "0.9.5"
-    },
-    {
-      "name": "rand_chacha",
-      "version": "0.3.1"
     },
     {
       "name": "rand_chacha",
@@ -1056,10 +1040,6 @@
     {
       "name": "rand_core",
       "version": "0.10.1"
-    },
-    {
-      "name": "rand_core",
-      "version": "0.6.4"
     },
     {
       "name": "rand_core",
@@ -1468,6 +1448,10 @@
     {
       "name": "want",
       "version": "0.3.2"
+    },
+    {
+      "name": "web-time",
+      "version": "1.1.0"
     },
     {
       "name": "winapi",
@@ -3822,23 +3806,6 @@
     },
     {
       "name": "getrandom",
-      "version": "0.2.17",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/getrandom/0.2.17/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "LICENSE-APACHE",
-          "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf"
-        },
-        {
-          "path": "LICENSE-MIT",
-          "sha256": "42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737"
-        }
-      ]
-    },
-    {
-      "name": "getrandom",
       "version": "0.3.4",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/getrandom/0.3.4/download",
@@ -3873,9 +3840,9 @@
     },
     {
       "name": "governor",
-      "version": "0.7.0",
+      "version": "0.10.4",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/governor/0.7.0/download",
+      "source": "https://crates.io/api/v1/crates/governor/0.10.4/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5170,19 +5137,6 @@
       ]
     },
     {
-      "name": "no-std-compat",
-      "version": "0.4.1",
-      "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/no-std-compat/0.4.1/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "LICENSE",
-          "sha256": "a82f9dd9371fddd9b1b5ad38f970bcfa4197c0da07b3dfb3f568089edf79f168"
-        }
-      ]
-    },
-    {
       "name": "nom",
       "version": "7.1.3",
       "license_declared": "MIT",
@@ -5837,27 +5791,6 @@
     },
     {
       "name": "rand",
-      "version": "0.8.6",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/rand/0.8.6/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "COPYRIGHT",
-          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
-        },
-        {
-          "path": "LICENSE-APACHE",
-          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab"
-        },
-        {
-          "path": "LICENSE-MIT",
-          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
-        }
-      ]
-    },
-    {
-      "name": "rand",
       "version": "0.9.5",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/rand/0.9.5/download",
@@ -5870,27 +5803,6 @@
         {
           "path": "LICENSE-APACHE",
           "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab"
-        },
-        {
-          "path": "LICENSE-MIT",
-          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
-        }
-      ]
-    },
-    {
-      "name": "rand_chacha",
-      "version": "0.3.1",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/rand_chacha/0.3.1/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "COPYRIGHT",
-          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
-        },
-        {
-          "path": "LICENSE-APACHE",
-          "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf"
         },
         {
           "path": "LICENSE-MIT",
@@ -5937,27 +5849,6 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "8b6e9feec03e7c9a5facb26855cecd31662bf989b636bcfe79521bdf8ac863f0"
-        }
-      ]
-    },
-    {
-      "name": "rand_core",
-      "version": "0.6.4",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/rand_core/0.6.4/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "COPYRIGHT",
-          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
-        },
-        {
-          "path": "LICENSE-APACHE",
-          "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51"
-        },
-        {
-          "path": "LICENSE-MIT",
-          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
         }
       ]
     },
@@ -7652,6 +7543,23 @@
       ]
     },
     {
+      "name": "web-time",
+      "version": "1.1.0",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/web-time/1.1.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "54a744942eb3fa63a74d8d359989ed6962c04f3f10ff20cfa08ff8aa7efbe4e6"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "f428305bbf2e70fbd807af0f3c7ac1b7acfb95311640f451e9d2e48db6d7e96b"
+        }
+      ]
+    },
+    {
       "name": "winapi",
       "version": "0.3.9",
       "license_declared": "MIT/Apache-2.0",
@@ -8969,7 +8877,7 @@
     },
     {
       "file": "governor-LICENSE",
-      "source": "https://raw.githubusercontent.com/boinkor-net/governor/a9fe5d530f8560a32b64e68e65c4f593054a31fd/LICENSE",
+      "source": "https://raw.githubusercontent.com/boinkor-net/governor/9f3a79dd47dd32acd589c562b8d4fefe99b93372/LICENSE",
       "sha256": "2248fdedb215c73b6431d4c0419c6476c0aa19621fa94041aa7c5a3ce952e5cc"
     },
     {
@@ -9409,8 +9317,8 @@
     "electron/package.json": "3e902205adafb729cd89d4aaf4d30d47e1230d2a314f3e2419dcb0db5347d155",
     "frontend/package.json": "40efa0eda6eb46b604188b751f0b9c4045ce00d3a101329ea33098c2193f20b7",
     "pnpm-lock.yaml": "32aceb7112faace4a0beb1783fc7ed3c42a86015f86711fbe5f7672f242e8435",
-    "rust/Cargo.lock": "fac3436052e9294c4354930c1435aa153aece5431d8ea132c62977f473b8abfb",
-    "rust/Cargo.toml": "85069328aa9cda682bd699a44485c37054e79050fa040bfb9e1e71b6587c3d35",
+    "rust/Cargo.lock": "d925ca5065188c6b904be4ce5fb0ebdc9c3f86deb3e27bff968814f2c93eeef5",
+    "rust/Cargo.toml": "00c0190be6071f0755fb649da835d7f2a5b1275bcccca3e4f7187137555eadb2",
     "rust/crates/pumas-app-manager/Cargo.toml": "6e6116d6f5396204cbb6abfed86f804ec4590e0a4935ea8ee9fe842a403a197a",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "f39cc48ba0350d63a65521adf5a53bd91e084ac1f6741b68a7a87b1142bfbdc4",
     "rust/crates/pumas-core/Cargo.toml": "513e373ec0a6c7d6d9ddde0def95c2867483702f7cb51e4634fdf486a8b77eb2",
@@ -9423,5 +9331,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "eacf229811d3b11100dbcee8e70e69697a023c39987382ea3d601f7cb6bee302"
+  "notices_sha256": "d0406be7af940db1f3db8cc73151e0239abde4f05bd84bba5ccd53f759fa710d"
 }

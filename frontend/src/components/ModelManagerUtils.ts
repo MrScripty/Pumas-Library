@@ -33,7 +33,7 @@ export function buildDownloadingModels(
         downloadSelectedArtifactId: status.selectedArtifactId,
         downloadArtifactId: status.artifactId,
         downloadTotalBytes: status.totalBytes,
-      } as ModelInfo;
+      };
     });
 }
 

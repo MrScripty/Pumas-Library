@@ -23,6 +23,7 @@ const {
   getElectronAPIMock: vi.fn(),
   getModelsMock: vi.fn(),
   isApiAvailableMock: vi.fn<() => boolean>(),
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the inferred type that later updates rely on
   downloadActivities: {} as Record<string, DownloadStatus>,
   resumeDownloadMock: vi.fn(),
   pickerState: { error: null as string | null, busy: false },

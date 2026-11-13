@@ -83,7 +83,7 @@ async-trait = "0.1"
 # ONNX Runtime and tokenizer execution
 half = "2.7.1"
 # Native ONNX Runtime is provisioned separately. Cargo must never download it.
-ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "api-24", "half"] }
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "api-24", "half"] }
 tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
 
 # URL and path handling

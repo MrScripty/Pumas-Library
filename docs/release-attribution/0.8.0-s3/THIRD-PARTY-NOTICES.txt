@@ -23529,8 +23529,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-flate2 1.1.10 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/flate2/1.1.10/download
+flate2 1.1.11 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/flate2/1.1.11/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -38354,8 +38354,8 @@ SOFTWARE.
 
 ==============================================================================
 
-lzma-rust2 0.24.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/lzma-rust2/0.24.0/download
+lzma-rust2 0.25.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/lzma-rust2/0.25.0/download
 Declared license: Apache-2.0
 --- LICENSE ---
                                  Apache License
@@ -54236,8 +54236,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-regex 1.12.3 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/regex/1.12.3/download
+regex 1.13.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/regex/1.13.1/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -54472,8 +54472,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-regex-automata 0.4.13 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/regex-automata/0.4.13/download
+regex-automata 0.4.18 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/regex-automata/0.4.18/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -54944,8 +54944,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-regex-syntax 0.8.8 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/regex-syntax/0.8.8/download
+regex-syntax 0.8.11 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/regex-syntax/0.8.11/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -63756,8 +63756,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-tempfile 3.25.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/tempfile/3.25.0/download
+tempfile 3.27.0 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/tempfile/3.27.0/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -69885,8 +69885,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-uuid 1.29.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/uuid/1.29.0/download
+uuid 1.29.2 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/uuid/1.29.2/download
 Declared license: Apache-2.0 OR MIT
 --- LICENSE-APACHE ---
                               Apache License
@@ -77065,8 +77065,8 @@ ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation a
 
 ==============================================================================
 
-zip 9.4.0 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/zip/9.4.0/download
+zip 9.4.1 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/zip/9.4.1/download
 Declared license: MIT
 --- LICENSE ---
 The MIT License (MIT)

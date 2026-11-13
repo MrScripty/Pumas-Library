@@ -585,8 +585,6 @@ async fn execute_reconciliation(
     context: RuntimeTaskContext,
 ) -> Result<Vec<(String, String)>> {
     tracing::debug!("Running owned reconciliation: scope={scope:?} reason={reason}");
-    #[cfg(windows)]
-    eprintln!("DIAGW execute reconciliation scope={scope:?} reason={reason}");
     // The token stays outside the caught future until registered effects settle.
     let outcome = AssertUnwindSafe(async {
         let changes = run_scope(&inputs, &context, &scope).await?;
@@ -936,8 +934,6 @@ fn classify_watcher_changes(
         }
 
         let Some(depth) = model_scope_depth(library_root, &path) else {
-            #[cfg(windows)]
-            eprintln!("DIAGW watcher full scope path={path:?} root={library_root:?}");
             summary.requires_full_scope = true;
             continue;
         };
@@ -946,8 +942,6 @@ fn classify_watcher_changes(
         }
 
         if let Some(model_id) = model_id_from_path(library_root, &path) {
-            #[cfg(windows)]
-            eprintln!("DIAGW watcher model path={path:?}");
             summary.model_ids.insert(model_id);
         } else {
             summary.requires_full_scope = true;
@@ -1701,13 +1695,11 @@ async fn reconcile_model_scope(
     }
 
     if path_exists(&model_dir.join("metadata.json")).await? {
-        let current = primary
+        if primary
             .model_library
             .model_scope_is_current(&model_dir)
-            .await?;
-        #[cfg(windows)]
-        eprintln!("DIAGW reconcile {model_id} current={current}");
-        if current {
+            .await?
+        {
             return Ok(Vec::new());
         }
         primary.model_library.index_model_dir(&model_dir).await?;

@@ -70,7 +70,7 @@ impl ImportFileIdentity {
             return Err(invalid_capability_path().into());
         }
         Ok(Self {
-            identity: filesystem_identity(&metadata).ok_or_else(|| invalid_capability_path())?,
+            identity: filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?,
             size,
             sha256,
         })
@@ -97,7 +97,7 @@ impl DownloadDestinationRoot {
     /// Observation only: unlike owning composition, never initializes markers.
     pub(crate) fn open_import_read_only(path: &Path) -> Result<Self> {
         Ok(Self(Arc::new(
-            RecoveryRoot::open(path)?.ok_or_else(|| invalid_capability_path())?,
+            RecoveryRoot::open(path)?.ok_or_else(invalid_capability_path)?,
         )))
     }
 }
@@ -111,7 +111,7 @@ impl DownloadRecoveryDestination {
         file: std::fs::File,
     ) -> Result<()> {
         let expected = filesystem_identity(&Metadata::from_file(&file)?)
-            .ok_or_else(|| invalid_capability_path())?;
+            .ok_or_else(invalid_capability_path)?;
         let directory = self.directory(false)?;
         let current = directory.symlink_metadata(name)?;
         if !current.is_file()
@@ -213,15 +213,6 @@ impl DownloadRecoveryDestination {
         self.require_import_bound()?;
         let (observed, _) = self.observe_import_payload()?;
         if !expected.same_bindings(&observed) {
-            #[cfg(windows)]
-            {
-                eprintln!(
-                    "DIAG bindings expected {expected:?}\nDIAG bindings observed {observed:?}"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                let again = self.observe_import_payload().map(|(o, _)| o);
-                eprintln!("DIAG bindings after 500ms {again:?}");
-            }
             return Err(invalid_capability_path().into());
         }
         Ok(())
@@ -370,7 +361,7 @@ fn observe_directory(
         let path = relative.join(&name);
         let portable = path
             .to_str()
-            .ok_or_else(|| invalid_capability_path())?
+            .ok_or_else(invalid_capability_path)?
             .replace(std::path::MAIN_SEPARATOR, "/");
         let root_document = relative.as_os_str().is_empty()
             && name.to_str().is_some_and(is_import_mutable_document_entry);
@@ -406,8 +397,7 @@ fn observe_directory(
             if !metadata.is_file() || metadata.is_symlink() {
                 return Err(invalid_capability_path().into());
             }
-            let physical =
-                filesystem_identity(&metadata).ok_or_else(|| invalid_capability_path())?;
+            let physical = filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?;
             identity.files.insert(
                 portable,
                 ImportFileIdentity {
@@ -556,8 +546,8 @@ mod tests {
         std::fs::write(directory.join(&staging), b"{}").unwrap();
         stage.verify_import_bindings(&proof).unwrap();
         std::fs::remove_file(directory.join(&staging)).unwrap();
-        // Lookalikes, nested staging names and staging-named directories are
-        // unbound entries and still refuse the proof.
+        // Lookalikes, staging names of payload files, out-of-range attempts and
+        // staging-named directories are unbound entries that refuse the proof.
         for name in [
             "metadata.json.unbound.0.tmp".to_string(),
             format!("weights.{}.0.tmp", uuid::Uuid::new_v4()),

@@ -12,6 +12,7 @@ import {
   type MetadataSource,
 } from './ModelMetadataFieldConfig';
 import { ModelBundleManifestPanel } from './ModelBundleManifestPanel';
+import { ModelDocumentsPanel } from './ModelDocumentsPanel';
 import { ModelInferenceSettingsEditor } from './ModelInferenceSettingsEditor';
 import { ModelMetadataGrid } from './ModelMetadataGrid';
 import { ModelMetadataModalTabs } from './ModelMetadataModalTabs';
@@ -177,6 +178,8 @@ export function ModelMetadataModalContent({
           isHiddenGgufField={isHiddenGgufField}
           linkedGgufFields={LINKED_GGUF_FIELDS}
         />
+      ) : activeSource === 'documents' ? (
+        <ModelDocumentsPanel modelId={modelId} />
       ) : activeSource === 'inference' ? (
         inferenceSettingsError ? (
           <div role="alert" className="text-center py-4 text-[hsl(var(--accent-error))]">

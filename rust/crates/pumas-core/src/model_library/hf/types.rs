@@ -406,6 +406,11 @@ pub(crate) struct HfFileEntry {
     pub entry_type: Option<String>,
     #[serde(default)]
     pub lfs: Option<HfLfsInfo>,
+    /// Git blob id for regular files (the LFS pointer blob id for LFS files).
+    #[serde(default)]
+    pub oid: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
 }
 
 /// LFS information from HuggingFace.

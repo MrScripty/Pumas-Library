@@ -23,6 +23,7 @@
 
 pub(crate) mod artifact_identity;
 mod artifact_load_target;
+pub(crate) mod companion_files;
 pub mod declarations;
 mod dependencies;
 pub(crate) mod dependency_pins;
@@ -87,6 +88,10 @@ pub(crate) use external_assets::get_diffusers_bundle_lookup_hints;
 pub use external_assets::{get_diffusers_component_manifest, MODEL_EXECUTION_CONTRACT_VERSION};
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
 pub(crate) use hf::IntentDownloadObservation;
+pub(crate) use hf::{
+    place_companions, CompanionBackfillTarget, CompanionFetchPlan, CompanionPlanOutcome,
+    LocalWeight,
+};
 pub use hf::{
     AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,
     DownloadCompletionInfo, HfAuthStatus, HuggingFaceClient,

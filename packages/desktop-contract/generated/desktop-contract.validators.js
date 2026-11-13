@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ff9f5dc054325a09f95216f10dfb363747aa848a23f8ef4b2140224b46dccfce. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 c8351051f726739de4a9cf5f5db576767efd05bc3e77ed55731bc92a5a4b3275. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   try {
@@ -9165,7 +9165,7 @@ function validate64(data, { instancePath = "", parentData, parentDataProperty, r
 }
 var validateHfDownloadDetailsOutcome = validate65;
 var schema83 = { "additionalProperties": false, "description": "Exact download details derived from a repository file tree.", "properties": { "downloadOptions": { "default": [], "items": { "$ref": "#/definitions/DownloadOption" }, "type": "array" }, "repoId": { "type": "string" }, "totalSizeBytes": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] } }, "required": ["repoId", "downloadOptions", "totalSizeBytes"], "type": "object" };
-var schema84 = { "additionalProperties": false, "description": "Download option for a quantization variant or file group.", "properties": { "fileGroup": { "$ref": "#/definitions/FileGroup" }, "quant": { "type": "string" }, "sizeBytes": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] } }, "required": ["quant", "sizeBytes"], "type": "object" };
+var schema84 = { "additionalProperties": false, "description": "Download option for a quantization variant or file group.", "properties": { "companionSizeBytes": { "description": "Bytes of the model card, license, code and other metadata files that\ndownload with this option, in addition to `size_bytes`. Absent when\nthe Hub did not report every companion's size.", "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "fileGroup": { "$ref": "#/definitions/FileGroup" }, "quant": { "type": "string" }, "sizeBytes": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] } }, "required": ["quant", "sizeBytes"], "type": "object" };
 function validate68(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -9178,103 +9178,31 @@ function validate68(data, { instancePath = "", parentData, parentDataProperty, r
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "fileGroup" || key0 === "quant" || key0 === "sizeBytes")) {
+          if (!(key0 === "companionSizeBytes" || key0 === "fileGroup" || key0 === "quant" || key0 === "sizeBytes")) {
             validate68.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
         }
         if (_errs1 === errors) {
-          if (data.fileGroup !== void 0) {
-            let data0 = data.fileGroup;
+          if (data.companionSizeBytes !== void 0) {
+            let data0 = data.companionSizeBytes;
             const _errs2 = errors;
-            const _errs3 = errors;
-            if (errors === _errs3) {
-              if (data0 && typeof data0 == "object" && !Array.isArray(data0)) {
-                let missing1;
-                if (data0.filenames === void 0 && (missing1 = "filenames") || data0.shardCount === void 0 && (missing1 = "shardCount") || data0.label === void 0 && (missing1 = "label")) {
-                  validate68.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+            if (!(typeof data0 == "number" && (!(data0 % 1) && !isNaN(data0)) && isFinite(data0)) && data0 !== null) {
+              validate68.errors = [{ instancePath: instancePath + "/companionSizeBytes", schemaPath: "#/properties/companionSizeBytes/type", keyword: "type", params: { type: schema84.properties.companionSizeBytes.type }, message: "must be integer,null" }];
+              return false;
+            }
+            if (errors === _errs2) {
+              if (typeof data0 == "number" && isFinite(data0)) {
+                if (data0 > 9007199254740991 || isNaN(data0)) {
+                  validate68.errors = [{ instancePath: instancePath + "/companionSizeBytes", schemaPath: "#/properties/companionSizeBytes/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
                   return false;
                 } else {
-                  const _errs5 = errors;
-                  for (const key1 in data0) {
-                    if (!(key1 === "filenames" || key1 === "label" || key1 === "shardCount")) {
-                      validate68.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
-                      return false;
-                      break;
-                    }
-                  }
-                  if (_errs5 === errors) {
-                    if (data0.filenames !== void 0) {
-                      let data1 = data0.filenames;
-                      const _errs6 = errors;
-                      if (errors === _errs6) {
-                        if (Array.isArray(data1)) {
-                          var valid3 = true;
-                          const len0 = data1.length;
-                          for (let i0 = 0; i0 < len0; i0++) {
-                            const _errs8 = errors;
-                            if (typeof data1[i0] !== "string") {
-                              validate68.errors = [{ instancePath: instancePath + "/fileGroup/filenames/" + i0, schemaPath: "#/definitions/FileGroup/properties/filenames/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                              return false;
-                            }
-                            var valid3 = _errs8 === errors;
-                            if (!valid3) {
-                              break;
-                            }
-                          }
-                        } else {
-                          validate68.errors = [{ instancePath: instancePath + "/fileGroup/filenames", schemaPath: "#/definitions/FileGroup/properties/filenames/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
-                          return false;
-                        }
-                      }
-                      var valid2 = _errs6 === errors;
-                    } else {
-                      var valid2 = true;
-                    }
-                    if (valid2) {
-                      if (data0.label !== void 0) {
-                        const _errs10 = errors;
-                        if (typeof data0.label !== "string") {
-                          validate68.errors = [{ instancePath: instancePath + "/fileGroup/label", schemaPath: "#/definitions/FileGroup/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                          return false;
-                        }
-                        var valid2 = _errs10 === errors;
-                      } else {
-                        var valid2 = true;
-                      }
-                      if (valid2) {
-                        if (data0.shardCount !== void 0) {
-                          let data4 = data0.shardCount;
-                          const _errs12 = errors;
-                          if (!(typeof data4 == "number" && (!(data4 % 1) && !isNaN(data4)) && isFinite(data4))) {
-                            validate68.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
-                            return false;
-                          }
-                          if (errors === _errs12) {
-                            if (typeof data4 == "number" && isFinite(data4)) {
-                              if (data4 > 4294967295 || isNaN(data4)) {
-                                validate68.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
-                                return false;
-                              } else {
-                                if (data4 < 0 || isNaN(data4)) {
-                                  validate68.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
-                                  return false;
-                                }
-                              }
-                            }
-                          }
-                          var valid2 = _errs12 === errors;
-                        } else {
-                          var valid2 = true;
-                        }
-                      }
-                    }
+                  if (data0 < 0 || isNaN(data0)) {
+                    validate68.errors = [{ instancePath: instancePath + "/companionSizeBytes", schemaPath: "#/properties/companionSizeBytes/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                    return false;
                   }
                 }
-              } else {
-                validate68.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-                return false;
               }
             }
             var valid0 = _errs2 === errors;
@@ -9282,40 +9210,138 @@ function validate68(data, { instancePath = "", parentData, parentDataProperty, r
             var valid0 = true;
           }
           if (valid0) {
-            if (data.quant !== void 0) {
-              const _errs14 = errors;
-              if (typeof data.quant !== "string") {
-                validate68.errors = [{ instancePath: instancePath + "/quant", schemaPath: "#/properties/quant/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                return false;
+            if (data.fileGroup !== void 0) {
+              let data1 = data.fileGroup;
+              const _errs4 = errors;
+              const _errs5 = errors;
+              if (errors === _errs5) {
+                if (data1 && typeof data1 == "object" && !Array.isArray(data1)) {
+                  let missing1;
+                  if (data1.filenames === void 0 && (missing1 = "filenames") || data1.shardCount === void 0 && (missing1 = "shardCount") || data1.label === void 0 && (missing1 = "label")) {
+                    validate68.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                    return false;
+                  } else {
+                    const _errs7 = errors;
+                    for (const key1 in data1) {
+                      if (!(key1 === "filenames" || key1 === "label" || key1 === "shardCount")) {
+                        validate68.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                        return false;
+                        break;
+                      }
+                    }
+                    if (_errs7 === errors) {
+                      if (data1.filenames !== void 0) {
+                        let data2 = data1.filenames;
+                        const _errs8 = errors;
+                        if (errors === _errs8) {
+                          if (Array.isArray(data2)) {
+                            var valid3 = true;
+                            const len0 = data2.length;
+                            for (let i0 = 0; i0 < len0; i0++) {
+                              const _errs10 = errors;
+                              if (typeof data2[i0] !== "string") {
+                                validate68.errors = [{ instancePath: instancePath + "/fileGroup/filenames/" + i0, schemaPath: "#/definitions/FileGroup/properties/filenames/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                              var valid3 = _errs10 === errors;
+                              if (!valid3) {
+                                break;
+                              }
+                            }
+                          } else {
+                            validate68.errors = [{ instancePath: instancePath + "/fileGroup/filenames", schemaPath: "#/definitions/FileGroup/properties/filenames/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                            return false;
+                          }
+                        }
+                        var valid2 = _errs8 === errors;
+                      } else {
+                        var valid2 = true;
+                      }
+                      if (valid2) {
+                        if (data1.label !== void 0) {
+                          const _errs12 = errors;
+                          if (typeof data1.label !== "string") {
+                            validate68.errors = [{ instancePath: instancePath + "/fileGroup/label", schemaPath: "#/definitions/FileGroup/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            return false;
+                          }
+                          var valid2 = _errs12 === errors;
+                        } else {
+                          var valid2 = true;
+                        }
+                        if (valid2) {
+                          if (data1.shardCount !== void 0) {
+                            let data5 = data1.shardCount;
+                            const _errs14 = errors;
+                            if (!(typeof data5 == "number" && (!(data5 % 1) && !isNaN(data5)) && isFinite(data5))) {
+                              validate68.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                              return false;
+                            }
+                            if (errors === _errs14) {
+                              if (typeof data5 == "number" && isFinite(data5)) {
+                                if (data5 > 4294967295 || isNaN(data5)) {
+                                  validate68.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
+                                  return false;
+                                } else {
+                                  if (data5 < 0 || isNaN(data5)) {
+                                    validate68.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                    return false;
+                                  }
+                                }
+                              }
+                            }
+                            var valid2 = _errs14 === errors;
+                          } else {
+                            var valid2 = true;
+                          }
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  validate68.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                  return false;
+                }
               }
-              var valid0 = _errs14 === errors;
+              var valid0 = _errs4 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (data.sizeBytes !== void 0) {
-                let data6 = data.sizeBytes;
+              if (data.quant !== void 0) {
                 const _errs16 = errors;
-                if (!(typeof data6 == "number" && (!(data6 % 1) && !isNaN(data6)) && isFinite(data6)) && data6 !== null) {
-                  validate68.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/type", keyword: "type", params: { type: schema84.properties.sizeBytes.type }, message: "must be integer,null" }];
+                if (typeof data.quant !== "string") {
+                  validate68.errors = [{ instancePath: instancePath + "/quant", schemaPath: "#/properties/quant/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                   return false;
-                }
-                if (errors === _errs16) {
-                  if (typeof data6 == "number" && isFinite(data6)) {
-                    if (data6 > 9007199254740991 || isNaN(data6)) {
-                      validate68.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
-                      return false;
-                    } else {
-                      if (data6 < 0 || isNaN(data6)) {
-                        validate68.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
-                        return false;
-                      }
-                    }
-                  }
                 }
                 var valid0 = _errs16 === errors;
               } else {
                 var valid0 = true;
+              }
+              if (valid0) {
+                if (data.sizeBytes !== void 0) {
+                  let data7 = data.sizeBytes;
+                  const _errs18 = errors;
+                  if (!(typeof data7 == "number" && (!(data7 % 1) && !isNaN(data7)) && isFinite(data7)) && data7 !== null) {
+                    validate68.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/type", keyword: "type", params: { type: schema84.properties.sizeBytes.type }, message: "must be integer,null" }];
+                    return false;
+                  }
+                  if (errors === _errs18) {
+                    if (typeof data7 == "number" && isFinite(data7)) {
+                      if (data7 > 9007199254740991 || isNaN(data7)) {
+                        validate68.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                        return false;
+                      } else {
+                        if (data7 < 0 || isNaN(data7)) {
+                          validate68.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                          return false;
+                        }
+                      }
+                    }
+                  }
+                  var valid0 = _errs18 === errors;
+                } else {
+                  var valid0 = true;
+                }
               }
             }
           }
@@ -9602,7 +9628,7 @@ function validate65(data, { instancePath = "", parentData, parentDataProperty, r
 }
 var validateHfModelSearchOutcome = validate72;
 var schema88 = { "additionalProperties": false, "description": "HuggingFace model search result.\n\nNote: Fields like `developer`, `kind`, `formats`, `quants`, and `url` are\nnon-optional to match frontend TypeScript expectations. The frontend cannot\nhandle null values for these fields. Use empty strings/arrays as defaults.", "properties": { "cached": { "default": false, "description": "Whether this result was served from the local search cache rather\nthan fetched from HuggingFace for this request.", "type": "boolean" }, "compatibleEngines": { "default": [], "description": "Compatible inference engines based on model formats", "items": { "type": "string" }, "type": "array" }, "developer": { "default": "", "description": "Developer/organization name (empty string if unknown)", "type": "string" }, "downloadOptions": { "default": [], "description": "Detailed download options with sizes", "items": { "$ref": "#/definitions/DownloadOption" }, "type": "array" }, "downloads": { "default": null, "description": "Total download count", "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "formats": { "default": [], "description": 'Supported formats (e.g., ["safetensors", "gguf"])', "items": { "type": "string" }, "type": "array" }, "kind": { "default": "unknown", "description": 'Model kind/type (e.g., "text-generation", defaults to "unknown")', "type": "string" }, "license": { "default": null, "description": "License identifier resolved from HuggingFace metadata", "type": ["string", "null"] }, "modelCard": { "additionalProperties": true, "default": null, "description": "Parsed HuggingFace cardData payload when available", "type": ["object", "null"] }, "name": { "type": "string" }, "observedAt": { "description": "When this metadata was observed from HuggingFace (RFC 3339): the\noriginal search time for a cached search result, the fetch time for a\nlive one. `None` when the source did not record it.", "type": ["string", "null"] }, "quantSizes": { "additionalProperties": { "maximum": 9007199254740991, "minimum": 0, "type": "integer" }, "default": null, "description": "Size in bytes per quantization level", "type": ["object", "null"] }, "quants": { "default": [], "description": 'Available quantization levels (e.g., ["Q4_K_M", "Q8_0"])', "items": { "type": "string" }, "type": "array" }, "releaseDate": { "default": null, "description": "Release/last modified date", "type": ["string", "null"] }, "repoId": { "type": "string" }, "totalSizeBytes": { "default": null, "description": "Total size in bytes (all files)", "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "url": { "default": "", "description": "URL to the model page (empty string if unknown)", "type": "string" } }, "required": ["repoId", "name", "developer", "kind", "formats", "quants", "downloadOptions", "url", "releaseDate", "modelCard", "license", "downloads", "totalSizeBytes", "quantSizes", "compatibleEngines", "cached"], "type": "object" };
-var schema89 = { "additionalProperties": false, "description": "Download option for a quantization variant or file group.", "properties": { "fileGroup": { "$ref": "#/definitions/FileGroup" }, "quant": { "type": "string" }, "sizeBytes": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] } }, "required": ["quant", "sizeBytes"], "type": "object" };
+var schema89 = { "additionalProperties": false, "description": "Download option for a quantization variant or file group.", "properties": { "companionSizeBytes": { "description": "Bytes of the model card, license, code and other metadata files that\ndownload with this option, in addition to `size_bytes`. Absent when\nthe Hub did not report every companion's size.", "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "fileGroup": { "$ref": "#/definitions/FileGroup" }, "quant": { "type": "string" }, "sizeBytes": { "default": null, "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] } }, "required": ["quant", "sizeBytes"], "type": "object" };
 function validate74(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -9615,103 +9641,31 @@ function validate74(data, { instancePath = "", parentData, parentDataProperty, r
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "fileGroup" || key0 === "quant" || key0 === "sizeBytes")) {
+          if (!(key0 === "companionSizeBytes" || key0 === "fileGroup" || key0 === "quant" || key0 === "sizeBytes")) {
             validate74.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
         }
         if (_errs1 === errors) {
-          if (data.fileGroup !== void 0) {
-            let data0 = data.fileGroup;
+          if (data.companionSizeBytes !== void 0) {
+            let data0 = data.companionSizeBytes;
             const _errs2 = errors;
-            const _errs3 = errors;
-            if (errors === _errs3) {
-              if (data0 && typeof data0 == "object" && !Array.isArray(data0)) {
-                let missing1;
-                if (data0.filenames === void 0 && (missing1 = "filenames") || data0.shardCount === void 0 && (missing1 = "shardCount") || data0.label === void 0 && (missing1 = "label")) {
-                  validate74.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+            if (!(typeof data0 == "number" && (!(data0 % 1) && !isNaN(data0)) && isFinite(data0)) && data0 !== null) {
+              validate74.errors = [{ instancePath: instancePath + "/companionSizeBytes", schemaPath: "#/properties/companionSizeBytes/type", keyword: "type", params: { type: schema89.properties.companionSizeBytes.type }, message: "must be integer,null" }];
+              return false;
+            }
+            if (errors === _errs2) {
+              if (typeof data0 == "number" && isFinite(data0)) {
+                if (data0 > 9007199254740991 || isNaN(data0)) {
+                  validate74.errors = [{ instancePath: instancePath + "/companionSizeBytes", schemaPath: "#/properties/companionSizeBytes/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
                   return false;
                 } else {
-                  const _errs5 = errors;
-                  for (const key1 in data0) {
-                    if (!(key1 === "filenames" || key1 === "label" || key1 === "shardCount")) {
-                      validate74.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
-                      return false;
-                      break;
-                    }
-                  }
-                  if (_errs5 === errors) {
-                    if (data0.filenames !== void 0) {
-                      let data1 = data0.filenames;
-                      const _errs6 = errors;
-                      if (errors === _errs6) {
-                        if (Array.isArray(data1)) {
-                          var valid3 = true;
-                          const len0 = data1.length;
-                          for (let i0 = 0; i0 < len0; i0++) {
-                            const _errs8 = errors;
-                            if (typeof data1[i0] !== "string") {
-                              validate74.errors = [{ instancePath: instancePath + "/fileGroup/filenames/" + i0, schemaPath: "#/definitions/FileGroup/properties/filenames/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                              return false;
-                            }
-                            var valid3 = _errs8 === errors;
-                            if (!valid3) {
-                              break;
-                            }
-                          }
-                        } else {
-                          validate74.errors = [{ instancePath: instancePath + "/fileGroup/filenames", schemaPath: "#/definitions/FileGroup/properties/filenames/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
-                          return false;
-                        }
-                      }
-                      var valid2 = _errs6 === errors;
-                    } else {
-                      var valid2 = true;
-                    }
-                    if (valid2) {
-                      if (data0.label !== void 0) {
-                        const _errs10 = errors;
-                        if (typeof data0.label !== "string") {
-                          validate74.errors = [{ instancePath: instancePath + "/fileGroup/label", schemaPath: "#/definitions/FileGroup/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                          return false;
-                        }
-                        var valid2 = _errs10 === errors;
-                      } else {
-                        var valid2 = true;
-                      }
-                      if (valid2) {
-                        if (data0.shardCount !== void 0) {
-                          let data4 = data0.shardCount;
-                          const _errs12 = errors;
-                          if (!(typeof data4 == "number" && (!(data4 % 1) && !isNaN(data4)) && isFinite(data4))) {
-                            validate74.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
-                            return false;
-                          }
-                          if (errors === _errs12) {
-                            if (typeof data4 == "number" && isFinite(data4)) {
-                              if (data4 > 4294967295 || isNaN(data4)) {
-                                validate74.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
-                                return false;
-                              } else {
-                                if (data4 < 0 || isNaN(data4)) {
-                                  validate74.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
-                                  return false;
-                                }
-                              }
-                            }
-                          }
-                          var valid2 = _errs12 === errors;
-                        } else {
-                          var valid2 = true;
-                        }
-                      }
-                    }
+                  if (data0 < 0 || isNaN(data0)) {
+                    validate74.errors = [{ instancePath: instancePath + "/companionSizeBytes", schemaPath: "#/properties/companionSizeBytes/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                    return false;
                   }
                 }
-              } else {
-                validate74.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-                return false;
               }
             }
             var valid0 = _errs2 === errors;
@@ -9719,40 +9673,138 @@ function validate74(data, { instancePath = "", parentData, parentDataProperty, r
             var valid0 = true;
           }
           if (valid0) {
-            if (data.quant !== void 0) {
-              const _errs14 = errors;
-              if (typeof data.quant !== "string") {
-                validate74.errors = [{ instancePath: instancePath + "/quant", schemaPath: "#/properties/quant/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                return false;
+            if (data.fileGroup !== void 0) {
+              let data1 = data.fileGroup;
+              const _errs4 = errors;
+              const _errs5 = errors;
+              if (errors === _errs5) {
+                if (data1 && typeof data1 == "object" && !Array.isArray(data1)) {
+                  let missing1;
+                  if (data1.filenames === void 0 && (missing1 = "filenames") || data1.shardCount === void 0 && (missing1 = "shardCount") || data1.label === void 0 && (missing1 = "label")) {
+                    validate74.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                    return false;
+                  } else {
+                    const _errs7 = errors;
+                    for (const key1 in data1) {
+                      if (!(key1 === "filenames" || key1 === "label" || key1 === "shardCount")) {
+                        validate74.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                        return false;
+                        break;
+                      }
+                    }
+                    if (_errs7 === errors) {
+                      if (data1.filenames !== void 0) {
+                        let data2 = data1.filenames;
+                        const _errs8 = errors;
+                        if (errors === _errs8) {
+                          if (Array.isArray(data2)) {
+                            var valid3 = true;
+                            const len0 = data2.length;
+                            for (let i0 = 0; i0 < len0; i0++) {
+                              const _errs10 = errors;
+                              if (typeof data2[i0] !== "string") {
+                                validate74.errors = [{ instancePath: instancePath + "/fileGroup/filenames/" + i0, schemaPath: "#/definitions/FileGroup/properties/filenames/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                              var valid3 = _errs10 === errors;
+                              if (!valid3) {
+                                break;
+                              }
+                            }
+                          } else {
+                            validate74.errors = [{ instancePath: instancePath + "/fileGroup/filenames", schemaPath: "#/definitions/FileGroup/properties/filenames/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                            return false;
+                          }
+                        }
+                        var valid2 = _errs8 === errors;
+                      } else {
+                        var valid2 = true;
+                      }
+                      if (valid2) {
+                        if (data1.label !== void 0) {
+                          const _errs12 = errors;
+                          if (typeof data1.label !== "string") {
+                            validate74.errors = [{ instancePath: instancePath + "/fileGroup/label", schemaPath: "#/definitions/FileGroup/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            return false;
+                          }
+                          var valid2 = _errs12 === errors;
+                        } else {
+                          var valid2 = true;
+                        }
+                        if (valid2) {
+                          if (data1.shardCount !== void 0) {
+                            let data5 = data1.shardCount;
+                            const _errs14 = errors;
+                            if (!(typeof data5 == "number" && (!(data5 % 1) && !isNaN(data5)) && isFinite(data5))) {
+                              validate74.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                              return false;
+                            }
+                            if (errors === _errs14) {
+                              if (typeof data5 == "number" && isFinite(data5)) {
+                                if (data5 > 4294967295 || isNaN(data5)) {
+                                  validate74.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
+                                  return false;
+                                } else {
+                                  if (data5 < 0 || isNaN(data5)) {
+                                    validate74.errors = [{ instancePath: instancePath + "/fileGroup/shardCount", schemaPath: "#/definitions/FileGroup/properties/shardCount/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                    return false;
+                                  }
+                                }
+                              }
+                            }
+                            var valid2 = _errs14 === errors;
+                          } else {
+                            var valid2 = true;
+                          }
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  validate74.errors = [{ instancePath: instancePath + "/fileGroup", schemaPath: "#/definitions/FileGroup/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                  return false;
+                }
               }
-              var valid0 = _errs14 === errors;
+              var valid0 = _errs4 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (data.sizeBytes !== void 0) {
-                let data6 = data.sizeBytes;
+              if (data.quant !== void 0) {
                 const _errs16 = errors;
-                if (!(typeof data6 == "number" && (!(data6 % 1) && !isNaN(data6)) && isFinite(data6)) && data6 !== null) {
-                  validate74.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/type", keyword: "type", params: { type: schema89.properties.sizeBytes.type }, message: "must be integer,null" }];
+                if (typeof data.quant !== "string") {
+                  validate74.errors = [{ instancePath: instancePath + "/quant", schemaPath: "#/properties/quant/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                   return false;
-                }
-                if (errors === _errs16) {
-                  if (typeof data6 == "number" && isFinite(data6)) {
-                    if (data6 > 9007199254740991 || isNaN(data6)) {
-                      validate74.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
-                      return false;
-                    } else {
-                      if (data6 < 0 || isNaN(data6)) {
-                        validate74.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
-                        return false;
-                      }
-                    }
-                  }
                 }
                 var valid0 = _errs16 === errors;
               } else {
                 var valid0 = true;
+              }
+              if (valid0) {
+                if (data.sizeBytes !== void 0) {
+                  let data7 = data.sizeBytes;
+                  const _errs18 = errors;
+                  if (!(typeof data7 == "number" && (!(data7 % 1) && !isNaN(data7)) && isFinite(data7)) && data7 !== null) {
+                    validate74.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/type", keyword: "type", params: { type: schema89.properties.sizeBytes.type }, message: "must be integer,null" }];
+                    return false;
+                  }
+                  if (errors === _errs18) {
+                    if (typeof data7 == "number" && isFinite(data7)) {
+                      if (data7 > 9007199254740991 || isNaN(data7)) {
+                        validate74.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                        return false;
+                      } else {
+                        if (data7 < 0 || isNaN(data7)) {
+                          validate74.errors = [{ instancePath: instancePath + "/sizeBytes", schemaPath: "#/properties/sizeBytes/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                          return false;
+                        }
+                      }
+                    }
+                  }
+                  var valid0 = _errs18 === errors;
+                } else {
+                  var valid0 = true;
+                }
               }
             }
           }

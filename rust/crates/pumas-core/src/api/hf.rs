@@ -4592,9 +4592,10 @@ pub(super) mod tests {
                 sha256: "a".repeat(64),
             }],
             regular_files: Vec::new(),
+            regular_file_details: None,
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None,
-            cache_version: 2,
+            cache_version: crate::model_library::REPO_FILE_TREE_VERSION,
         };
         std::fs::write(
             root.path().join("cache/hf_acme_model_files.json"),

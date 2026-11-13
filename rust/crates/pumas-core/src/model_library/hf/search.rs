@@ -461,13 +461,15 @@ impl HuggingFaceClient {
         quants: &[String],
     ) -> Vec<DownloadOption> {
         // First try quant-based extraction (GGUF repos, fp16/bf16 variants).
-        let quant_options = Self::extract_quant_based_options(tree, quants);
-        if !quant_options.is_empty() {
-            return quant_options;
+        let mut options = Self::extract_quant_based_options(tree, quants);
+        if options.is_empty() {
+            // No quants detected – use shard-aware grouping.
+            options = Self::extract_grouped_options(tree);
         }
-
-        // No quants detected – use shard-aware grouping.
-        Self::extract_grouped_options(tree)
+        for option in &mut options {
+            option.companion_size_bytes = companion_size_for_option(tree, option);
+        }
+        options
     }
 
     /// Quant-based option extraction for GGUF and precision-variant repos.
@@ -531,6 +533,7 @@ impl HuggingFaceClient {
                                 shard_count: group.shard_count,
                                 label: group.label,
                             }),
+                            companion_size_bytes: None,
                         })
                         .collect::<Vec<_>>();
                 }
@@ -540,6 +543,7 @@ impl HuggingFaceClient {
                     quant,
                     size_bytes: Some(size_bytes),
                     file_group: None,
+                    companion_size_bytes: None,
                 }]
             })
             .collect()
@@ -569,6 +573,7 @@ impl HuggingFaceClient {
                         shard_count: g.shard_count,
                         label: g.label,
                     }),
+                    companion_size_bytes: None,
                 }
             })
             .collect()
@@ -739,6 +744,41 @@ impl HuggingFaceClient {
     }
 }
 
+/// Size of the non-weight files that download with `option`, using the same
+/// selection as the download itself: a file group downloads as explicit
+/// files, and a quant downloads every weight whose name carries it.
+fn companion_size_for_option(tree: &RepoFileTree, option: &DownloadOption) -> Option<u64> {
+    use super::companions::{companion_size_bytes, select_companion_files, CompanionMode};
+    use super::types::FileToDownload;
+    let (payload, mode) = match &option.file_group {
+        Some(group) => (
+            group
+                .filenames
+                .iter()
+                .map(|filename| FileToDownload {
+                    filename: filename.clone(),
+                    size: None,
+                    sha256: None,
+                })
+                .collect::<Vec<_>>(),
+            CompanionMode::ExplicitFiles,
+        ),
+        None => (
+            tree.lfs_files
+                .iter()
+                .filter(|file| file.filename.contains(option.quant.as_str()))
+                .map(|file| FileToDownload {
+                    filename: file.filename.clone(),
+                    size: Some(file.size),
+                    sha256: Some(file.sha256.clone()),
+                })
+                .collect(),
+            CompanionMode::Scoped,
+        ),
+    };
+    companion_size_bytes(tree, &select_companion_files(tree, &payload, mode))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -807,6 +847,55 @@ mod tests {
     }
 
     #[test]
+    fn download_options_report_the_size_of_their_companion_files() {
+        use crate::model_library::types::RegularFileInfo;
+        let detail = |filename: &str, size| RegularFileInfo {
+            filename: filename.to_string(),
+            size,
+            git_oid: "c".repeat(40),
+        };
+        let tree = RepoFileTree {
+            repo_id: "acme/model-GGUF".to_string(),
+            lfs_files: vec![
+                lfs("Q4_K_M/model-Q4_K_M.gguf", 4_000),
+                lfs("Q8_0/model-Q8_0.gguf", 8_000),
+                lfs("imatrix.dat", 900),
+            ],
+            regular_files: vec![
+                "README.md".into(),
+                "LICENSE".into(),
+                "Q4_K_M/notes.md".into(),
+            ],
+            regular_file_details: Some(vec![
+                detail("README.md", 30),
+                detail("LICENSE", 20),
+                detail("Q4_K_M/notes.md", 5),
+            ]),
+            cached_at: "2026-01-01T00:00:00Z".to_string(),
+            last_modified: None,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
+        };
+
+        let options = HuggingFaceClient::extract_download_options_from_tree(
+            &tree,
+            &["Q4_K_M".into(), "Q8_0".into()],
+        );
+
+        let q4 = options
+            .iter()
+            .find(|option| option.quant == "Q4_K_M")
+            .unwrap();
+        assert_eq!(q4.size_bytes, Some(4_000));
+        // Calibration data is not a companion: only the card, license and notes.
+        assert_eq!(q4.companion_size_bytes, Some(55));
+        let q8 = options
+            .iter()
+            .find(|option| option.quant == "Q8_0")
+            .unwrap();
+        assert_eq!(q8.companion_size_bytes, Some(50));
+    }
+
+    #[test]
     fn test_quant_options_sum_sharded_sizes() {
         let tree = RepoFileTree {
             repo_id: "unsloth/Qwen3.5-122B-A10B-GGUF".to_string(),
@@ -817,6 +906,7 @@ mod tests {
                 lfs("Q2_K/model-Q2_K.gguf", 41_800_000_000),
             ],
             regular_files: vec![],
+            regular_file_details: None,
             cached_at: "2026-01-01T00:00:00Z".to_string(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -848,6 +938,7 @@ mod tests {
                 lfs("OpenAI-20B-NEOPlus-Uncensored-Q8_0.gguf", 22_100_000_000),
             ],
             regular_files: vec![],
+            regular_file_details: None,
             cached_at: "2026-01-01T00:00:00Z".to_string(),
             last_modified: None,
             cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
@@ -911,11 +1002,13 @@ mod tests {
                 quant: "Q4_K_M".to_string(),
                 size_bytes: Some(22_016_023_168),
                 file_group: None,
+                companion_size_bytes: None,
             },
             DownloadOption {
                 quant: "Q6_K".to_string(),
                 size_bytes: Some(28_852_861_568),
                 file_group: None,
+                companion_size_bytes: None,
             },
         ];
 
@@ -935,11 +1028,13 @@ mod tests {
                 quant: "Q4_K_M".to_string(),
                 size_bytes: Some(22_016_023_168),
                 file_group: None,
+                companion_size_bytes: None,
             },
             DownloadOption {
                 quant: "Q6_K".to_string(),
                 size_bytes: Some(28_852_861_568),
                 file_group: None,
+                companion_size_bytes: None,
             },
         ];
 
@@ -955,11 +1050,13 @@ mod tests {
                 quant: "Q4_K_M".to_string(),
                 size_bytes: Some(22_016_023_168),
                 file_group: None,
+                companion_size_bytes: None,
             },
             DownloadOption {
                 quant: "Q6_K".to_string(),
                 size_bytes: Some(28_852_861_568),
                 file_group: None,
+                companion_size_bytes: None,
             },
         ];
 
@@ -1066,6 +1163,7 @@ mod tests {
             quant: "Q4_K_M".to_string(),
             size_bytes: Some(42),
             file_group: None,
+            companion_size_bytes: None,
         }];
         cached.total_size_bytes = Some(42);
         cache.cache_repo_details(&cached).unwrap();

@@ -208,12 +208,9 @@ fn gguf_declares_decision_head(model_dir: &Path) -> bool {
         return false;
     };
     entries.filter_map(|entry| entry.ok()).any(|entry| {
-        let name = entry.file_name().to_string_lossy().to_lowercase();
-        name.ends_with(".gguf")
-            && !name.contains("mmproj")
+        crate::model_library::is_primary_gguf_name(&entry.file_name().to_string_lossy())
             && entry.file_type().is_ok_and(|kind| kind.is_file())
-            && crate::model_library::identify_model_type(entry.path())
-                .is_ok_and(|info| info.model_type == ModelType::Decision)
+            && crate::model_library::gguf_declares_decision_head(&entry.path()) == Some(true)
     })
 }
 

@@ -308,6 +308,38 @@ impl Drop for RootExecutionGrant {
         // fork until the child execs. Custody ends with this grant, so release
         // the lock explicitly on its shared open file description.
         let _ = fs2::FileExt::unlock(&self.file);
+        signal_root_release(self.authority.0.root_identity);
+    }
+}
+
+/// Per physical root, a counter bumped whenever an execution grant on it is
+/// released in this process. Every opened [`DownloadDestinationRoot`] for the
+/// same root shares it, so work deferred by a busy root can wait for release
+/// whichever handle held the grant.
+static ROOT_RELEASES: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<FilesystemIdentity, Arc<tokio::sync::watch::Sender<u64>>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+fn root_release_sender(identity: FilesystemIdentity) -> Arc<tokio::sync::watch::Sender<u64>> {
+    let mut releases = ROOT_RELEASES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    releases
+        .entry(identity)
+        .or_insert_with(|| Arc::new(tokio::sync::watch::Sender::new(0)))
+        .clone()
+}
+
+fn signal_root_release(identity: FilesystemIdentity) {
+    let sender = ROOT_RELEASES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&identity)
+        .cloned();
+    if let Some(sender) = sender {
+        sender.send_modify(|released| *released = released.wrapping_add(1));
     }
 }
 
@@ -343,6 +375,13 @@ impl DownloadDestinationRoot {
 
     pub(crate) fn same_physical_root(&self, other: &Self) -> bool {
         self.0.root_identity == other.0.root_identity
+    }
+
+    /// Changes each time an execution grant on this physical root is
+    /// released in this process. Subscribe before checking whether the root
+    /// is free, so a release in between is not missed.
+    pub(crate) fn release_signal(&self) -> tokio::sync::watch::Receiver<u64> {
+        root_release_sender(self.0.root_identity).subscribe()
     }
 
     pub(crate) fn try_acquire_execution_grant(&self) -> Result<RootExecutionGrant> {

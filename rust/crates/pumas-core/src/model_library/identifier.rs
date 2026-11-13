@@ -398,55 +398,6 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
     ModelType::Llm
 }
 
-/// What a prefix of a GGUF file shows about a decision head.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GgufDecisionProbe {
-    /// The model keys were read to their end: whether `<arch>.decision.type`
-    /// is among them. Not a GGUF file reads as `Declared(false)`.
-    Declared(bool),
-    /// The prefix ends before the model keys do.
-    NeedMore,
-}
-
-/// Read the same evidence `identify_model_type` uses for a decision model
-/// from the first bytes of a GGUF file, so a remote file can be classified
-/// from its header alone.
-pub(crate) fn probe_gguf_decision_head(prefix: &[u8]) -> GgufDecisionProbe {
-    if prefix.len() < 24 {
-        return GgufDecisionProbe::NeedMore;
-    }
-    if &prefix[..4] != magic::GGUF {
-        return GgufDecisionProbe::Declared(false);
-    }
-    let metadata_count = u64::from_le_bytes(prefix[16..24].try_into().unwrap());
-    let mut reader = EndTrackingReader {
-        inner: std::io::Cursor::new(&prefix[24..]),
-        reached_end: false,
-    };
-    let metadata = extract_gguf_key_metadata(&mut reader, metadata_count as usize);
-    match metadata {
-        Ok(metadata) if metadata.decision => GgufDecisionProbe::Declared(true),
-        _ if reader.reached_end => GgufDecisionProbe::NeedMore,
-        Ok(_) | Err(_) => GgufDecisionProbe::Declared(false),
-    }
-}
-
-/// Records whether a parse ran into the end of the bytes it was given.
-struct EndTrackingReader<R> {
-    inner: R,
-    reached_end: bool,
-}
-
-impl<R: Read> Read for EndTrackingReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let read = self.inner.read(buf)?;
-        if read == 0 && !buf.is_empty() {
-            self.reached_end = true;
-        }
-        Ok(read)
-    }
-}
-
 /// Extract key metadata fields from GGUF for model identification.
 ///
 /// Extracts: general.architecture, general.name, general.basename
@@ -1210,18 +1161,7 @@ mod tests {
 
     /// A GGUF header carrying string keys, as llama.cpp writes them.
     fn gguf_with_string_keys(keys: &[(&str, &str)]) -> Vec<u8> {
-        let mut bytes = b"GGUF".to_vec();
-        bytes.extend_from_slice(&3_u32.to_le_bytes());
-        bytes.extend_from_slice(&0_u64.to_le_bytes());
-        bytes.extend_from_slice(&(keys.len() as u64).to_le_bytes());
-        for (key, value) in keys {
-            bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
-            bytes.extend_from_slice(key.as_bytes());
-            bytes.extend_from_slice(&8_u32.to_le_bytes());
-            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
-            bytes.extend_from_slice(value.as_bytes());
-        }
-        bytes
+        crate::model_library::test_gguf_with_string_keys(keys, 0)
     }
 
     #[test]

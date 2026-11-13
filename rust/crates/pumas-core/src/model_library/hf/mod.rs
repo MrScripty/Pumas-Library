@@ -20,7 +20,7 @@ mod bundles;
 mod companion_backfill;
 mod companions;
 mod download;
-mod gguf_header;
+pub(crate) mod gguf_header;
 mod lifecycle;
 mod metadata;
 mod package_selection;
@@ -133,10 +133,8 @@ pub struct HuggingFaceClient {
     downloads_unavailable: Arc<std::sync::RwLock<Option<String>>>,
     #[cfg(any(test, feature = "test-support"))]
     download_base_url: Option<String>,
-    /// Unit-test fixtures script every request; only tests that serve a GGUF
-    /// header range turn the download preflight's header read on.
-    #[cfg(test)]
-    pub(super) test_gguf_header_probe: bool,
+    /// Reads a remote GGUF header for the download preflight.
+    pub(super) gguf_header_reader: Arc<dyn gguf_header::GgufHeaderReader>,
 }
 
 impl std::fmt::Debug for HuggingFaceClient {
@@ -237,8 +235,7 @@ impl HuggingFaceClient {
             downloads_unavailable: self.downloads_unavailable.clone(),
             #[cfg(any(test, feature = "test-support"))]
             download_base_url: self.download_base_url.clone(),
-            #[cfg(test)]
-            test_gguf_header_probe: self.test_gguf_header_probe,
+            gguf_header_reader: self.gguf_header_reader.clone(),
         }
     }
 
@@ -286,13 +283,23 @@ impl HuggingFaceClient {
     }
 
     #[cfg(test)]
-    pub(crate) fn enable_test_gguf_header_probe(&mut self) {
-        self.test_gguf_header_probe = true;
+    pub(crate) fn set_gguf_header_reader(
+        &mut self,
+        reader: Arc<dyn gguf_header::GgufHeaderReader>,
+    ) {
+        self.gguf_header_reader = reader;
     }
 
+    /// Point the client at a scripted fixture. Fixtures script every request,
+    /// so the GGUF header read answers "no decision head" from a script
+    /// instead of the network; a test of the header read installs its own
+    /// reader afterwards.
     #[cfg(test)]
     pub(crate) fn set_test_download_base_url(&mut self, base_url: String) {
         self.download_base_url = Some(base_url);
+        self.gguf_header_reader = gguf_header::ScriptedGgufHeaderReader::new(|_| {
+            Ok(gguf_header::GgufHeaderEvidence::NoDecisionHead)
+        });
     }
 
     pub(crate) fn configure_download_destination_root(
@@ -441,8 +448,7 @@ impl HuggingFaceClient {
             downloads_unavailable: Arc::new(std::sync::RwLock::new(None)),
             #[cfg(any(test, feature = "test-support"))]
             download_base_url: None,
-            #[cfg(test)]
-            test_gguf_header_probe: false,
+            gguf_header_reader: Arc::new(gguf_header::HttpGgufHeaderReader),
         })
     }
 

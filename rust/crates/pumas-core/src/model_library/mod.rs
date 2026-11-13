@@ -87,6 +87,9 @@ pub use download_store::DownloadPersistence;
 pub(crate) use external_assets::get_diffusers_bundle_lookup_hints;
 pub use external_assets::{get_diffusers_component_manifest, MODEL_EXECUTION_CONTRACT_VERSION};
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
+pub(crate) use hf::gguf_header::GgufHeaderEvidence;
+#[cfg(test)]
+pub(crate) use hf::gguf_header::{HttpGgufHeaderReader, ScriptedGgufHeaderReader};
 pub(crate) use hf::IntentDownloadObservation;
 pub(crate) use hf::{
     place_companions, CompanionBackfillTarget, CompanionFetchPlan, CompanionPlanOutcome,
@@ -98,7 +101,6 @@ pub use hf::{
 };
 pub use hf_cache::{CacheStats, CachedRepoDetails, HfCacheConfig, HfSearchCache};
 pub use identifier::{extract_gguf_metadata, identify_model_type, ModelTypeInfo};
-pub(crate) use identifier::{probe_gguf_decision_head, GgufDecisionProbe};
 pub(crate) use importer::TEMP_IMPORT_PREFIX;
 pub use importer::{
     AcquiredGgufVisionSpec, AcquiredGgufVisionTask, InPlaceImportSpec, IncompleteShardRecovery,
@@ -128,7 +130,13 @@ pub use model_type_resolver::{
     ModelTypeResolution,
 };
 pub use naming::normalize_name;
-pub(crate) use package_facts::gguf::{gguf_package_has_ranking_head, gguf_serving_facts};
+#[cfg(test)]
+pub(crate) use package_facts::gguf::test_gguf_with_string_keys;
+pub(crate) use package_facts::gguf::{
+    gguf_declares_decision_head, gguf_package_has_ranking_head, gguf_serving_facts,
+    is_primary_gguf_name, probe_gguf_decision_head, GgufDecisionHeadProbe,
+    MAX_GGUF_METADATA_PREFIX_BYTES,
+};
 pub use read_only::PumasReadOnlyLibrary;
 pub use task_signature::{
     normalize_task_signature, NormalizedTaskSignature, TaskNormalizationStatus,

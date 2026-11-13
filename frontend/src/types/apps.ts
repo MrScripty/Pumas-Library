@@ -95,6 +95,8 @@ export interface RemoteModelInfo {
     selectedArtifactId?: string | null;
     artifactId?: string | null;
     sizeBytes?: number | null;
+    /** Card, license, code and metadata files that download with this option. */
+    companionSizeBytes?: number | null;
     fileGroup?: {
       filenames: string[];
       shardCount: number;

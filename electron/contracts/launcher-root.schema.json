@@ -25,7 +25,8 @@
             "reason": {"$ref": "#/definitions/LauncherRootRecoveryReason"},
             "authoritySource": {"enum": ["persisted", "default"]},
             "action": {"const": "select-library"},
-            "detail": {"$ref": "#/definitions/LauncherRootRecoveryDetail"}
+            "detail": {"$ref": "#/definitions/LauncherRootRecoveryDetail"},
+            "staleInstance": {"$ref": "#/definitions/LauncherRootStaleInstance"}
           }
         },
         {
@@ -38,7 +39,8 @@
             "reason": {"$ref": "#/definitions/LauncherRootRecoveryReason"},
             "authoritySource": {"enum": ["environment", "argument"]},
             "action": {"const": "correct-launch-input"},
-            "detail": {"$ref": "#/definitions/LauncherRootRecoveryDetail"}
+            "detail": {"$ref": "#/definitions/LauncherRootRecoveryDetail"},
+            "staleInstance": {"$ref": "#/definitions/LauncherRootStaleInstance"}
           }
         }
       ],
@@ -57,13 +59,42 @@
           }
         },
         "LauncherRootRecoveryReason": {
-          "enum": ["invalid", "unavailable", "migration-required", "backend-unavailable"]
+          "enum": ["invalid", "unavailable", "migration-required", "backend-unavailable", "stale-instance"]
         },
         "LauncherRootRecoveryDetail": {
           "description": "Why the library could not open, as reported by the backend.",
           "type": "string",
           "minLength": 1,
           "maxLength": 1024
+        },
+        "LauncherRootStaleInstance": {
+          "description": "The library's instance entry left by a Pumas process that is no longer running, as the backend reported it. Releasing it requires the user's confirmation of exactly this entry.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pid", "startedAt", "leaseChecked", "survivingProcesses"],
+          "properties": {
+            "pid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+            "startedAt": {"type": "string", "minLength": 1, "maxLength": 64},
+            "version": {"type": "string", "minLength": 1, "maxLength": 64},
+            "leaseChecked": {
+              "description": "Whether a free lock on the library backs the finding (false on Windows, where only the process check does).",
+              "type": "boolean"
+            },
+            "survivingProcesses": {
+              "description": "Processes the old Pumas started (runtime profiles, launched apps) that are still running. The release is refused while any is.",
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["pid", "record"],
+                "properties": {
+                  "pid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+                  "record": {"type": "string", "minLength": 1, "maxLength": 96}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -159,6 +190,67 @@
           "additionalProperties": false,
           "required": ["status", "stage"],
           "properties": {"status": {"const": "failed"}, "stage": {"enum": ["upgrade", "open"]}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "state"],
+          "properties": {"status": {"const": "ready"}, "state": {"$ref": "#/definitions/LauncherRootReadyState"}}
+        }
+      ],
+      "definitions": {
+        "LauncherRootSelectionAction": {"enum": ["select-library", "correct-launch-input"]},
+        "LauncherRootReadyState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "selectionAction", "libraryScopeId"],
+          "properties": {
+            "status": {"const": "ready"},
+            "selectionAction": {"$ref": "#/definitions/LauncherRootSelectionAction"},
+            "libraryScopeId": {
+              "anyOf": [{"type": "null"}, {"type": "string", "pattern": "^display-v1:[a-f0-9]{64}$"}]
+            }
+          }
+        }
+      }
+    },
+    "StaleInstanceReleaseConfirmation": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "StaleInstanceReleaseConfirmation",
+      "description": "The user's confirmation that the reported instance entry belongs to a Pumas process that is no longer running.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid", "startedAt", "confirmed"],
+      "properties": {
+        "pid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "startedAt": {"type": "string", "minLength": 1, "maxLength": 64},
+        "confirmed": {"const": true}
+      }
+    },
+    "StaleInstanceReleaseResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "StaleInstanceReleaseResult",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "unavailable"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "stage"],
+          "properties": {
+            "status": {"const": "failed"},
+            "stage": {"enum": ["release", "open"]},
+            "message": {
+              "description": "Why the release or the following start failed, as reported.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          }
         },
         {
           "type": "object",

@@ -326,6 +326,26 @@ test('installed-list decoding preserves actual tags and rejects malformed succes
   }
 });
 
+test('runtime-provider discovery decodes producer descriptors and rejects malformed ones', () => {
+  for (const key of ['runtime_providers', 'runtime_providers_empty']) {
+    const result = contract.decodeRuntimeProvidersOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const onnx = fixtures.runtime_providers.providers.find((entry) => entry.provider === 'onnx_runtime');
+  assert.equal(onnx.app_id, 'onnx-runtime');
+  assert.ok(onnx.device_modes.includes('gpu'));
+  const [first] = fixtures.runtime_providers.providers;
+  for (const patch of [{ provider: 'unknown_runtime' }, { app_id: 42 }, { version_managed: 'yes' },
+    { device_modes: ['warp_drive'] }, { provider_modes: null }, { extra: true }]) {
+    const providers = [{ ...first, ...patch }];
+    assert.equal(contract.decodeRuntimeProvidersOutcome({ ...fixtures.runtime_providers, providers }).status, 'invalid');
+  }
+  for (const patch of [{ success: false }, { providers: null }, { extra: true }]) {
+    assert.equal(contract.decodeRuntimeProvidersOutcome({ ...fixtures.runtime_providers, ...patch }).status, 'invalid');
+  }
+});
+
 test('cache-status decoding preserves actual full and compact snapshots without partial mixtures', () => {
   for (const key of ['github_cache_status_populated', 'github_cache_status_empty', 'github_cache_status_fetching', 'github_cache_status_no_manager']) {
     const result = contract.decodeGithubCacheStatusOutcome(fixtures[key]);

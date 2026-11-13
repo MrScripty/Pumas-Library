@@ -58,6 +58,7 @@ pub(crate) async fn fixture_faulted(
         created_at: "2026-09-13T00:00:00Z".into(),
         known_sha256: None,
         huggingface_evidence: None,
+        error: None,
     };
     let admission = DownloadAdmissionRequest {
         snapshot: original.clone(),

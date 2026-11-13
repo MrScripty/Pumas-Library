@@ -1427,3 +1427,92 @@ async fn copied_import_public_reclassification_conditionally_moves_ready_generat
         .is_empty());
     fixture.tasks.shutdown_owned().await.unwrap();
 }
+
+/// Re-project the indexed row the way a concurrent metadata refresh does:
+/// same Pending publication, a changed ordinary field.
+fn reproject_pending_row(library: &ModelLibrary, destination: &DownloadRecoveryDestination) {
+    let id = library.get_model_id(destination.display_path()).unwrap();
+    let mut row = library.index().get(&id).unwrap().unwrap();
+    assert!(!crate::models::copied_import_ready_value(&row.metadata));
+    row.official_name = "Refreshed while hashing".into();
+    row.metadata["notes"] = serde_json::json!("refreshed");
+    library.index().upsert(&row).unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_finalizes_after_a_concurrent_reprojection_of_its_pending_row() {
+    let mut fixture = Fixture::new().await;
+    let library = fixture.library.clone();
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, destination| {
+        if boundary == ImportBoundary::BeforeReady {
+            reproject_pending_row(&library, destination);
+        }
+        Ok(())
+    }));
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(result.success, "{:?}", result.error);
+    let id = fixture.library.get_model_id(&fixture.target()).unwrap();
+    assert!(crate::models::copied_import_ready_value(
+        &fixture.library.index().get(&id).unwrap().unwrap().metadata
+    ));
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+/// The live failure: Ready and confirmed on disk, Pending in the index.
+fn strand_index_row(library: &ModelLibrary, id: &str) {
+    let mut row = library.index().get(id).unwrap().unwrap();
+    row.metadata["import_publication"]["confirmed"] = serde_json::json!(false);
+    row.metadata["import_state"] = serde_json::json!("pending");
+    row.metadata["validation_state"] = serde_json::json!("invalid");
+    library.index().upsert(&row).unwrap();
+    assert!(!crate::models::copied_import_ready_value(
+        &library.index().get(id).unwrap().unwrap().metadata
+    ));
+}
+
+#[tokio::test]
+async fn a_retained_copied_import_is_finished_only_after_its_payload_is_reverified() {
+    use crate::model_library::RetainedImportOutcome;
+    for changed_payload in [false, true] {
+        let fixture = Fixture::new().await;
+        assert!(
+            fixture
+                .importer
+                .import(&fixture.spec)
+                .await
+                .unwrap()
+                .success
+        );
+        let target = fixture.target();
+        let id = fixture.library.get_model_id(&target).unwrap();
+        strand_index_row(&fixture.library, &id);
+        if changed_payload {
+            let payload = std::fs::read_dir(&target)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| path.extension().is_some_and(|ext| ext == "onnx"))
+                .unwrap();
+            std::fs::write(payload, b"synthetic ONNX PAYLOAD").unwrap();
+        }
+        let outcome = fixture.library.finish_retained_import(&id).await;
+        let ready = crate::models::copied_import_ready_value(
+            &fixture.library.index().get(&id).unwrap().unwrap().metadata,
+        );
+        if changed_payload {
+            let error = outcome.unwrap_err().to_string();
+            assert!(
+                error.contains("delete it and import the files again"),
+                "{error}"
+            );
+            assert!(!ready);
+        } else {
+            assert_eq!(outcome.unwrap(), RetainedImportOutcome::Acknowledged);
+            assert!(ready);
+            assert_eq!(
+                fixture.library.finish_retained_import(&id).await.unwrap(),
+                RetainedImportOutcome::AlreadyReady
+            );
+        }
+        let _ = fixture.tasks.shutdown_owned().await;
+    }
+}

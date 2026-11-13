@@ -1,6 +1,7 @@
 # ADR 0001: ONNX Runtime Provider Model
 
-- Status: Accepted and implemented
+- Status: Accepted and implemented; in-process ONNX execution and ONNX Runtime
+  packaging superseded by [ADR 0009](0009-onnx-runtime-downloaded-runtime.md)
 - Date: 2026-05-11
 
 ## Context
@@ -45,6 +46,12 @@ the old route shape is not retained as a parallel reader.
 | RPC serving and gateway adapters | `rust/crates/pumas-rpc/src/handlers/` |
 | Frontend descriptors | `frontend/src/utils/runtimeProviderDescriptors.ts` |
 | Source plugin metadata | `launcher-data/plugins/*.json` |
+
+[ADR 0009](0009-onnx-runtime-downloaded-runtime.md) replaces the in-process
+execution and packaging text in this ADR: ONNX Runtime is a downloaded,
+version-managed runtime that each runtime profile runs in its own ONNX host
+process, and no package bundles it. The ONNX manifest's `installationType` is
+therefore `binary`. The original text follows for history.
 
 The ONNX manifest uses `installationType = "in-process"`; it must not enter
 binary, Python, Docker, or version-manager installation flows.

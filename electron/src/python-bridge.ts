@@ -573,7 +573,7 @@ export class PythonBridge {
     // close follows stdout drain; exit can arrive before the diagnostic frame.
     let startupClosed!: () => void;
     const closedBeforeReady = new Promise<never>((_resolve, reject) => {
-      startupClosed = () => reject(new BackendStartupError(startupFailure.reason, startupFailure.detail));
+      startupClosed = () => reject(new BackendStartupError(startupFailure.reason, startupFailure.detail, startupFailure.staleInstance));
       child.once('close', startupClosed);
     });
     void closedBeforeReady.catch(() => {});

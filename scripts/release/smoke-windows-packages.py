@@ -91,9 +91,9 @@ def verify(directory, variant="full"):
             ]:
                 if digest(resources / bundled) != digest(source):
                     raise RuntimeError(f"Installed resource differs: {bundled}")
-            for library in (ROOT / "electron/resources/bin").glob("*.dll"):
-                if digest(resources / library.name) != digest(library):
-                    raise RuntimeError(f"Installed DLL differs: {library.name}")
+            # ONNX Runtime is downloaded by the desktop at runtime, never packaged.
+            if any(resources.glob("onnxruntime*.dll")):
+                raise RuntimeError("Desktop package must not bundle ONNX Runtime")
             command = [
                 sys.executable,
                 str(ROOT / "scripts/release/smoke-rpc.py"),

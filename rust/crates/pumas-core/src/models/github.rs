@@ -13,6 +13,25 @@ pub struct GitHubAsset {
     pub content_type: Option<String>,
 }
 
+/// Whether a listed build can be installed on this host, as far as the
+/// listing knows. Only builds whose installability depends on more than their
+/// archive (ONNX Runtime CUDA builds, which also need NVIDIA's libraries)
+/// carry one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
+pub enum InstallAvailability {
+    /// The lookup is still running; list the versions again for its result.
+    Checking,
+    /// The build installs.
+    Available,
+    /// The build cannot install; `unavailable_reason` says why.
+    Unavailable,
+    /// The lookup could not reach the package indexes. Installing still
+    /// checks, and decides.
+    Unknown,
+}
+
 /// GitHub release information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubRelease {
@@ -37,6 +56,15 @@ pub struct GitHubRelease {
     pub archive_size: Option<u64>,
     #[serde(default)]
     pub dependencies_size: Option<u64>,
+    /// Why this listed build cannot be installed on this host, when the
+    /// listing knows it before an install is attempted. Computed per listing;
+    /// never part of the publisher's release data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
+    /// Whether this build installs, for builds where the listing checks it.
+    /// Computed per listing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_availability: Option<InstallAvailability>,
 }
 
 impl GitHubRelease {
@@ -73,6 +101,15 @@ pub struct VersionReleaseInfo {
     pub dependencies_size: Option<u64>,
     #[serde(default)]
     pub installing: Option<bool>,
+    /// Why this build cannot be installed on this host, or `null` when it can
+    /// (or the backend cannot tell yet). An unavailable build is listed so the
+    /// user sees the reason and the builds that install instead.
+    #[serde(default)]
+    pub unavailable_reason: Option<String>,
+    /// Whether this build installs, for builds the backend checks before an
+    /// install (ONNX Runtime CUDA builds); `null` for every other build.
+    #[serde(default)]
+    pub install_availability: Option<InstallAvailability>,
 }
 
 /// Release asset for frontend.
@@ -108,6 +145,8 @@ impl From<GitHubRelease> for VersionReleaseInfo {
             archive_size: release.archive_size,
             dependencies_size: release.dependencies_size,
             installing: None,
+            unavailable_reason: release.unavailable_reason,
+            install_availability: release.install_availability,
         }
     }
 }
@@ -183,6 +222,8 @@ mod tests {
             total_size: Some(2048),
             archive_size: Some(1024),
             dependencies_size: Some(1024),
+            unavailable_reason: None,
+            install_availability: None,
         };
 
         let info: VersionReleaseInfo = release.clone().into();

@@ -28,7 +28,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
 
 # Database (bundled SQLite includes FTS5 by default)
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }

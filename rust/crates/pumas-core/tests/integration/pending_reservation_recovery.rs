@@ -706,12 +706,17 @@ async fn unpolled_start_keeps_checkpoint_and_incompatible_recovery_keeps_predece
         registry.get_instance(&root).unwrap().unwrap().started_at,
         checkpoint.generation
     );
-    let recovered = recover_pending_reservation(
-        registry.clone(),
-        &root,
-        &checkpoint,
-        &CompatibilityRequirements::default(),
-    )
+    // Dropping the unpolled start closed this process's lease descriptor, but a
+    // child forked meanwhile by a parallel test holds a copy until it execs.
+    let recovered = crate::support::after_fork_release(|| async {
+        recover_pending_reservation(
+            registry.clone(),
+            &root,
+            &checkpoint,
+            &CompatibilityRequirements::default(),
+        )
+    })
+    .await
     .unwrap();
     recovered.cancel().unwrap();
     assert!(registry.get_instance(&root).unwrap().is_none());

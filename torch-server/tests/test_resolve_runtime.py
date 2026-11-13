@@ -477,6 +477,33 @@ class ResolverTests(unittest.TestCase):
                             target, [{"name": "sympy", "version": "1.14.0"}]
                         )
             record.write_text(good_record, encoding="utf-8")
+            native = good_record.replace(
+                "sympy-1.14.0.dist-info/METADATA", "sympy-1.14.0.dist-info\\METADATA"
+            )
+            record.write_text(native, encoding="utf-8")
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                native_manifest = resolver.installed_file_manifest(
+                    target, [{"name": "sympy", "version": "1.14.0"}]
+                )
+            self.assertEqual(
+                [item["path"] for item in native_manifest["files"]],
+                [item["path"] for item in manifest["files"]],
+            )
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", False):
+                with self.assertRaisesRegex(ValueError, "escapes its target"):
+                    resolver.installed_file_manifest(
+                        target, [{"name": "sympy", "version": "1.14.0"}]
+                    )
+            escaping = good_record.replace(
+                "../../share/man/man1/isympy.1", "..\\..\\share\\..\\..\\outside"
+            )
+            record.write_text(escaping, encoding="utf-8")
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                with self.assertRaisesRegex(ValueError, "escapes its target"):
+                    resolver.installed_file_manifest(
+                        target, [{"name": "sympy", "version": "1.14.0"}]
+                    )
+            record.write_text(good_record, encoding="utf-8")
 
     def test_pip_worker_fallback_keeps_isolation_and_bytecode_suppression(self):
         with (

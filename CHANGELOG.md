@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   The installed-wheel check that follows now compares the acquired Torch
   wheel by file identity instead of path text, since pip reports it as a
   `file:` URL and Pumas names it by its canonical path.
+  On Windows the staged-package check also accepts a wheel RECORD that
+  writes paths with the native `\` separator, as torchvision's Windows wheel
+  does; parent and absolute paths are still refused.
 
 ## [0.8.0] - 2026-11-13
 

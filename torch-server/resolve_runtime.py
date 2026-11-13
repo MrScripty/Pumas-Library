@@ -217,6 +217,12 @@ def staged_file_digest(path: Path) -> tuple[bytes, int]:
     return digest.digest(), size
 
 
+# On Windows a backslash in a wheel RECORD is the native separator, which some
+# wheel tools write (torchvision's Windows wheel does). Elsewhere it is part of
+# a file name and stays rejected.
+RECORD_BACKSLASH_IS_SEPARATOR = os.sep == "\\"
+
+
 def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -> dict:
     """Validate pip's staged wheel files against every installed RECORD."""
     if target.is_symlink() or not target.is_dir():
@@ -266,6 +272,8 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 if len(row) != 3:
                     raise ValueError("Malformed staged wheel RECORD")
                 name, recorded_hash, recorded_size = row
+                if RECORD_BACKSLASH_IS_SEPARATOR:
+                    name = name.replace("\\", "/")
                 if name.startswith("../../"):
                     relocated = name.removeprefix("../../")
                     root, separator, nested = relocated.partition("/")

@@ -6933,11 +6933,12 @@ impl HuggingFaceClient {
         download_id: &str,
         interrupted_ref: Option<&crate::models::PumasModelRef>,
     ) -> Result<bool> {
-        // Completion settlement can still hold the library root just after
-        // Completed is projected. A terminal download is never resumable and
-        // terminal states never revert, so a busy root answers "not resumable"
-        // for it instead of failing the request as busy. The state is read
-        // only on that refusal, so the ordinary path keeps its lock order.
+        // The download's own transfer, import or completion settlement can
+        // hold the library root. Only Paused and Error downloads are
+        // resumable, so for any other state a busy root answers "not
+        // resumable", the same answer the unprotected path gives, instead of
+        // failing the request as busy. The state is read only on that
+        // refusal, so the ordinary path keeps its lock order.
         let mut protected_context = match self.protect_download_mutation(context).await {
             Ok(protected) => protected,
             Err(PumasError::DownloadRootBusy)
@@ -6947,10 +6948,7 @@ impl HuggingFaceClient {
                     .await
                     .get(download_id)
                     .is_some_and(|state| {
-                        matches!(
-                            state.status,
-                            DownloadStatus::Completed | DownloadStatus::Cancelled
-                        )
+                        !matches!(state.status, DownloadStatus::Paused | DownloadStatus::Error)
                     }) =>
             {
                 return Ok(false);

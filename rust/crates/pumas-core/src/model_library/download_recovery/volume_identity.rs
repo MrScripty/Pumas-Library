@@ -16,14 +16,20 @@
 //! translates it through the same lookup, so records written during the
 //! current boot keep matching after an upgrade.
 
+#[cfg(unix)]
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::sync::{Mutex, OnceLock};
 
 /// Set on every UUID-derived volume; Linux device numbers stay far below it.
-pub(super) const STABLE_VOLUME: u64 = 1 << 63;
+pub(crate) const STABLE_VOLUME: u64 = 1 << 63;
 
+/// Only Unix device numbers need a stable volume; Windows volume serial
+/// numbers are already stable.
+///
 /// The stable volume for a device number, or the device number itself when
 /// its filesystem has no UUID to name it by.
+#[cfg(unix)]
 pub(crate) fn stable_volume(device: u64) -> u64 {
     if device & STABLE_VOLUME != 0 {
         return device;
@@ -48,6 +54,7 @@ pub(crate) fn stable_volume(device: u64) -> u64 {
 
 /// FNV-1a over the UUID's case-folded text: deterministic across processes,
 /// releases and platforms.
+#[cfg(unix)]
 pub(super) fn volume_from_uuid(uuid: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in uuid.trim().to_ascii_lowercase().bytes() {
@@ -73,12 +80,12 @@ fn filesystem_uuid(device: u64) -> Option<String> {
     None
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn filesystem_uuid(_device: u64) -> Option<String> {
     None
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

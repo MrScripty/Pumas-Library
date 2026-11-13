@@ -391,7 +391,9 @@ class InstallSelectionFixture(unittest.TestCase):
             resolution = {
                 "release": TAG.removeprefix("v"),
                 "build": "cpu",
-                "adapter": "none",
+                "modalities": ["text", "image", "audio"],
+                "omitted_modalities": {},
+                "extras": [],
                 "python": "3.14",
                 "artifacts": [
                     {
@@ -411,6 +413,30 @@ class InstallSelectionFixture(unittest.TestCase):
             path.write_text(json.dumps(resolution), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "installed Torch resolution failed"):
                 installed_resolution_evidence(root, "python3.14")
+            # Extras, or a modality neither resolved nor omitted, are not the
+            # general install this acceptance runs.
+            resolution["artifacts"][0]["sha256"] = "a" * 64
+            for change in (
+                {"extras": ["nunchaku"]},
+                {"modalities": ["text", "image"]},
+                {"modalities": ["text", "image"], "omitted_modalities": {"audio": ""}},
+            ):
+                path.write_text(json.dumps({**resolution, **change}), encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "installed Torch resolution failed"):
+                    installed_resolution_evidence(root, "python3.14")
+            path.write_text(
+                json.dumps(
+                    {
+                        **resolution,
+                        "modalities": ["text", "image"],
+                        "omitted_modalities": {"audio": "no compatible wheel"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                installed_resolution_evidence(root, "python3.14"), {"artifact_count": 1}
+            )
 
     def test_install_failure_log_capture_is_bounded_to_launcher_logs(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3355,6 +3381,27 @@ def request_install_selection(base: str, *, rpc_call=None) -> dict:
     return preview
 
 
+GENERAL_MODALITIES = frozenset({"text", "image", "audio"})
+
+
+def general_install_resolution(resolution: dict) -> bool:
+    """Whether a resolution records the general install without extras.
+
+    Every Torch install resolves all general modalities, each resolved or
+    omitted with a reason, and records the optional extras it carries.
+    """
+    modalities = resolution.get("modalities")
+    omitted = resolution.get("omitted_modalities", {})
+    return (
+        isinstance(modalities, list)
+        and isinstance(omitted, dict)
+        and all(isinstance(reason, str) and reason for reason in omitted.values())
+        and set(modalities).isdisjoint(omitted)
+        and set(modalities) | set(omitted) == GENERAL_MODALITIES
+        and resolution.get("extras") == []
+    )
+
+
 def installed_resolution_evidence(root: Path, python: str) -> dict:
     resolution_path = root / "torch-versions" / TAG / "resolution.json"
     with resolution_path.open(encoding="utf-8") as resolution_file:
@@ -3363,7 +3410,7 @@ def installed_resolution_evidence(root: Path, python: str) -> dict:
     require(
         resolution.get("release") == TAG.removeprefix("v")
         and resolution.get("build") == "cpu"
-        and resolution.get("adapter") == "none"
+        and general_install_resolution(resolution)
         and resolution.get("python") == python.removeprefix("python")
         and isinstance(artifacts, list)
         and bool(artifacts)

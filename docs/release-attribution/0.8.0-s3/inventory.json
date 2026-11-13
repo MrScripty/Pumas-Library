@@ -9308,7 +9308,7 @@
     "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md.provenance.json": "3abbd4c93221c44bd33aa7012b5cd12bd1bce0a569768d076e820ee24959c10d",
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
-    "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
+    "scripts/release/torch-managed-python-acceptance.py": "e909594a7757900fab28f24abdd7206b749fd8ec579f79116fd1375caf3b6ed3"
   },
   "notices_sha256": "93a606ab2f71b033e53af6295564db3a7b135ae52aa6d09d062e292dc2084ecf"
 }

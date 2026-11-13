@@ -29,7 +29,9 @@ mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;
 mod download_recovery;
+#[cfg(unix)]
 pub(crate) use download_recovery::stable_volume;
+pub(crate) use download_recovery::STABLE_VOLUME;
 mod download_resolution;
 pub use download_resolution::{
     DownloadLocalAcceptance, DownloadLocalCandidate, DownloadLocationReport,

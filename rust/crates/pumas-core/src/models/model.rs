@@ -473,6 +473,11 @@ pub struct ModelMetadata {
     // Conversion provenance tracking
     #[serde(default)]
     pub conversion_source: Option<ConversionSource>,
+    /// Sentence-transformers declarations (pooling, normalization, scoring)
+    /// resolved from the package or its upstream lineage (ADR 0007).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentence_transformers:
+        Option<crate::model_library::declarations::SentenceTransformersDeclarations>,
     // Download provenance
     /// HuggingFace repository ID (e.g. "TheBloke/Llama-2-7B-GGUF").
     #[serde(default)]
@@ -763,6 +768,11 @@ pub struct DownloadOption {
     /// rather than a quant-based selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_group: Option<FileGroup>,
+    /// Bytes of the model card, license, code and other metadata files that
+    /// download with this option, in addition to `size_bytes`. Absent when
+    /// the Hub did not report every companion's size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion_size_bytes: Option<u64>,
 }
 
 /// Model download status.

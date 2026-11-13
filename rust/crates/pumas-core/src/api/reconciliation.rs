@@ -615,7 +615,7 @@ async fn execute_reconciliation(
             // claim or changing bytes. Busy download custody is a deferred
             // observation, not an unverified mutation that poisons shutdown.
             run.finish_failure().await;
-            schedule_desired_retry(inputs, true);
+            schedule_after_root_release(inputs);
             Ok(Vec::new())
         }
         Err(error) => {
@@ -688,6 +688,42 @@ fn schedule_dirty_followup(inputs: ReconciliationInputs) {
             }
             StartOutcome::Clean | StartOutcome::InFlight => {}
         }
+    });
+}
+
+/// Re-run the library pass once the download holding the library root
+/// releases it, so every model deferred by the busy root is reclassified.
+/// A holder in another process gives no release signal, so the existing
+/// desired-state retry is armed as well.
+fn schedule_after_root_release(inputs: ReconciliationInputs) {
+    let Ok(authority) = inputs.model_library.mutation_authority() else {
+        return;
+    };
+    let mut released = authority.root().release_signal();
+    schedule_desired_retry(inputs.clone(), true);
+    let runtime_tasks = inputs.runtime_tasks.clone();
+    runtime_tasks.spawn(async move {
+        loop {
+            // Subscribed above, so a release between the deferral and this
+            // check wakes the wait below instead of being missed.
+            match authority.root().try_acquire_execution_grant() {
+                Ok(grant) => {
+                    drop(grant);
+                    break;
+                }
+                Err(PumasError::DownloadRootBusy) => {
+                    if released.changed().await.is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!("Deferred reclassification stopped waiting: {error}");
+                    return;
+                }
+            }
+        }
+        inputs.reconciliation.lock_state().all.dirty = true;
+        schedule_dirty_followup(inputs);
     });
 }
 
@@ -1801,6 +1837,13 @@ async fn run_scope(
                     "Reconcile(all): reclassify had {} errors",
                     reclassify.errors.len()
                 );
+            }
+            if !reclassify.deferred.is_empty() {
+                tracing::info!(
+                    "Reconcile(all): {} model(s) deferred until the library root is released",
+                    reclassify.deferred.len()
+                );
+                schedule_after_root_release(primary.clone());
             }
 
             let post_cleanup = context

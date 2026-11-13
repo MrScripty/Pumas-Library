@@ -24,7 +24,7 @@ class _ControlledLoadManager(ModelManager):
         self.publication_error = None
         self.loaded_result = None
 
-    def _load_sync(self, model_path, device, model_type):
+    def _load_sync(self, model_path, device, model_type, declarations=None):
         """Block only the executor thread until the test releases its work."""
         self.loop.call_soon_threadsafe(self.worker_started.set)
         self.release_worker.wait()

@@ -7,6 +7,250 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sentence-transformers declarations (pooling, normalization, `LogitScore`
+  tokens, prompt template, prompts) are recorded in model metadata as
+  `sentence_transformers`, resolved from the model's package or lineage (its
+  source repository, then its single base model) at an immutable commit.
+  Models are resolved automatically when they become complete (downloads,
+  imports and conversions); `resolve_model_declarations`
+  (optional `repo_id`) resolves any library model
+  ([ADR 0007](docs/adr/0007-model-declarations.md)).
+- ONNX Runtime embeds with the pooling (mean, CLS, last token, max) and
+  normalization a model declares, accepts graphs that take `position_ids` and
+  segment ids, and reranks with cross-encoder graphs (one relevance logit per
+  pair) through `rerank` and the gateway's `/v1/rerank`. Graphs needing inputs
+  the adapter cannot supply are refused at load with their names, and ONNX
+  validation errors now carry their reason.
+- Torch serves text embedders and rerankers from local Safetensors packages
+  (for example Prism-Qwen3.5-Reranker, bge-reranker-v2-m3, harrier) through
+  `text_embedding`, `rerank`, `/v1/embeddings` and `/v1/rerank`, computing what
+  the model's recorded declarations say even when the package lacks its
+  sentence-transformers files. A runtime advertises them when Transformers
+  and Jinja are installed, which every Torch install now includes; the routes
+  come from the sidecar shipped with Pumas, so installed runtimes gain them
+  without a reinstall.
+- Cross-encoder rerankers published as text classifiers (for example
+  bge-reranker-v2-m3) are recorded as rerankers: a GGUF ranking head without
+  a decision head, or a `*ForSequenceClassification` config with one label,
+  decides the category over a `text-classification` tag when reranker
+  evidence corroborates it (see Fixed), and such a tag no longer blocks
+  `rerank` for a recorded reranker.
+- `start_model_conversion` direction `gguf_to_ranking_gguf` derives a llama.cpp
+  ranking head into a copy of a causal-LM reranker GGUF that shipped without
+  one (for example zerank-2 and some Qwen3-Reranker quantizations), from the
+  model's recorded `LogitScore` declaration. Architectures whose llama.cpp
+  rank pooling cannot use such a head are refused with the reason
+  ([ADR 0006](docs/adr/0006-derived-ranking-heads.md)). The base conversion
+  environment now also needs `jinja2`; re-run conversion setup.
+- Runtime profiles can pin an installed runtime version
+  (`runtime_version`), so llama.cpp, Torch and other managed runtimes can run
+  instances of different versions at the same time. A profile without a pin
+  follows the runtime's active version, as before. Saving a pin that is not
+  installed, or launching a profile whose pinned version was removed, is
+  refused with the reason. Running instances report the version they started
+  from in `RuntimeProfileStatus.runtime_version`.
+- `get_runtime_providers` reports each runtime provider's app id, whether it
+  is version-managed in this build, and its supported provider, device and
+  management modes. The desktop app derives its version panels and runtime
+  profile editor choices from it instead of hard-coded lists, so ONNX Runtime
+  profiles now offer GPU.
+- Installing an ONNX Runtime CUDA build (`+cuda12`, `+cuda13`) also installs
+  the NVIDIA CUDA runtime, cuBLAS, cuFFT, cuRAND, NVRTC, nvJitLink and cuDNN
+  libraries it loads, into `cuda/lib` of that version, and the version's ONNX
+  host starts with its library search path pointing there. Which packages and
+  version ranges a build needs comes from the `cuda` and `cudnn` extras of the
+  matching `onnxruntime-gpu` release, read from PyPI or Microsoft's
+  `onnxruntime-cuda-12`/`onnxruntime-cuda-13` feed; Pumas then takes the
+  newest compatible NVIDIA wheels on PyPI, with no pinned versions. The wheels
+  download with the release archive through the shared acquisition path
+  (resumable, each verified against its published SHA-256), and a retried
+  install keeps the set it started with. Only shared libraries and licenses
+  are kept; `cuda/libraries.json` records their source and digests, and
+  removing the version removes them. A build without usable metadata (CUDA 12
+  builds from 1.30, CUDA 13 builds before 1.28, as published today) is refused
+  with the reason, and the reason names the builds that install instead. The
+  version listing gives each CUDA build an `installAvailability` (`checking`,
+  `available`, `unavailable` with `unavailableReason`, or `unknown` when the
+  indexes could not be read, which leaves install to decide) and reports
+  `availability_pending` while any check runs; the desktop app shows
+  "Checking…" or the reason in place of Install and lists again until nothing
+  is pending. These lookups are kept until the package indexes change or the
+  list is refreshed. The NVIDIA driver remains
+  the operating system's. CPU builds are unchanged. See
+  [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md#amendment-2026-11-12-cuda-libraries).
+
+### Changed
+
+- Changing a runtime's active or default version no longer requires stopping
+  its running profiles; they keep the version they started from, and the
+  change applies to new launches. Removing a version is refused only while an
+  instance runs that version, and the refusal names the profiles to stop.
+- ONNX Runtime is a downloaded, version-managed runtime like llama.cpp and
+  Torch, and no Pumas package bundles it: desktop packages and headless
+  inference archives alike. The ONNX Runtime panel lists official
+  `microsoft/onnxruntime` releases that support the C API Pumas uses (1.24 or
+  newer) as CPU, CUDA 12 and CUDA 13 builds for the host, installs them through
+  the shared, resumable and verified download path, and tracks installed,
+  active and default versions.
+- Each ONNX Runtime profile runs its own ONNX host process (`pumas-rpc
+  --onnx-host`) that loads the version the profile launches, so profiles on
+  different versions serve at the same time and switching a profile's version
+  restarts only that host, never Pumas. A profile's device mode selects the
+  build's execution provider (CPU, CUDA, or CoreML on macOS); a provider that
+  cannot initialize, or a missing runtime, refuses the launch with the reason.
+  For CUDA the reason says whether the NVIDIA driver is missing, too old for
+  the build, or present while the CUDA runtime or cuDNN libraries installed
+  with the version did not load (reinstall the version); the driver stays the
+  operating system's, and Pumas only points at NVIDIA's download. Hosts run with ONNX Runtime telemetry disabled
+  (`ORT_DISABLE_TELEMETRY=1` and telemetry events off), so ONNX Runtime
+  creates no device id or telemetry database in the user cache.
+  Serving launches the profile's host when needed. `ORT_DYLIB_PATH` remains a
+  developer override. See
+  [ADR 0009](docs/adr/0009-onnx-runtime-downloaded-runtime.md).
+- Headless inference archives contain only `pumas-rpc`, its license and
+  notices, the protocol schema and build record; their manifest is schema 2
+  without the `runtime` record, and schema-1 manifests are refused with the
+  reason. Release SBOMs list no bundled runtime.
+- Torch runtime wheels now download through Pumas's shared acquisition
+  owner, the one llama.cpp archives use, instead of through pip. A dropped
+  connection resumes from the bytes already received, and a failed install
+  keeps those bytes so the next install continues them. Each wheel is checked
+  against the SHA-256 its index publishes before pip installs it offline from
+  the local file. The resolver still chooses every version. Previously, pip
+  discarded a partial wheel when its retries ran out, as it did with 415 MB of
+  a 540 MB Torch wheel during a DNS outage.
+- A Torch install that cannot use shared acquisition keeps pip's downloads
+  and writes the reason in its installation log.
+- Every Torch install now carries all general modalities: the text (with
+  Jinja), image and audio packages resolve together at current releases.
+  Image generation, Cohere ASR and text models no longer depend on which
+  adapter was picked at install time. Nunchaku is the only optional extra,
+  because its wheel is qualified to one Torch and Python pair. A modality
+  whose packages have no compatible wheel is left out with its reason instead
+  of failing the install; the Cohere ASR Transformers floor is a floor, not a
+  pin, and yields to an older Torch or a chosen tested combination.
+- Installed Torch runtimes report capabilities from what their install probe
+  could import, each available, unavailable (with the reason) or unknown for
+  runtimes probed before this change. The install dialog shows the general
+  modalities and extras the backend reports, and "verified combinations" are
+  shown as tested-as-working evidence.
+
+### Deprecated
+
+- The `adapter` parameter of `preview_torch_runtime` is still accepted and
+  mapped (`none`, `flux2` and `cohere-asr` select the general install,
+  `nunchaku` the Nunchaku extra). Send `extras` instead; a removal will be
+  announced separately.
+
+### Fixed
+
+- Torch embeddings now apply the Dense and LayerNorm modules a model declares
+  after pooling (EmbeddingGemma: Transformer, Pooling, Dense, Dense,
+  Normalize) from the weights in its package. Before, they were skipped and
+  the vectors were silently wrong. Declarations record each module's
+  directory, role and layer (`module_details`); a module a runtime does not
+  implement is refused at load with the reason. Records written earlier
+  carry no layer, so such a model is refused until its declarations are
+  resolved again.
+- ONNX Runtime reads a graph's pooled `sentence_embedding` output when the
+  model declares stages after pooling, instead of re-pooling token states and
+  dropping those stages, and refuses graphs that do not export one.
+- ONNX Runtime rerank applies the model's declared activation, as Torch does.
+- Torch text requests the sidecar refuses (an empty input or document list,
+  a blank query, too many items) return 400 with the reason instead of 502.
+- One-label classifier heads (a `*ForSequenceClassification` config or a GGUF
+  `cls.output.weight`) are recorded as rerankers only with reranker evidence
+  beside them (a reranker tag or name, a CrossEncoder package, or recorded
+  CrossEncoder/`LogitScore` declarations). Alone they are low-confidence
+  rerankers that an explicit task tag overrides, so reward and regression
+  heads keep their category.
+- Declarations are read from the source repository at the commit its files
+  were downloaded at, not its current `main`; a lineage repository that fails
+  to read no longer ends the search; and recording them changes only the
+  `sentence_transformers` field, so edits made during the fetch are kept.
+- The declarations reactor no longer stalls the update feed behind a fetch,
+  rescans the library when the feed lags, abandons transfers that stop
+  delivering data, and stops at shutdown. It resolves only embedders,
+  rerankers and decision models.
+- Acquisition workspace identities persist the reboot-stable volume instead
+  of the raw device number; identities persisted earlier are translated when
+  read.
+
+- One malformed library record no longer makes the whole library unavailable.
+  `get_models` and catalog search leave the record out and list it in
+  `unavailable_records` with the model ID and the reason; the library view
+  shows those records beside the models that loaded.
+- A copied import no longer gets stuck Ready on disk but Pending in the index
+  when a metadata refresh overlaps its hash pass. Imports already stuck that
+  way can be finished with `finish_retained_import`, or with "Verify and
+  finish import" in the library view, which first re-verifies the confirmed
+  receipt and rehashes the payload. `unavailable_records` now carries the
+  library's diagnosis `code` and a `recovery` when a repair exists
+  ([ADR 0008](docs/adr/0008-retained-copied-publications.md)).
+- A failed download keeps its failure reason across restarts. Downloads that
+  failed before this change say so, instead of showing no reason.
+- Torch runtime installs no longer fail on a slow connection because a stage
+  ran longer than an hour. A stage now fails only after 30 minutes with no
+  new downloaded bytes and no install-log output, and the error says so.
+- A failed Torch install no longer makes the next start refuse the library
+  ("instance is already running" with a dead pid). The failure was reported a
+  second time at shutdown, which left the instance registered. Leftovers from
+  a failed Torch install are durably marked and cleaned at the next start.
+- A library left registered as open by a Pumas process that was killed or
+  crashed no longer needs hand-editing the registry. Startup reports it as a
+  `stale-instance` failure with the entry's details, and the desktop offers
+  "Release Entry": after you confirm, Pumas re-checks that the library's lock
+  is free, the process is gone and the entry is unchanged, removes only that
+  entry and opens the library. Headless users can run `pumas-rpc
+  --release-stale-instance`. Pumas still never replaces such an entry on its
+  own.
+- On Linux, file identities recorded for downloads and copied imports name
+  the filesystem by its UUID instead of its device number, which the kernel
+  can reassign at boot (an NVMe partition moved from 259:6 to 259:8).
+  Identities recorded before this change are translated when read, so records
+  from the current boot keep matching.
+- A retried ONNX Runtime CUDA install no longer stays stuck when a CUDA library
+  wheel it selected earlier has been removed from PyPI (its project, listing
+  or file answers not found). The retry resolves the libraries again,
+  withdraws the earlier unfinished download, reuses the finished downloads the
+  new selection still names after verifying them, and records why in the
+  install log. A server error or network failure keeps the earlier selection,
+  and a retry checks only the wheels it still has to download. A retry whose
+  kept selection cannot be read or no longer applies replaces the earlier
+  download the same way instead of failing on it.
+- A Hugging Face download whose GGUF declares a llama.cpp decision head
+  (`<arch>.decision.type`, as Kev does) is classified `decision` before it
+  downloads. The download preflight reads only the metadata headers of the
+  same files classification reads after download (top-level, non-projector
+  GGUFs, first shard of a split package) with bounded HTTP Range requests, so
+  a `config.json` or task tag no longer files it as `llm`. A header that breaks
+  the GGUF metadata bounds is logged with the reason and the download is
+  classified from repository metadata; for a pinned revision a failed header
+  read fails the plan instead of changing its model ID. Replays of durable
+  bound targets keep the category their model ID was recorded under, so
+  existing bindings such as Kev under `llm/` stay valid. GGUF identification
+  now reads every model key, rather than stopping after 100 keys.
+- Reclassifying the library while a download holds the library root defers
+  the affected models (`ReclassifyResult.deferred` and
+  `FfiReclassifyResult.deferred`, with the reason) instead of reporting
+  "Download library root is busy" as an error, and runs again once the
+  download releases the root.
+- A paused Hugging Face download that already published some regular
+  (non-LFS) files can resume. Those files have no published SHA-256, and the
+  resumed download refused them with "Existing selected file … has no verified
+  receipt or supplied checksum". Each file a download publishes now gets a
+  durable receipt first, so a resumed download recognizes its own files without
+  downloading or hashing them again. Downloads started before this change have
+  no receipts: Pumas transfers such a file again from the same immutable
+  revision and keeps the existing copy when it is byte-identical, retrying
+  within the same resume if that transfer is cut off. A partial copy left by an
+  earlier refusal is discarded when all of its bytes are already in the final
+  file. A file that really differs, or one a receipt-keeping download did not
+  publish, is still refused with both files kept and their sizes and SHA-256
+  values in the reason.
+
 ## [0.8.0] - 2026-11-08
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
@@ -55,6 +299,24 @@ the 2026-11-02 audit
   `audio_transcription` sidecar capability). The `cohere-asr` Torch adapter
   resolves current packages with a Transformers 5.4 floor, and `cohere_asr`
   configs are classified as audio models.
+- Hugging Face downloads keep the model card, license and notice files
+  (`LICENSE*`, `NOTICE*`, `USE_POLICY*`, `COPYING*`), the repository's code
+  and its other metadata files with the selected weights, scoped to the root
+  and the folders that hold the selected weights; other weight variants are
+  never pulled. Metadata records the stored card and license
+  (`model_card_artifact`, `license_artifact`, with SHA-256 and source URL) and
+  the code (`custom_code_sources`, `requires_custom_code`). Code is stored for
+  inspection only and never executed; Torch refuses an `auto_map` model whose
+  architecture Transformers does not implement and names the code it would
+  need. Model IDs and directories do not change. Download options report
+  `companionSizeBytes`.
+- Companion backfill (`backfill_model_companion_files`,
+  `backfill_library_companion_files`, dry run by default) fetches the card,
+  license, code and metadata files existing models are missing, at their
+  recorded commit, through hash-checked, resumable acquisition. Weights and
+  identity are untouched; local imports and vanished revisions are skipped
+  with a reason. `get_model_documents` returns the stored card, licenses and
+  code, shown in the model window's **Card & License** tab.
 
 ### Changed
 
@@ -105,6 +367,15 @@ the 2026-11-02 audit
   3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
   from the preset keep working. Torch install options replace
   `bundledPresetAvailable` and `preset` with `verified`.
+- Torch runtimes run the sidecar shipped with the running Pumas instead of a
+  copy written into the runtime at install time, so upgrading Pumas updates
+  the sidecar for every installed runtime without a reinstall. Pumas writes it
+  once to `launcher-data/torch-sidecar/<version>-<digest>/` and every runtime
+  version launches from there; a runtime holds only its Python environment,
+  packages and records. Before each launch Pumas checks the runtime's
+  interpreter and startup packages against the sidecar's floors (never pins)
+  and refuses an incompatible runtime with every reason. Sidecar copies in
+  runtimes installed earlier are no longer run and are left in place.
 - Desktop update streams (model library, downloads, runtime profiles, serving
   status and status telemetry) are validated against the backend's declaration.
   A rejected desktop payload says which field and rule failed.
@@ -212,6 +483,15 @@ the 2026-11-02 audit
 
 ### Security
 
+- Third-party telemetry is disabled in every runtime and conversion process
+  Pumas starts (`HF_HUB_DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1`, which cover
+  huggingface_hub, Transformers, Diffusers and sentence-transformers, and
+  `ORT_DISABLE_TELEMETRY=1` for ONNX Runtime), even when the user's
+  environment enables it.
+- Runtime and conversion processes run with `HF_HUB_OFFLINE=1`, so Hugging
+  Face libraries read only the files Pumas downloaded into the library and
+  never fetch missing ones into their own cache. The Sherry conversion script
+  now also loads with `local_files_only=True` and without remote code.
 - The desktop keeps every renderer on the bundled app: child windows,
   off-app navigation, webviews and browser permissions are denied, links open
   in the system browser, and every IPC handler checks its sender. Packaged

@@ -218,6 +218,20 @@ fn profile_runtime_env_vars(
                 runtime_host_port(endpoint_url, port)?,
             );
         }
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost) => {
+            #[cfg(feature = "onnx-runtime")]
+            {
+                use crate::onnx_runtime::host_protocol;
+                env_vars.insert(
+                    host_protocol::TOKEN_ENV.into(),
+                    host_protocol::host_api_token().into(),
+                );
+                env_vars.insert(
+                    host_protocol::PARENT_PID_ENV.into(),
+                    std::process::id().to_string(),
+                );
+            }
+        }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::LlamaCppRouter
             | RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
@@ -239,7 +253,10 @@ fn profile_runtime_extra_args(
     match launch_strategy {
         RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
             // Profile arguments replace the default Torch launch arguments.
-            let mut args = vec!["-B".to_string(), "serve.py".to_string()];
+            // The sidecar comes from this Pumas, never from the runtime, and
+            // `-B` keeps every instance from writing next to the shared scripts.
+            let entry = super::torch_sidecar::torch_sidecar_entry(launcher_root);
+            let mut args = vec!["-B".to_string(), entry.to_string_lossy().into_owned()];
             args.extend(runtime_listener_args(endpoint_url, port)?);
             Ok(args)
         }
@@ -267,9 +284,68 @@ fn profile_runtime_extra_args(
             apply_llama_cpp_device_args(&mut args, profile);
             Ok(args)
         }
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost) => {
+            // The host derives its execution provider from the installed
+            // build it loads and this device mode.
+            let mut args = runtime_listener_args(endpoint_url, port)?;
+            args.extend([
+                "--onnx-device-mode".to_string(),
+                onnx_device_mode_arg(profile.device.mode).to_string(),
+            ]);
+            Ok(args)
+        }
         RuntimeProfileLaunchStrategy::InProcessRuntime(_) => Ok(Vec::new()),
         RuntimeProfileLaunchStrategy::ExternalOnly => Ok(Vec::new()),
     }
+}
+
+/// The `--onnx-device-mode` spelling of a profile's device mode.
+pub fn onnx_device_mode_arg(mode: RuntimeDeviceMode) -> &'static str {
+    match mode {
+        RuntimeDeviceMode::Auto => "auto",
+        RuntimeDeviceMode::Cpu => "cpu",
+        RuntimeDeviceMode::Gpu => "gpu",
+        RuntimeDeviceMode::Hybrid => "hybrid",
+        RuntimeDeviceMode::SpecificDevice => "specific_device",
+    }
+}
+
+/// Parse an `--onnx-device-mode` value.
+pub fn parse_onnx_device_mode(value: &str) -> Option<RuntimeDeviceMode> {
+    [
+        RuntimeDeviceMode::Auto,
+        RuntimeDeviceMode::Cpu,
+        RuntimeDeviceMode::Gpu,
+        RuntimeDeviceMode::Hybrid,
+        RuntimeDeviceMode::SpecificDevice,
+    ]
+    .into_iter()
+    .find(|mode| onnx_device_mode_arg(*mode) == value)
+}
+
+static ONNX_HOST_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Register the executable that runs ONNX hosts (`pumas-rpc --onnx-host`).
+///
+/// The RPC server registers its own executable at startup. An embedding
+/// application that registers none cannot launch ONNX Runtime profiles, and
+/// such a launch is refused with that reason.
+pub fn register_onnx_host_executable(executable: PathBuf) -> Result<()> {
+    let registered = ONNX_HOST_EXECUTABLE.get_or_init(|| executable.clone());
+    if registered != &executable {
+        return Err(PumasError::InvalidParams {
+            message: format!(
+                "an ONNX host executable is already registered: {}",
+                registered.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "onnx-runtime")]
+pub(crate) fn onnx_host_executable() -> Option<&'static Path> {
+    ONNX_HOST_EXECUTABLE.get().map(PathBuf::as_path)
 }
 
 fn runtime_listener_args(
@@ -447,7 +523,13 @@ mod torch_tests {
         let [spec] = specs.as_slice() else {
             panic!("expected one managed profile")
         };
-        assert_eq!(&spec.extra_args[..2], &["-B", "serve.py"]);
+        // The entry is this Pumas's sidecar, shared by every runtime version.
+        let entry = super::super::torch_sidecar::torch_sidecar_entry(Path::new("/fixture"));
+        assert!(entry.starts_with("/fixture/launcher-data/torch-sidecar"));
+        assert_eq!(
+            &spec.extra_args[..2],
+            &["-B".to_string(), entry.to_string_lossy().into_owned()]
+        );
         assert!(spec.extra_args.contains(&"--port".into()));
         assert!(spec.health_check_url.as_str().ends_with("/health"));
         assert_eq!(
@@ -474,24 +556,42 @@ mod torch_tests {
         );
 
         // Exercise both production argument builders against real Python imports.
-        // The fixture substitutes package code, not the launch arguments.
+        // The fixture substitutes the sidecar and package code, not the launch
+        // arguments: the entry runs from the shared sidecar directory while the
+        // working directory is the runtime's own.
         let mut changed_routes = Vec::new();
+        let launcher = tempfile::tempdir().unwrap();
+        let profile_spec = derive_managed_profile_launch_specs(
+            launcher.path(),
+            &config,
+            &ProviderRegistry::builtin(),
+        )
+        .unwrap()
+        .remove(0);
+        let entry = super::super::torch_sidecar::torch_sidecar_entry(launcher.path());
+        let sidecar = entry.parent().unwrap();
+        std::fs::create_dir_all(sidecar).unwrap();
+        std::fs::write(
+            sidecar.join("sidecar_dependency.py"),
+            "import launch_dependency\nVALUE = launch_dependency.VALUE\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &entry,
+            "import sidecar_dependency\nassert sidecar_dependency.VALUE == 42\n",
+        )
+        .unwrap();
         for (route, args) in [
             (
                 "version",
-                crate::process::BinaryLaunchConfig::torch("fixture", "/fixture").extra_args,
+                crate::process::BinaryLaunchConfig::torch("fixture", "/fixture", &entry).extra_args,
             ),
-            ("profile", spec.extra_args.clone()),
+            ("profile", profile_spec.extra_args.clone()),
         ] {
             let runtime = tempfile::tempdir().unwrap();
             let packages = runtime.path().join("site-packages");
             std::fs::create_dir(&packages).unwrap();
             std::fs::write(packages.join("launch_dependency.py"), "VALUE = 42\n").unwrap();
-            std::fs::write(
-                runtime.path().join("serve.py"),
-                "import launch_dependency\nassert launch_dependency.VALUE == 42\n",
-            )
-            .unwrap();
             let status =
                 std::process::Command::new(if cfg!(windows) { "python" } else { "python3" })
                     .args(args)
@@ -503,13 +603,13 @@ mod torch_tests {
                     .status()
                     .expect("Torch launch regression requires Python");
             assert!(status.success(), "{route} launch failed");
-            if packages.join("__pycache__").exists() {
+            if packages.join("__pycache__").exists() || sidecar.join("__pycache__").exists() {
                 changed_routes.push(route);
             }
         }
         assert!(
             changed_routes.is_empty(),
-            "Torch launches mutated installed package bytes: {changed_routes:?}"
+            "Torch launches wrote bytecode into packages or the shared sidecar: {changed_routes:?}"
         );
     }
 
@@ -583,5 +683,138 @@ else:\n    raise SystemExit('outside path was accepted')\n";
             std::env::split_paths(&joined).collect::<Vec<_>>(),
             vec![PathBuf::from("/external/a"), PathBuf::from("/library")]
         );
+    }
+}
+
+#[cfg(all(test, feature = "onnx-runtime"))]
+mod onnx_host_tests {
+    use super::*;
+    use crate::models::{RuntimeProviderId, RuntimeProviderMode};
+    use crate::onnx_runtime::host_protocol;
+
+    #[test]
+    fn onnx_profile_launches_its_host_with_device_mode_token_and_parent_watch() {
+        let mut config = RuntimeProfilesConfigFile::default_seed();
+        let profile = &mut config.profiles[0];
+        profile.provider = RuntimeProviderId::OnnxRuntime;
+        profile.provider_mode = RuntimeProviderMode::OnnxServe;
+        profile.device.mode = RuntimeDeviceMode::Gpu;
+        profile.endpoint_url = None;
+        profile.port = None;
+        let specs = derive_managed_profile_launch_specs(
+            Path::new("/fixture"),
+            &config,
+            &ProviderRegistry::builtin(),
+        )
+        .unwrap();
+        let [spec] = specs.as_slice() else {
+            panic!("expected one managed profile")
+        };
+        assert_eq!(
+            spec.launch_strategy,
+            RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost)
+        );
+        let args = &spec.extra_args;
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--onnx-device-mode", "gpu"]));
+        assert!(args.contains(&"--port".into()));
+        assert!(spec
+            .pid_file
+            .starts_with("/fixture/launcher-data/runtime-profiles/onnx-runtime"));
+        let token = spec.env_vars.get(host_protocol::TOKEN_ENV).expect("token");
+        assert_eq!(token, host_protocol::host_api_token());
+        assert!(!args.iter().any(|arg| arg.contains(token.as_str())));
+        assert_eq!(
+            spec.env_vars.get(host_protocol::PARENT_PID_ENV),
+            Some(&std::process::id().to_string())
+        );
+
+        // The launch config adds the installed version the host loads.
+        let config = crate::process::BinaryLaunchConfig::onnx_host(
+            "v1.31.1+cuda12",
+            "/fixture/onnx-runtime-versions/v1.31.1+cuda12",
+            "/fixture/bin/pumas-rpc",
+        );
+        assert_eq!(config.command.as_deref(), Some(host_protocol::HOST_FLAG));
+        assert_eq!(
+            config
+                .env_vars
+                .get(host_protocol::RUNTIME_VERSION_ENV)
+                .map(String::as_str),
+            Some("v1.31.1+cuda12")
+        );
+        assert!(config.env_vars.contains_key(host_protocol::RUNTIME_DIR_ENV));
+        assert_eq!(
+            config
+                .env_vars
+                .get(host_protocol::ORT_DISABLE_TELEMETRY_ENV)
+                .map(String::as_str),
+            Some("1")
+        );
+        for mode in [
+            RuntimeDeviceMode::Auto,
+            RuntimeDeviceMode::Cpu,
+            RuntimeDeviceMode::Gpu,
+            RuntimeDeviceMode::Hybrid,
+            RuntimeDeviceMode::SpecificDevice,
+        ] {
+            assert_eq!(
+                parse_onnx_device_mode(onnx_device_mode_arg(mode)),
+                Some(mode)
+            );
+        }
+    }
+
+    #[test]
+    fn an_onnx_host_searches_the_cuda_libraries_installed_with_its_version() {
+        use crate::onnx_runtime_distribution as distribution;
+        let temp = tempfile::TempDir::new().unwrap();
+        let version_dir = temp.path().join("v1.31.1+cuda12");
+        std::fs::create_dir_all(version_dir.join("lib")).unwrap();
+        let Some((variable, separator)) = distribution::library_search_path_variable() else {
+            // macOS has no CUDA builds; its host gets no search path.
+            let config = crate::process::BinaryLaunchConfig::onnx_host(
+                "v1.31.1+cpu",
+                &version_dir,
+                "/fixture/bin/pumas-rpc",
+            );
+            assert!(!config.env_vars.contains_key("DYLD_LIBRARY_PATH"));
+            return;
+        };
+
+        // Without installed CUDA libraries the host's search path is untouched.
+        let config = crate::process::BinaryLaunchConfig::onnx_host(
+            "v1.31.1+cuda12",
+            &version_dir,
+            "/fixture/bin/pumas-rpc",
+        );
+        assert!(!config.env_vars.contains_key(variable));
+
+        let library_dir = distribution::join_relative(&version_dir, distribution::CUDA_LIBRARY_DIR);
+        std::fs::create_dir_all(&library_dir).unwrap();
+        // A directory without the record of what filled it is not an install.
+        assert_eq!(distribution::installed_cuda_library_dir(&version_dir), None);
+        std::fs::write(
+            distribution::join_relative(&version_dir, distribution::CUDA_LIBRARIES_RECORD),
+            b"{}",
+        )
+        .unwrap();
+        assert_eq!(
+            distribution::installed_cuda_library_dir(&version_dir).as_deref(),
+            Some(library_dir.as_path())
+        );
+        let config = crate::process::BinaryLaunchConfig::onnx_host(
+            "v1.31.1+cuda12",
+            &version_dir,
+            "/fixture/bin/pumas-rpc",
+        );
+        let search_path = config.env_vars.get(variable).expect("library search path");
+        let first = search_path.split(separator).next().unwrap();
+        assert_eq!(first, library_dir.to_string_lossy());
+        if variable == "LD_LIBRARY_PATH" {
+            // The inherited LD_LIBRARY_PATH is never passed to owned children.
+            assert_eq!(search_path, &library_dir.to_string_lossy());
+        }
     }
 }

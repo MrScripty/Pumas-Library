@@ -14,7 +14,8 @@ use std::time::Duration;
 use tokio::process::Command;
 
 /// Installation checks may import sidecar code directly or in a child process.
-/// Keep their imports from changing the runtime's retained source-byte tree.
+/// Keep their imports from changing the runtime's retained source-byte tree or
+/// writing bytecode next to the sidecar every runtime shares.
 fn runtime_check_command(python: &Path, script: &Path) -> Command {
     let mut command = Command::new(python);
     command.arg(script).env("PYTHONDONTWRITEBYTECODE", "1");
@@ -24,6 +25,10 @@ fn runtime_check_command(python: &Path, script: &Path) -> Command {
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
 const MAX_TORCH_DOWNLOAD_SOURCE_BYTES: usize = 2048;
 const TORCH_DOWNLOAD_SPEED_STALE_AFTER: Duration = Duration::from_secs(2);
+/// An install stage fails only when it stops making progress: neither its
+/// download progress nor its log has changed for this long. A slow link
+/// that keeps transferring is never cut off by elapsed time.
+const TORCH_STAGE_STALLED_AFTER: Duration = Duration::from_secs(30 * 60);
 pub(super) const TORCH_PUBLISHING_MARKER: &[u8] = b"metadata pending";
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -720,7 +725,8 @@ mod cross_process_recovery_tests {
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let task = spawn_blocking_with_stage(stage.clone(), move || {
-            write_embedded_torch_sidecar(&runtime).unwrap();
+            std::fs::create_dir_all(&runtime).unwrap();
+            std::fs::write(runtime.join("runtime.json"), "{}").unwrap();
             started_tx.send(()).unwrap();
             release_rx.recv().unwrap();
         });
@@ -730,7 +736,7 @@ mod cross_process_recovery_tests {
 
         let metadata = MetadataManager::new(versions);
         assert!(retry_pending_torch_cleanup(versions, &metadata).is_err());
-        assert!(stage_path.join("runtime/serve.py").exists());
+        assert!(stage_path.join("runtime/runtime.json").exists());
         release_tx.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
@@ -802,6 +808,8 @@ mod cross_process_recovery_tests {
             total_size: None,
             archive_size: None,
             dependencies_size: None,
+            unavailable_reason: None,
+            install_availability: None,
         };
         let (progress_tx, _progress_rx) = mpsc::channel(4);
         installer
@@ -1102,102 +1110,6 @@ pub(super) fn schedule_torch_orphan_prune(
     });
 }
 
-/// Materialize the sidecar code embedded in the app binary. The runtime's
-/// packages are resolved per installation, never from an embedded lock.
-pub(crate) fn write_embedded_torch_sidecar(destination: &Path) -> Result<()> {
-    std::fs::create_dir_all(destination).map_err(PumasError::from)?;
-    for (name, contents) in [
-        ("LICENSE", include_str!("../../../../../../LICENSE")),
-        (
-            "serve.py",
-            include_str!("../../../../../../torch-server/serve.py"),
-        ),
-        (
-            "resolve_runtime.py",
-            include_str!("../../../../../../torch-server/resolve_runtime.py"),
-        ),
-        (
-            "probe_runtime.py",
-            include_str!("../../../../../../torch-server/probe_runtime.py"),
-        ),
-        (
-            "nunchaku_compat.py",
-            include_str!("../../../../../../torch-server/nunchaku_compat.py"),
-        ),
-        (
-            "control_api.py",
-            include_str!("../../../../../../torch-server/control_api.py"),
-        ),
-        (
-            "device_manager.py",
-            include_str!("../../../../../../torch-server/device_manager.py"),
-        ),
-        (
-            "diffusion.py",
-            include_str!("../../../../../../torch-server/diffusion.py"),
-        ),
-        (
-            "flux2.py",
-            include_str!("../../../../../../torch-server/flux2.py"),
-        ),
-        (
-            "image_api.py",
-            include_str!("../../../../../../torch-server/image_api.py"),
-        ),
-        (
-            "audio_api.py",
-            include_str!("../../../../../../torch-server/audio_api.py"),
-        ),
-        (
-            "model_manager.py",
-            include_str!("../../../../../../torch-server/model_manager.py"),
-        ),
-        (
-            "audio_input.py",
-            include_str!("../../../../../../torch-server/audio_input.py"),
-        ),
-        (
-            "audio_contract.py",
-            include_str!("../../../../../../torch-server/audio_contract.py"),
-        ),
-        (
-            "loaders/cohere_asr_loader.py",
-            include_str!("../../../../../../torch-server/loaders/cohere_asr_loader.py"),
-        ),
-        (
-            "openai_api.py",
-            include_str!("../../../../../../torch-server/openai_api.py"),
-        ),
-        (
-            "validation.py",
-            include_str!("../../../../../../torch-server/validation.py"),
-        ),
-        (
-            "loaders/__init__.py",
-            include_str!("../../../../../../torch-server/loaders/__init__.py"),
-        ),
-        (
-            "loaders/dllm_loader.py",
-            include_str!("../../../../../../torch-server/loaders/dllm_loader.py"),
-        ),
-        (
-            "loaders/safetensors_loader.py",
-            include_str!("../../../../../../torch-server/loaders/safetensors_loader.py"),
-        ),
-        (
-            "loaders/sherry_loader.py",
-            include_str!("../../../../../../torch-server/loaders/sherry_loader.py"),
-        ),
-    ] {
-        let path = destination.join(name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(PumasError::from)?;
-        }
-        std::fs::write(path, contents).map_err(PumasError::from)?;
-    }
-    Ok(())
-}
-
 fn failed(message: impl Into<String>) -> PumasError {
     PumasError::InstallationFailed {
         message: message.into(),
@@ -1324,7 +1236,7 @@ async fn automatic_torch_builds() -> Vec<&'static str> {
     automatic_torch_builds_for_driver(lowest)
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct DirectTorchResolution {
     release: String,
     torch: String,
@@ -1334,16 +1246,188 @@ struct DirectTorchResolution {
     implementation: String,
     platform: String,
     machine: String,
-    adapter: String,
+    /// General modalities this resolution carries.
+    modalities: Vec<String>,
+    /// General modalities left out, each with the resolver's reason.
+    #[serde(default)]
+    omitted_modalities: std::collections::BTreeMap<String, String>,
+    /// Optional extras the resolution added.
+    extras: Vec<String>,
     artifacts: Vec<crate::version_manager::TorchArtifact>,
+}
+
+/// Packages each general modality needs, as `resolve_runtime.py` resolves
+/// them (image and audio models use the text stack too). A test keeps this
+/// table equal to the resolver's.
+const MODALITY_PACKAGES: &[(&str, &[&str])] = &[
+    (
+        "text",
+        &[
+            "transformers",
+            "tokenizers",
+            "huggingface-hub",
+            "jinja2",
+            "sentencepiece",
+            "protobuf",
+        ],
+    ),
+    ("image", &["torchvision", "diffusers", "accelerate", "peft"]),
+    (
+        "audio",
+        &[
+            "accelerate",
+            "librosa",
+            "soundfile",
+            "soxr",
+            "numpy",
+            "scipy",
+        ],
+    ),
+];
+
+fn modality_packages(modality: &str) -> impl Iterator<Item = &'static str> {
+    let own = MODALITY_PACKAGES
+        .iter()
+        .find(|(name, _)| *name == modality)
+        .map_or(&[][..], |(_, packages)| *packages);
+    let text = if modality == "text" {
+        &[][..]
+    } else {
+        MODALITY_PACKAGES[0].1
+    };
+    text.iter().chain(own).copied()
 }
 
 struct DirectTorchSelection<'a> {
     version: &'a str,
     build: &'a str,
     minor: &'a str,
-    adapter: &'a str,
+    /// Optional extras added to the general modalities.
+    extras: &'a [String],
     python: &'a Path,
+    /// The verified local copy of the official Torch wheel that pip resolved
+    /// against, when shared acquisition downloaded it.
+    local_torch_wheel: Option<&'a Path>,
+}
+
+/// Whether a pip report URL names exactly this existing local file.
+fn report_names_local_file(url: &str, path: &Path) -> bool {
+    let Ok(url) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    if url.scheme() != "file" {
+        return false;
+    }
+    let Ok(reported) = url.to_file_path() else {
+        return false;
+    };
+    matches!(
+        (std::fs::canonicalize(reported), std::fs::canonicalize(path)),
+        (Ok(reported), Ok(expected)) if reported == expected
+    )
+}
+
+/// A report source compares by resolved local file, or else by exact URL.
+fn installed_source(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .filter(|parsed| parsed.scheme() == "file")
+        .and_then(|parsed| parsed.to_file_path().ok())
+        .and_then(|path| std::fs::canonicalize(path).ok())
+        .map_or_else(
+            || url.to_owned(),
+            |path| format!("local:{}", path.display()),
+        )
+}
+
+/// The install selection a wheel set serves: release, build, Python,
+/// dependency profile, platform, package-version choice and wheel role. A
+/// later resolution of the same selection supersedes its unfinished sets.
+/// Opting into verified package versions is a different selection: it can
+/// resolve different wheels, and switching between the two choices must not
+/// supersede the other's partial downloads.
+fn torch_wheel_selection(
+    tag: &str,
+    build: &str,
+    minor: &str,
+    extras: &[String],
+    verified_constraints: Option<&str>,
+    role: &str,
+) -> String {
+    let version_choice = verified_constraints.map_or_else(
+        || "current".to_owned(),
+        |constraints| format!("verified-{:x}", Sha256::digest(constraints.as_bytes())),
+    );
+    let extras = if extras.is_empty() {
+        "general".to_owned()
+    } else {
+        extras.join("+")
+    };
+    format!(
+        "{tag}|{build}|python{minor}|{extras}|{}-{}|{version_choice}|{role}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )
+}
+
+/// Recorded when the text stack (Transformers, tokenizers, Jinja) imports, so
+/// text models such as embedders and rerankers can load. Not a sidecar
+/// protocol capability.
+const TORCH_TEXT_CAPABILITY: &str = "text_models";
+
+/// Serving capabilities a probe found importable: image generation needs the
+/// image modality, audio transcription the Cohere ASR family, and text work
+/// the text modality. A capability the probe could not import is absent.
+fn serving_capabilities(probed: &serde_json::Value) -> Vec<&'static str> {
+    let importable = |key: &str| {
+        matches!(
+            probed[key]["status"].as_str(),
+            Some("passed" | "inconclusive")
+        )
+    };
+    [
+        ("text_modality", TORCH_TEXT_CAPABILITY),
+        ("image_modality", TORCH_IMAGE_GENERATION_CAPABILITY),
+        ("cohere_asr", TORCH_AUDIO_TRANSCRIPTION_CAPABILITY),
+    ]
+    .into_iter()
+    .filter(|(key, _)| importable(key))
+    .map(|(_, capability)| capability)
+    .collect()
+}
+
+/// The resolver's selected official Torch wheel, before acquisition.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectedTorchWheel {
+    url: String,
+    sha256: String,
+}
+
+/// The selected Torch wheel must come from the official channel (or, for
+/// macOS CPU, PyPI) before Pumas downloads it.
+fn trusted_selected_torch_wheel(url: &str, build: &str, expected_torch: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    parsed.scheme() == "https"
+        && !url.chars().any(char::is_whitespace)
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && matches!(parsed.port(), None | Some(443))
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+        && parsed.path().to_ascii_lowercase().ends_with(".whl")
+        && ((matches!(
+            parsed.host_str(),
+            Some("download.pytorch.org" | "download-r2.pytorch.org")
+        ) && parsed.path().starts_with(&format!("/whl/{build}/")))
+            || trusted_macos_pypi_torch_wheel(
+                &parsed,
+                "torch",
+                expected_torch,
+                cfg!(target_os = "macos") && build == "cpu",
+            ))
 }
 
 struct TorchAttemptContext<'a> {
@@ -1409,7 +1493,7 @@ fn validate_direct_torch_report(
     let version = selection.version;
     let build = selection.build;
     let minor = selection.minor;
-    let adapter = selection.adapter;
+    let extras = selection.extras;
     let python = selection.python;
     let expected_torch = if cfg!(target_os = "macos") && build == "cpu" {
         version.to_owned()
@@ -1420,7 +1504,7 @@ fn validate_direct_torch_report(
         || resolution.torch != expected_torch
         || resolution.build != build
         || resolution.python != minor
-        || resolution.adapter != adapter
+        || resolution.extras != extras
         || resolution.implementation != "cpython"
         || !same_interpreter(Path::new(&resolution.interpreter), python)
         || resolution.artifacts.is_empty()
@@ -1483,8 +1567,9 @@ fn validate_direct_torch_report(
                         &artifact.version,
                         cfg!(target_os = "macos") && build == "cpu",
                     )
-            } else if adapter == "nunchaku" && artifact.name == "nunchaku" {
-                // The adapter's own wheel comes from its project's releases;
+            } else if extras.iter().any(|extra| extra == "nunchaku") && artifact.name == "nunchaku"
+            {
+                // The extra's own wheel comes from its project's releases;
                 // the resolver admits only its exact URL and hash.
                 url.host_str() == Some("github.com")
                     && url
@@ -1510,7 +1595,10 @@ fn validate_direct_torch_report(
             }
         }
         if artifact.name == "torchvision"
-            && (adapter == "none"
+            && (!resolution
+                .modalities
+                .iter()
+                .any(|modality| modality == "image")
                 || !(artifact.version.ends_with(&format!("+{build}"))
                     || (cfg!(target_os = "macos")
                         && build == "cpu"
@@ -1528,9 +1616,16 @@ fn validate_direct_torch_report(
         let report_name = item["metadata"]["name"]
             .as_str()
             .map(|name| name.to_ascii_lowercase().replace('_', "-"));
+        // pip read an acquired Torch wheel locally; the lock keeps its official URL.
+        let reported_source = match (artifact.name == "torch", selection.local_torch_wheel) {
+            (true, Some(local)) => item["download_info"]["url"]
+                .as_str()
+                .is_some_and(|url| report_names_local_file(url, local)),
+            _ => item["download_info"]["url"].as_str() == Some(artifact.url.as_str()),
+        };
         if report_name.as_deref() != Some(artifact.name.as_str())
             || item["metadata"]["version"].as_str() != Some(artifact.version.as_str())
-            || item["download_info"]["url"].as_str() != Some(artifact.url.as_str())
+            || !reported_source
             || item["download_info"]["archive_info"]["hashes"]["sha256"].as_str()
                 != Some(artifact.sha256.as_str())
             || requirements.lines().nth(index)
@@ -1560,35 +1655,58 @@ fn validate_direct_torch_report(
             return Err(failed("Torch report omitted a required core dependency"));
         }
     }
-    if adapter == "flux2" || adapter == "nunchaku" {
-        for required in [
-            "torchvision",
-            "diffusers",
-            "transformers",
-            "accelerate",
-            "peft",
-            "sentencepiece",
-            "protobuf",
-        ] {
-            if !names.contains(required) {
-                return Err(failed("Torch report omitted an image dependency"));
-            }
-        }
-        if adapter == "nunchaku" && !names.contains("nunchaku") {
-            return Err(failed("Torch report omitted the Nunchaku adapter wheel"));
+    // Every general modality is resolved or left out with a reason, and a
+    // resolved modality brings all of its packages.
+    let known = |modality: &str| MODALITY_PACKAGES.iter().any(|(name, _)| *name == modality);
+    if resolution
+        .modalities
+        .iter()
+        .any(|modality| !known(modality))
+        || resolution
+            .omitted_modalities
+            .iter()
+            .any(|(modality, reason)| {
+                !known(modality)
+                    || reason.trim().is_empty()
+                    || resolution.modalities.contains(modality)
+            })
+        || MODALITY_PACKAGES.iter().any(|(modality, _)| {
+            !resolution
+                .modalities
+                .iter()
+                .any(|resolved| resolved == modality)
+                && !resolution.omitted_modalities.contains_key(*modality)
+        })
+    {
+        return Err(failed(
+            "Torch report must resolve each general modality or name why it was left out",
+        ));
+    }
+    for modality in &resolution.modalities {
+        if modality_packages(modality).any(|required| !names.contains(required)) {
+            return Err(failed(format!(
+                "Torch report omitted a {modality} dependency"
+            )));
         }
     }
-    if adapter == "cohere-asr" {
-        super::super::cohere_asr_profile::validate(version, &resolution.artifacts)?;
+    for extra in extras {
+        if !super::super::torch_preview::EXTRAS.contains(&extra.as_str())
+            || !names.contains(extra.as_str())
+        {
+            return Err(failed("Torch report omitted a requested extra's wheel"));
+        }
     }
     Ok(())
 }
 
 /// The phase-2 pip report must install exactly the accepted lock: the same
-/// distributions, versions, URLs and SHA-256 digests, no more and no fewer.
+/// distributions, versions, sources and SHA-256 digests, no more and no fewer.
+/// A distribution in `local_files` must come from that acquired local file;
+/// every other one from its locked URL.
 fn validate_locked_install_report(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
+    local_files: &std::collections::HashMap<String, PathBuf>,
 ) -> Result<()> {
     let entries = report["install"]
         .as_array()
@@ -1602,7 +1720,7 @@ fn validate_locked_install_report(
                     .to_ascii_lowercase()
                     .replace('_', "-"),
                 item["metadata"]["version"].as_str()?.to_owned(),
-                item["download_info"]["url"].as_str()?.to_owned(),
+                installed_source(item["download_info"]["url"].as_str()?),
                 item["download_info"]["archive_info"]["hashes"]["sha256"]
                     .as_str()?
                     .to_ascii_lowercase(),
@@ -1614,14 +1732,23 @@ fn validate_locked_install_report(
         .artifacts
         .iter()
         .map(|artifact| {
-            (
+            let source = match local_files.get(&artifact.name) {
+                Some(path) => format!(
+                    "local:{}",
+                    std::fs::canonicalize(path)
+                        .map_err(|_| failed("An acquired Torch wheel is missing"))?
+                        .display()
+                ),
+                None => artifact.url.clone(),
+            };
+            Ok((
                 artifact.name.clone(),
                 artifact.version.clone(),
-                artifact.url.clone(),
+                source,
                 artifact.sha256.to_ascii_lowercase(),
-            )
+            ))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
     installed.sort();
     locked.sort();
     if installed != locked {
@@ -1934,6 +2061,91 @@ impl VersionInstaller {
         }
     }
 
+    /// Shared acquisition for this attempt's wheels, or the reason the
+    /// attempt keeps pip's own (non-resumable) downloads.
+    fn torch_wheel_acquisition(
+        &self,
+        staging: &std::sync::Arc<TorchPendingStage>,
+        log_path: &Path,
+    ) -> std::result::Result<super::torch_wheels::TorchWheelAcquisition, String> {
+        let consumer = self
+            .acquisition_consumer
+            .clone()
+            .ok_or("this installer was created without the shared acquisition owner")?;
+        if consumer.owner() != super::torch_wheels::TORCH_WHEEL_CONSUMER {
+            return Err(format!(
+                "the configured acquisition scope belongs to {}",
+                consumer.owner()
+            ));
+        }
+        let root = super::super::torch_workspace::managed_torch_wheel_dir(&self.launcher_root)
+            .map_err(|error| format!("the wheel workspace root is unavailable: {error}"))?;
+        let client = super::torch_wheels::wheel_http_client(
+            super::torch_wheels::WHEEL_TRANSFER_STALL_TIMEOUT,
+        )
+        .map_err(|error| format!("the wheel HTTP client could not be created: {error}"))?;
+        Ok(super::torch_wheels::TorchWheelAcquisition {
+            consumer,
+            root,
+            lease: std::sync::Arc::new(staging._lock.clone()),
+            cancel_flag: self.cancel_flag.clone(),
+            shutdown_flag: self.shutdown_flag.clone(),
+            progress: self.progress_tracker.clone(),
+            log_path: log_path.to_path_buf(),
+            client,
+            retry: AcquisitionRetryPolicy {
+                attempts: Some(InstallationConfig::DOWNLOAD_RETRY_ATTEMPTS),
+                elapsed: Duration::ZERO,
+                backoff: RetryConfig::new()
+                    .with_max_attempts(InstallationConfig::DOWNLOAD_RETRY_ATTEMPTS)
+                    .with_base_delay(Duration::from_secs(2)),
+            },
+        })
+    }
+
+    /// Record why some wheels keep pip's download, which cannot resume.
+    fn note_torch_pip_downloads(&self, log_path: &Path, reason: &str) {
+        warn!(%reason, "Torch wheels download through pip without resume");
+        let note = format!(
+            "Pumas shared download unavailable ({reason}); pip downloads these wheels and \
+             cannot resume them after a network failure\n"
+        );
+        if let Err(error) = super::append_install_log_line(log_path, &note) {
+            warn!(%error, "Torch download fallback note was not written to the install log");
+        }
+    }
+
+    async fn announce_torch_wheel_download(
+        &self,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+        message: &str,
+    ) {
+        self.progress_tracker.write().await.update_stage(
+            InstallationStage::Dependencies,
+            0.0,
+            Some(message),
+        );
+        let _ = progress_tx.try_send(ProgressUpdate::StageChanged {
+            stage: InstallationStage::Dependencies,
+            message: message.to_owned(),
+        });
+    }
+
+    /// How a failed or successful attempt leaves its wheels: a user-cancelled
+    /// attempt removes them; shutdown (which also sets the cancel flag) and
+    /// any other failure keep them for the next try.
+    fn torch_wheel_use(&self, succeeded: bool) -> super::torch_wheels::WheelUse {
+        if succeeded {
+            super::torch_wheels::WheelUse::Consumed
+        } else if self.cancel_flag.load(Ordering::SeqCst)
+            && !self.shutdown_flag.load(Ordering::SeqCst)
+        {
+            super::torch_wheels::WheelUse::Discard
+        } else {
+            super::torch_wheels::WheelUse::Retain
+        }
+    }
+
     async fn stage_selected_torch_runtime(
         &self,
         selection: &super::super::torch_preview::TorchInstallSelection,
@@ -1941,13 +2153,12 @@ impl VersionInstaller {
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        if !["none", "flux2", "nunchaku", "cohere-asr"].contains(&selection.adapter.as_str()) {
-            return Err(failed("Unknown Torch dependency profile"));
-        }
-        if selection.adapter == "cohere-asr" {
-            super::super::cohere_asr_profile::validate_selection(
-                selection.tag.trim_start_matches('v'),
-            )?;
+        if selection
+            .extras
+            .iter()
+            .any(|extra| !super::super::torch_preview::EXTRAS.contains(&extra.as_str()))
+        {
+            return Err(failed("Unknown Torch extra"));
         }
         let builds: Vec<String> = if selection.build == "auto" {
             automatic_torch_builds()
@@ -2051,10 +2262,16 @@ impl VersionInstaller {
             Sha256::digest(std::fs::read(&managed_python.executable).map_err(PumasError::from)?)
         );
 
+        // The runtime holds only the interpreter environment, its packages and
+        // their records. The resolver and probe run from this Pumas's sidecar,
+        // the same code every installed runtime launches.
+        let sidecar =
+            pumas_library::runtime_profiles::materialize_torch_sidecar_async(&self.launcher_root)
+                .await?;
         let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
         spawn_blocking_with_stage(staging.clone(), move || {
-            write_embedded_torch_sidecar(&runtime_for_write)
+            std::fs::create_dir_all(&runtime_for_write).map_err(PumasError::from)
         })
         .await
         .map_err(|error| failed(format!("Runtime staging task failed: {error}")))??;
@@ -2085,10 +2302,15 @@ impl VersionInstaller {
             let mut command = Command::new(&python);
             command
                 .args(["-I", "-B"])
-                .arg(runtime.join("resolve_runtime.py"))
+                .arg(sidecar.join("resolve_runtime.py"))
                 .args(phase)
                 .args(["--version", version, "--build", build])
-                .args(["--adapter", &selection.adapter])
+                .args(
+                    selection
+                        .extras
+                        .iter()
+                        .flat_map(|extra| ["--extra", extra.as_str()]),
+                )
                 .arg("--progress-file")
                 .arg(&download_progress_path)
                 .arg("--output")
@@ -2097,157 +2319,370 @@ impl VersionInstaller {
                 .arg(&pip_cache);
             command
         };
-
-        // Phase 1: resolve once (a pip dry run) into a per-install hash lock.
-        // The resolver pins the Torch wheel by the URL and SHA-256 that the
-        // official index publishes for this interpreter.
-        let mut resolve = resolver_command(&[]);
-        let constraints = selection
-            .verified_constraints
-            .clone()
-            .into_iter()
-            .collect::<Vec<_>>();
-        if !constraints.is_empty() {
-            std::fs::create_dir_all(&resolver_output).map_err(PumasError::from)?;
-            let path = resolver_output.join("install-constraints.txt");
-            std::fs::write(&path, constraints.concat()).map_err(PumasError::from)?;
-            resolve.arg("--constraints").arg(path);
-        }
-        let status = self
-            .run_runtime_command_status_with_download_progress(
-                resolve,
-                log_path,
-                &format!("Resolving official Torch {build} wheels for Python {minor}"),
-                progress_tx,
-                Some(staging.clone()),
-                Some(&download_progress_path),
+        let expected_torch = if cfg!(target_os = "macos") && build == "cpu" {
+            version.to_owned()
+        } else {
+            format!("{version}+{build}")
+        };
+        // The install selection a wheel set serves. A later resolution of the
+        // same selection supersedes its unfinished sets that it no longer names.
+        let wheel_selection = |role: &str| {
+            torch_wheel_selection(
+                &selection.tag,
+                build,
+                minor,
+                &selection.extras,
+                selection.verified_constraints.as_deref(),
+                role,
             )
-            .await?;
-        if !status.success() {
-            if retry_direct_torch_attempt(
-                status.code(),
-                selection.python == "auto",
-                selection.build == "auto" && build != "cpu",
-            ) {
-                return Ok(DirectTorchAttempt::Retry);
+        };
+
+        // Phase 0, with shared acquisition: select the official Torch wheel
+        // and download it resumably with SHA-256 verification, so the
+        // resolution below reads that verified local copy instead of having
+        // pip download it (pip discards a partial wheel when its retries end).
+        let wheel_acquisition = match self.torch_wheel_acquisition(staging, log_path) {
+            Ok(acquisition) => Some(acquisition),
+            Err(reason) => {
+                self.note_torch_pip_downloads(log_path, &reason);
+                None
             }
-            return Err(failed(format!(
-                "Torch package resolution failed ({status}); see installation log"
-            )));
+        };
+        let mut selected_torch = None;
+        let mut held_torch = None;
+        if let Some(acquisition) = &wheel_acquisition {
+            std::fs::create_dir_all(&resolver_output).map_err(PumasError::from)?;
+            let mut select = Command::new(&python);
+            select
+                .args(["-I", "-B"])
+                .arg(sidecar.join("resolve_runtime.py"))
+                .arg("--select-torch-wheel")
+                .args(["--version", version, "--build", build])
+                .args(
+                    selection
+                        .extras
+                        .iter()
+                        .flat_map(|extra| ["--extra", extra.as_str()]),
+                )
+                .arg("--output")
+                .arg(&resolver_output);
+            let status = self
+                .run_runtime_command_status(
+                    select,
+                    log_path,
+                    &format!("Selecting the official Torch {build} wheel for Python {minor}"),
+                    progress_tx,
+                    Some(staging.clone()),
+                )
+                .await?;
+            if !status.success() {
+                if retry_direct_torch_attempt(
+                    status.code(),
+                    selection.python == "auto",
+                    selection.build == "auto" && build != "cpu",
+                ) {
+                    return Ok(DirectTorchAttempt::Retry);
+                }
+                return Err(failed(format!(
+                    "Torch wheel selection failed ({status}); see installation log"
+                )));
+            }
+            let selected: SelectedTorchWheel = serde_json::from_slice(
+                &std::fs::read(resolver_output.join("torch-wheel.json"))
+                    .map_err(PumasError::from)?,
+            )
+            .map_err(|error| failed(format!("Invalid Torch wheel selection: {error}")))?;
+            if !trusted_selected_torch_wheel(&selected.url, build, &expected_torch) {
+                return Err(failed(
+                    "Torch wheel selection names an untrusted wheel source",
+                ));
+            }
+            match super::torch_wheels::LockedWheel::new("torch", &selected.url, &selected.sha256) {
+                Ok(wheel) => {
+                    self.announce_torch_wheel_download(
+                        progress_tx,
+                        &format!("Downloading the verified Torch {build} wheel"),
+                    )
+                    .await;
+                    match acquisition
+                        .hold(&wheel_selection("torch"), vec![wheel.clone()], false)
+                        .await?
+                    {
+                        Ok(held) => held_torch = Some((held, wheel)),
+                        Err(reason) => self.note_torch_pip_downloads(
+                            log_path,
+                            &format!("the Torch wheel cannot use it: {reason}"),
+                        ),
+                    }
+                }
+                Err(reason) => self.note_torch_pip_downloads(log_path, &reason),
+            }
+            selected_torch = Some(selected);
         }
-        let resolution: DirectTorchResolution = serde_json::from_slice(
-            &std::fs::read(resolver_output.join("resolution.json")).map_err(PumasError::from)?,
-        )
-        .map_err(|error| failed(format!("Invalid Torch installation report: {error}")))?;
-        let report: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(resolver_output.join("pip-resolution.json"))
-                .map_err(PumasError::from)?,
-        )
-        .map_err(|error| failed(format!("Invalid Torch pip report: {error}")))?;
-        let requirements = std::fs::read_to_string(resolver_output.join("requirements.txt"))
-            .map_err(PumasError::from)?;
-        // Nothing is installed until this lock is accepted.
-        validate_direct_torch_report(
-            &resolution,
-            &report,
-            &requirements,
-            &DirectTorchSelection {
+
+        let mut held_rest = None;
+        let outcome = async {
+            let local_torch = held_torch.as_ref().map(|(held, wheel)| held.file(wheel));
+            // Phase 1: resolve once (a pip dry run) into a per-install hash
+            // lock. The resolver pins the Torch wheel by the URL and SHA-256
+            // that the official index publishes for this interpreter.
+            let mut resolve = resolver_command(&[]);
+            if let Some(selected) = &selected_torch {
+                resolve
+                    .arg("--torch-wheel")
+                    .arg(&selected.url)
+                    .arg("--torch-sha256")
+                    .arg(&selected.sha256);
+            }
+            if let Some(local) = &local_torch {
+                resolve.arg("--torch-local-wheel").arg(local);
+            }
+            let constraints = selection
+                .verified_constraints
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>();
+            if !constraints.is_empty() {
+                std::fs::create_dir_all(&resolver_output).map_err(PumasError::from)?;
+                let path = resolver_output.join("install-constraints.txt");
+                std::fs::write(&path, constraints.concat()).map_err(PumasError::from)?;
+                resolve.arg("--constraints").arg(path);
+            }
+            let status = self
+                .run_runtime_command_status_with_download_progress(
+                    resolve,
+                    log_path,
+                    &format!("Resolving official Torch {build} wheels for Python {minor}"),
+                    progress_tx,
+                    Some(staging.clone()),
+                    Some(&download_progress_path),
+                )
+                .await?;
+            if !status.success() {
+                if retry_direct_torch_attempt(
+                    status.code(),
+                    selection.python == "auto",
+                    selection.build == "auto" && build != "cpu",
+                ) {
+                    return Ok(DirectTorchAttempt::Retry);
+                }
+                return Err(failed(format!(
+                    "Torch package resolution failed ({status}); see installation log"
+                )));
+            }
+            let resolution: DirectTorchResolution = serde_json::from_slice(
+                &std::fs::read(resolver_output.join("resolution.json"))
+                    .map_err(PumasError::from)?,
+            )
+            .map_err(|error| failed(format!("Invalid Torch installation report: {error}")))?;
+            let report: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(resolver_output.join("pip-resolution.json"))
+                    .map_err(PumasError::from)?,
+            )
+            .map_err(|error| failed(format!("Invalid Torch pip report: {error}")))?;
+            let requirements = std::fs::read_to_string(resolver_output.join("requirements.txt"))
+                .map_err(PumasError::from)?;
+            let direct_selection = DirectTorchSelection {
                 version,
                 build,
                 minor,
-                adapter: &selection.adapter,
+                extras: &selection.extras,
                 python: &python,
-            },
-        )?;
+                local_torch_wheel: local_torch.as_deref(),
+            };
+            // Nothing is installed until this lock is accepted.
+            validate_direct_torch_report(&resolution, &report, &requirements, &direct_selection)?;
+            if let Some(selected) = &selected_torch {
+                if !resolution.artifacts.iter().any(|artifact| {
+                    artifact.name == "torch"
+                        && artifact.url == selected.url
+                        && artifact.sha256.eq_ignore_ascii_case(&selected.sha256)
+                }) {
+                    return Err(failed(
+                        "Torch resolution differs from the selected Torch wheel",
+                    ));
+                }
+            }
 
-        // Phase 2: install exactly the accepted lock with
-        // `--require-hashes --no-deps --no-index`.
-        let mut install = resolver_command(&["--install"]);
-        install.arg("--target").arg(&packages);
-        let status = self
-            .run_runtime_command_status_with_download_progress(
-                install,
+            // Download every other locked wheel through shared acquisition,
+            // so the installation below reads only verified local files.
+            let mut local_files = std::collections::HashMap::new();
+            let mut wheel_dirs = Vec::new();
+            if let (Some((held, wheel)), Some(local)) = (&held_torch, &local_torch) {
+                local_files.insert(wheel.name.clone(), local.clone());
+                wheel_dirs.push(held.directory().to_path_buf());
+            }
+            if let Some(acquisition) = &wheel_acquisition {
+                let rest = resolution
+                    .artifacts
+                    .iter()
+                    .filter(|artifact| !local_files.contains_key(&artifact.name))
+                    .map(|artifact| {
+                        super::torch_wheels::LockedWheel::new(
+                            &artifact.name,
+                            &artifact.url,
+                            &artifact.sha256,
+                        )
+                    })
+                    .collect::<std::result::Result<Vec<_>, String>>();
+                match rest {
+                    Ok(rest) if rest.is_empty() => {}
+                    Ok(rest) => {
+                        self.announce_torch_wheel_download(
+                            progress_tx,
+                            &format!("Downloading {} verified Torch dependency wheels", rest.len()),
+                        )
+                        .await;
+                        match acquisition.hold(&wheel_selection("dependencies"), rest.clone(), true).await? {
+                            Ok(held) => {
+                                for wheel in &rest {
+                                    local_files.insert(wheel.name.clone(), held.file(wheel));
+                                }
+                                wheel_dirs.push(held.directory().to_path_buf());
+                                held_rest = Some(held);
+                            }
+                            Err(reason) => self.note_torch_pip_downloads(
+                                log_path,
+                                &format!("the dependency wheels cannot use it: {reason}"),
+                            ),
+                        }
+                    }
+                    Err(reason) => self.note_torch_pip_downloads(
+                        log_path,
+                        &format!("a dependency wheel cannot use it: {reason}"),
+                    ),
+                }
+            }
+
+            // Phase 2: install exactly the accepted lock with
+            // `--require-hashes --no-deps --no-index`, from the acquired
+            // local wheels where they exist.
+            let installed = async {
+                let mut install = resolver_command(&["--install"]);
+                install.arg("--target").arg(&packages);
+                for directory in &wheel_dirs {
+                    install.arg("--wheel-dir").arg(directory);
+                }
+                let status = self
+                    .run_runtime_command_status_with_download_progress(
+                        install,
+                        log_path,
+                        &format!("Installing locked Torch {build} wheels for Python {minor}"),
+                        progress_tx,
+                        Some(staging.clone()),
+                        Some(&download_progress_path),
+                    )
+                    .await?;
+                if !status.success() {
+                    return Err(failed(format!(
+                        "Torch locked package installation failed ({status}); see installation log"
+                    )));
+                }
+                if std::fs::read_to_string(resolver_output.join("requirements.txt"))
+                    .map_err(PumasError::from)?
+                    != requirements
+                {
+                    return Err(failed("Torch hash lock changed during installation"));
+                }
+                let installed_report: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(resolver_output.join("pip-install.json"))
+                        .map_err(PumasError::from)?,
+                )
+                .map_err(|error| {
+                    failed(format!("Invalid Torch pip installation report: {error}"))
+                })?;
+                validate_locked_install_report(&resolution, &installed_report, &local_files)?;
+                // No staged package code runs until the staged files match the
+                // manifest checked against each wheel's RECORD.
+                let manifest: StagedFilesManifest = serde_json::from_slice(
+                    &std::fs::read(resolver_output.join("installed-files.json"))
+                        .map_err(PumasError::from)?,
+                )
+                .map_err(|error| failed(format!("Invalid Torch staged file manifest: {error}")))?;
+                validate_and_move_direct_torch_packages(
+                    &resolution,
+                    &report,
+                    &requirements,
+                    &direct_selection,
+                    &packages,
+                    &bootstrap,
+                    &manifest,
+                )
+            }
+            .await;
+            installed?;
+            for name in [
+                "requirements.txt",
+                "resolution.json",
+                "pip-resolution.json",
+                "pip-install.json",
+                "installed-files.json",
+            ] {
+                std::fs::copy(resolver_output.join(name), runtime.join(name))
+                    .map_err(PumasError::from)?;
+            }
+            let extras_label = if selection.extras.is_empty() {
+                "general".to_owned()
+            } else {
+                selection.extras.join("+")
+            };
+            let mut recipe = serde_json::json!({
+                "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, extras_label),
+                "protocol": SUPPORTED_TORCH_PROTOCOL,
+                "capabilities": [],
+                "qualification": "not verified by Pumas",
+                "build": build,
+                "python": format!("python{minor}"),
+                "modalities": resolution.modalities,
+                "omitted_modalities": resolution.omitted_modalities,
+                "extras": selection.extras,
+                "managed_python": managed_python_identity_record(&managed_python, &interpreter_hash),
+                "artifacts": resolution.artifacts,
+            });
+            std::fs::write(
+                runtime.join("runtime.json"),
+                serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
+            )
+            .map_err(PumasError::from)?;
+            let mut probe = runtime_check_command(&python, &sidecar.join("probe_runtime.py"));
+            probe.arg("--runtime").arg(&runtime);
+            self.run_runtime_command(
+                probe,
                 log_path,
-                &format!("Installing locked Torch {build} wheels for Python {minor}"),
+                "Checking installed Torch identity and CPU operation",
                 progress_tx,
                 Some(staging.clone()),
-                Some(&download_progress_path),
             )
             .await?;
-        if !status.success() {
-            return Err(failed(format!(
-                "Torch locked package installation failed ({status}); see installation log"
-            )));
+            // Record what the probe found importable, not what was selected.
+            let probed: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(runtime.join("probe-results.json")).map_err(PumasError::from)?,
+            )
+            .map_err(|error| failed(format!("Invalid Torch probe results: {error}")))?;
+            recipe["capabilities"] = serde_json::json!(serving_capabilities(&probed["capabilities"]));
+            std::fs::write(
+                runtime.join("runtime.json"),
+                serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
+            )
+            .map_err(PumasError::from)?;
+            Ok(DirectTorchAttempt::Installed(runtime.clone()))
         }
-        if std::fs::read_to_string(resolver_output.join("requirements.txt"))
-            .map_err(PumasError::from)?
-            != requirements
+        .await;
+        // Both sets stay held until the attempt's outcome, including the
+        // runtime probe, is known; a failed attempt keeps them both for the
+        // next try. A retry moves to another wheel, so its set is discarded.
+        let usage = match &outcome {
+            Ok(DirectTorchAttempt::Retry) => super::torch_wheels::WheelUse::Discard,
+            outcome => self.torch_wheel_use(outcome.is_ok()),
+        };
+        let mut outcome = outcome;
+        for held in [held_rest, held_torch.map(|(held, _)| held)]
+            .into_iter()
+            .flatten()
         {
-            return Err(failed("Torch hash lock changed during installation"));
+            outcome = settled_result(outcome, held.finish(usage).await);
         }
-        let installed: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(resolver_output.join("pip-install.json")).map_err(PumasError::from)?,
-        )
-        .map_err(|error| failed(format!("Invalid Torch pip installation report: {error}")))?;
-        validate_locked_install_report(&resolution, &installed)?;
-        // No staged package code runs until the staged files match the
-        // manifest checked against each wheel's RECORD.
-        let manifest: StagedFilesManifest = serde_json::from_slice(
-            &std::fs::read(resolver_output.join("installed-files.json"))
-                .map_err(PumasError::from)?,
-        )
-        .map_err(|error| failed(format!("Invalid Torch staged file manifest: {error}")))?;
-        validate_and_move_direct_torch_packages(
-            &resolution,
-            &report,
-            &requirements,
-            &DirectTorchSelection {
-                version,
-                build,
-                minor,
-                adapter: &selection.adapter,
-                python: &python,
-            },
-            &packages,
-            &bootstrap,
-            &manifest,
-        )?;
-        for name in [
-            "requirements.txt",
-            "resolution.json",
-            "pip-resolution.json",
-            "pip-install.json",
-            "installed-files.json",
-        ] {
-            std::fs::copy(resolver_output.join(name), runtime.join(name))
-                .map_err(PumasError::from)?;
-        }
-        let recipe = serde_json::json!({
-            "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, selection.adapter),
-            "protocol": SUPPORTED_TORCH_PROTOCOL,
-            "capabilities": if selection.adapter == "cohere-asr" { vec![TORCH_AUDIO_TRANSCRIPTION_CAPABILITY] } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
-            "qualification": "not verified by Pumas",
-            "build": build,
-            "python": format!("python{minor}"),
-            "adapter": selection.adapter,
-            "managed_python": managed_python_identity_record(&managed_python, &interpreter_hash),
-            "artifacts": resolution.artifacts,
-        });
-        std::fs::write(
-            runtime.join("runtime.json"),
-            serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
-        )
-        .map_err(PumasError::from)?;
-        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
-        self.run_runtime_command(
-            probe,
-            log_path,
-            "Checking installed Torch identity and CPU operation",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        Ok(DirectTorchAttempt::Installed(runtime))
+        outcome
     }
 
     pub(super) async fn install_torch_runtime(
@@ -2606,17 +3041,22 @@ impl VersionInstaller {
         if let Some(stage_lease) = stage_lease {
             child.attach_cleanup_lease(stage_lease);
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
+        let log_len = |path: &Path| std::fs::metadata(path).map(|meta| meta.len()).ok();
+        let mut activity = StageActivity::new(log_len(log_path), tokio::time::Instant::now());
         let mut last_download_progress: Option<TorchDownloadProgress> = None;
         let mut last_download_progress_change_at: Option<tokio::time::Instant> = None;
         let mut download_speed_expired = false;
         loop {
             let observed = child.observe_exit();
             let cancelled = self.cancel_flag.load(Ordering::SeqCst);
-            let timed_out = tokio::time::Instant::now() >= deadline;
+            activity.observe_log(log_len(log_path), tokio::time::Instant::now());
             if let Some(path) = download_progress_path {
                 if let Some(download_progress) = read_torch_download_progress(path) {
                     if last_download_progress.as_ref() != Some(&download_progress) {
+                        activity.observe_downloaded_bytes(
+                            download_progress.downloaded_bytes,
+                            tokio::time::Instant::now(),
+                        );
                         self.progress_tracker.write().await.update_network_transfer(
                             download_progress.source_url.as_deref(),
                             download_progress.active,
@@ -2649,6 +3089,8 @@ impl VersionInstaller {
                     }
                 }
             }
+            let timed_out =
+                activity.stalled(tokio::time::Instant::now(), TORCH_STAGE_STALLED_AFTER);
             if cancelled || timed_out || !matches!(&observed, Ok(None)) {
                 drop(child);
                 self.torch_cleanup
@@ -2665,7 +3107,8 @@ impl VersionInstaller {
                 self.check_cancelled()?;
                 if timed_out {
                     return Err(failed(format!(
-                        "{stage} exceeded the installation deadline"
+                        "{stage} made no progress for {} minutes (no download progress or log output); check the network and the install log, then retry",
+                        TORCH_STAGE_STALLED_AFTER.as_secs() / 60
                     )));
                 }
                 let status = observed
@@ -2675,6 +3118,69 @@ impl VersionInstaller {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+}
+
+/// When an install stage last made progress: its log grew or its download
+/// moved more bytes. Elapsed time alone never fails a stage.
+struct StageActivity {
+    log_len: Option<u64>,
+    downloaded_bytes: Option<u64>,
+    last_progress_at: tokio::time::Instant,
+}
+
+impl StageActivity {
+    fn new(log_len: Option<u64>, now: tokio::time::Instant) -> Self {
+        Self {
+            log_len,
+            downloaded_bytes: None,
+            last_progress_at: now,
+        }
+    }
+
+    fn observe_log(&mut self, log_len: Option<u64>, now: tokio::time::Instant) {
+        if log_len != self.log_len {
+            self.log_len = log_len;
+            self.last_progress_at = now;
+        }
+    }
+
+    fn observe_downloaded_bytes(&mut self, bytes: u64, now: tokio::time::Instant) {
+        if self.downloaded_bytes != Some(bytes) {
+            self.downloaded_bytes = Some(bytes);
+            self.last_progress_at = now;
+        }
+    }
+
+    fn stalled(&self, now: tokio::time::Instant, limit: Duration) -> bool {
+        now.saturating_duration_since(self.last_progress_at) >= limit
+    }
+}
+
+#[cfg(test)]
+mod stage_activity_tests {
+    use super::*;
+
+    #[test]
+    fn a_stage_stalls_only_when_neither_its_log_nor_its_bytes_move() {
+        let start = tokio::time::Instant::now();
+        let limit = Duration::from_secs(60);
+        let at = |seconds| start + Duration::from_secs(seconds);
+        let mut activity = StageActivity::new(Some(10), start);
+        // A slow but moving download is never cut off by elapsed time.
+        for minute in 1..=180 {
+            activity.observe_log(Some(10), at(minute * 60));
+            activity.observe_downloaded_bytes(minute * 1024, at(minute * 60));
+            assert!(!activity.stalled(at(minute * 60 + 59), limit));
+        }
+        // Rewrites of the same byte count and an unchanged log are no progress.
+        let last = 180 * 60;
+        activity.observe_downloaded_bytes(180 * 1024, at(last + 30));
+        activity.observe_log(Some(10), at(last + 30));
+        assert!(activity.stalled(at(last + 60), limit));
+        // Log output alone (a silent download, a build printing) is progress.
+        activity.observe_log(Some(11), at(last + 90));
+        assert!(!activity.stalled(at(last + 120), limit));
     }
 }
 
@@ -2867,7 +3373,12 @@ mod managed_python_provenance_tests {
             implementation: "cpython".into(),
             platform: platform.into(),
             machine: machine.into(),
-            adapter: "none".into(),
+            modalities: Vec::new(),
+            omitted_modalities: ["text", "image", "audio"]
+                .into_iter()
+                .map(|modality| (modality.to_owned(), "fixture resolves core only".to_owned()))
+                .collect(),
+            extras: Vec::new(),
             artifacts,
         };
         let report = serde_json::json!({
@@ -2892,13 +3403,60 @@ mod managed_python_provenance_tests {
             version: "2.14.0",
             build: "cpu",
             minor: "3.12",
-            adapter: "none",
+            extras: &[],
             python,
+            local_torch_wheel: None,
         };
         let check = |resolution: &DirectTorchResolution, report: &serde_json::Value, lock: &str| {
             validate_direct_torch_report(resolution, report, lock, &selection)
         };
         assert!(check(&resolution, &report, &requirements).is_ok());
+
+        // Resolved against the acquired Torch wheel: pip reports that exact
+        // local file, while the lock keeps the official URL.
+        let acquired = tempfile::tempdir().unwrap();
+        let local = acquired.path().join("torch-fixture.whl");
+        std::fs::write(&local, b"verified wheel").unwrap();
+        let other = acquired.path().join("other.whl");
+        std::fs::write(&other, b"other wheel").unwrap();
+        let local_selection = DirectTorchSelection {
+            local_torch_wheel: Some(&local),
+            ..selection
+        };
+        let mut local_report = report.clone();
+        local_report["install"][0]["download_info"]["url"] = reqwest::Url::from_file_path(&local)
+            .unwrap()
+            .as_str()
+            .into();
+        validate_direct_torch_report(&resolution, &local_report, &requirements, &local_selection)
+            .unwrap();
+        // The official URL is not the local file, and neither is another file.
+        assert!(validate_direct_torch_report(
+            &resolution,
+            &report,
+            &requirements,
+            &local_selection
+        )
+        .is_err());
+        local_report["install"][0]["download_info"]["url"] = reqwest::Url::from_file_path(&other)
+            .unwrap()
+            .as_str()
+            .into();
+        assert!(validate_direct_torch_report(
+            &resolution,
+            &local_report,
+            &requirements,
+            &local_selection
+        )
+        .is_err());
+        // Only Torch may come from a local file during resolution.
+        let mut local_dependency = report.clone();
+        local_dependency["install"][1]["download_info"]["url"] =
+            reqwest::Url::from_file_path(&local)
+                .unwrap()
+                .as_str()
+                .into();
+        assert!(check(&resolution, &local_dependency, &requirements).is_err());
         resolution.artifacts[0].url = "https://example.com/torch.whl".into();
         assert!(check(&resolution, &report, &requirements).is_err());
         resolution.artifacts[0].url = report["install"][0]["download_info"]["url"]
@@ -2972,7 +3530,7 @@ mod managed_python_provenance_tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn cohere_asr_direct_report_refuses_bad_profile_before_staged_publication() {
+    fn general_modality_report_is_complete_before_staged_publication() {
         let names = [
             "torch",
             "fastapi",
@@ -2981,14 +3539,15 @@ mod managed_python_provenance_tests {
             "pillow",
             "safetensors",
             "transformers",
-            "accelerate",
-            "huggingface-hub",
             "tokenizers",
-            "librosa",
-            "soxr",
-            "soundfile",
+            "huggingface-hub",
+            "jinja2",
             "sentencepiece",
             "protobuf",
+            "accelerate",
+            "librosa",
+            "soundfile",
+            "soxr",
             "numpy",
             "scipy",
             "numba",
@@ -3003,18 +3562,23 @@ mod managed_python_provenance_tests {
             implementation: "cpython".into(),
             platform: "Linux-fixture".into(),
             machine: "x86_64".into(),
-            adapter: "cohere-asr".into(),
+            // The image packages had no compatible wheel here.
+            modalities: vec!["text".into(), "audio".into()],
+            omitted_modalities: [(
+                "image".to_owned(),
+                "No compatible binary wheel for torchvision".to_owned(),
+            )]
+            .into_iter()
+            .collect(),
+            extras: Vec::new(),
             artifacts: names
                 .iter()
                 .map(|name| crate::version_manager::TorchArtifact {
                     name: (*name).into(),
-                    version: match *name {
-                        "torch" => "2.14.0+cpu",
-                        "transformers" => "5.4.0",
-                        "accelerate" => "1.12.0",
-                        "huggingface-hub" => "1.5.0",
-                        "tokenizers" => "0.22.2",
-                        _ => "1.0.0",
+                    version: if *name == "torch" {
+                        "2.14.0+cpu"
+                    } else {
+                        "1.0.0"
                     }
                     .into(),
                     url: if *name == "torch" {
@@ -3030,8 +3594,9 @@ mod managed_python_provenance_tests {
             version: "2.14.0",
             build: "cpu",
             minor: "3.12",
-            adapter: "cohere-asr",
+            extras: &[],
             python: Path::new("/fixture/python"),
+            local_torch_wheel: None,
         };
         let records = |resolution: &DirectTorchResolution| {
             let report = serde_json::json!({"install":resolution.artifacts.iter().map(|a| serde_json::json!({"metadata":{"name":a.name,"version":a.version},"download_info":{"url":a.url,"archive_info":{"hashes":{"sha256":a.sha256}}}})).collect::<Vec<_>>()});
@@ -3043,6 +3608,60 @@ mod managed_python_provenance_tests {
                 .join("\n");
             (report, lock)
         };
+        let check = |resolution: &DirectTorchResolution| {
+            let (report, lock) = records(resolution);
+            validate_direct_torch_report(resolution, &report, &lock, &selection)
+        };
+        check(&resolution).unwrap();
+
+        // A resolved modality must bring all of its packages.
+        let mut incomplete = resolution.artifacts.clone();
+        incomplete.retain(|artifact| artifact.name != "soundfile");
+        let complete = std::mem::replace(&mut resolution.artifacts, incomplete);
+        assert!(check(&resolution)
+            .unwrap_err()
+            .to_string()
+            .contains("audio dependency"));
+        resolution.artifacts = complete;
+
+        // A modality is resolved or left out with a reason, never silently.
+        let reason = resolution.omitted_modalities.remove("image").unwrap();
+        assert!(check(&resolution).is_err());
+        resolution
+            .omitted_modalities
+            .insert("image".into(), "  ".into());
+        assert!(check(&resolution).is_err());
+        resolution.omitted_modalities.insert("image".into(), reason);
+
+        // Torchvision belongs to the image modality.
+        let mut with_vision = resolution.clone();
+        with_vision
+            .artifacts
+            .push(crate::version_manager::TorchArtifact {
+                name: "torchvision".into(),
+                version: "0.29.0+cpu".into(),
+                url: "https://download.pytorch.org/whl/cpu/torchvision-fixture.whl".into(),
+                sha256: "a".repeat(64),
+            });
+        assert!(check(&with_vision).is_err());
+
+        // A requested extra must be in the report.
+        let nunchaku = ["nunchaku".to_owned()];
+        let extra_selection = DirectTorchSelection {
+            extras: &nunchaku,
+            ..selection
+        };
+        let mut with_extra = resolution.clone();
+        with_extra.extras = nunchaku.to_vec();
+        let (report, lock) = records(&with_extra);
+        assert!(
+            validate_direct_torch_report(&with_extra, &report, &lock, &extra_selection)
+                .unwrap_err()
+                .to_string()
+                .contains("extra")
+        );
+
+        // A complete report stages its packages.
         let directory = tempfile::tempdir().unwrap();
         let runtime = directory.path().join("runtime");
         let target = runtime.join("staged-packages");
@@ -3056,32 +3675,8 @@ mod managed_python_provenance_tests {
                 size: bytes.len() as u64,
             }],
         };
-        let index = resolution
-            .artifacts
-            .iter()
-            .position(|a| a.name == "transformers")
-            .unwrap();
         std::fs::create_dir_all(venv_packages_dir(&runtime, "3.12")).unwrap();
         let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
-        // Below the Transformers floor is refused before publication.
-        for wrong in ["4.57.6", "5.3.9"] {
-            resolution.artifacts[index].version = wrong.into();
-            let (report, lock) = records(&resolution);
-            assert!(validate_and_move_direct_torch_packages(
-                &resolution,
-                &report,
-                &lock,
-                &selection,
-                &target,
-                &bootstrap,
-                &manifest
-            )
-            .is_err());
-            assert!(target.join("selected.py").exists());
-            assert!(std::fs::read_dir(&bootstrap.root).unwrap().next().is_none());
-        }
-        // Releases above the floor are current versions, not drift.
-        resolution.artifacts[index].version = "5.12.0".into();
         let (report, lock) = records(&resolution);
         validate_and_move_direct_torch_packages(
             &resolution,
@@ -3096,7 +3691,35 @@ mod managed_python_provenance_tests {
         assert!(runtime
             .join("venv/lib/python3.12/site-packages/selected.py")
             .exists());
-        assert!(!target.exists());
+    }
+
+    #[test]
+    fn modality_packages_match_the_resolver() {
+        let resolver = include_str!("../../../../../../torch-server/resolve_runtime.py");
+        let tuple = |name: &str| {
+            let start = resolver
+                .find(&format!("\n{name} = ("))
+                .unwrap_or_else(|| panic!("resolver defines {name}"));
+            let body = &resolver[start..];
+            let end = body.find(')').unwrap();
+            body[..end]
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        for (modality, constant) in [("text", "TEXT"), ("image", "IMAGE"), ("audio", "AUDIO")] {
+            let own = MODALITY_PACKAGES
+                .iter()
+                .find(|(name, _)| *name == modality)
+                .unwrap()
+                .1;
+            assert_eq!(own.to_vec(), tuple(constant), "{modality}");
+        }
+        assert!(modality_packages("image").any(|name| name == "transformers"));
+        assert!(modality_packages("audio").any(|name| name == "jinja2"));
+        assert!(!modality_packages("text").any(|name| name == "diffusers"));
     }
 
     #[test]
@@ -3248,6 +3871,27 @@ mod managed_python_provenance_tests {
     }
 
     #[test]
+    fn verified_version_choice_is_its_own_wheel_selection() {
+        let select = |constraints: Option<&str>, role: &str| {
+            torch_wheel_selection("v2.9.1", "cu130", "3.12", &[], constraints, role)
+        };
+        let current = select(None, "dependencies");
+        let verified = select(Some("transformers==4.57.6\n"), "dependencies");
+        // Toggling recorded versions must not supersede the other choice.
+        assert_ne!(current, verified);
+        assert_ne!(
+            verified,
+            select(Some("transformers==4.57.7\n"), "dependencies")
+        );
+        // Retrying the same choice resumes the same selection.
+        assert_eq!(
+            verified,
+            select(Some("transformers==4.57.6\n"), "dependencies")
+        );
+        assert_ne!(current, select(None, "torch"));
+    }
+
+    #[test]
     fn locked_install_report_must_install_exactly_the_accepted_lock() {
         let artifact = |name: &str, sha: char| crate::version_manager::TorchArtifact {
             name: name.into(),
@@ -3264,7 +3908,9 @@ mod managed_python_provenance_tests {
             implementation: "cpython".into(),
             platform: "Linux-fixture".into(),
             machine: "x86_64".into(),
-            adapter: "none".into(),
+            modalities: Vec::new(),
+            omitted_modalities: Default::default(),
+            extras: Vec::new(),
             artifacts: vec![artifact("torch", 'a'), artifact("fastapi", 'b')],
         };
         let report_of = |artifacts: &[crate::version_manager::TorchArtifact]| {
@@ -3275,8 +3921,10 @@ mod managed_python_provenance_tests {
                 })).collect::<Vec<_>>()
             })
         };
+        let remote = std::collections::HashMap::new();
         // Order does not matter; content does.
-        validate_locked_install_report(&resolution, &report_of(&resolution.artifacts)).unwrap();
+        validate_locked_install_report(&resolution, &report_of(&resolution.artifacts), &remote)
+            .unwrap();
         for changed in [
             vec![artifact("torch", 'a'), artifact("fastapi", 'c')],
             vec![artifact("torch", 'a')],
@@ -3286,7 +3934,58 @@ mod managed_python_provenance_tests {
                 artifact("extra", 'd'),
             ],
         ] {
-            assert!(validate_locked_install_report(&resolution, &report_of(&changed)).is_err());
+            assert!(
+                validate_locked_install_report(&resolution, &report_of(&changed), &remote).is_err()
+            );
         }
+
+        // Acquired wheels must install from exactly their verified local files.
+        let acquired = tempfile::tempdir().unwrap();
+        let local = |name: &str| {
+            let path = acquired.path().join(format!("{name}-1.0.whl"));
+            std::fs::write(&path, name).unwrap();
+            path
+        };
+        let local_files = std::collections::HashMap::from([
+            ("torch".to_owned(), local("torch")),
+            ("fastapi".to_owned(), local("fastapi")),
+        ]);
+        let from_files = |files: &std::collections::HashMap<String, PathBuf>| {
+            let mut artifacts = resolution.artifacts.clone();
+            for artifact in &mut artifacts {
+                if let Some(path) = files.get(&artifact.name) {
+                    artifact.url = reqwest::Url::from_file_path(path).unwrap().into();
+                }
+            }
+            report_of(&artifacts)
+        };
+        validate_locked_install_report(&resolution, &from_files(&local_files), &local_files)
+            .unwrap();
+        // A network install of an acquired wheel is refused...
+        assert!(validate_locked_install_report(
+            &resolution,
+            &report_of(&resolution.artifacts),
+            &local_files
+        )
+        .is_err());
+        // ...and so is any local file the acquisition did not provide.
+        let swapped = std::collections::HashMap::from([
+            ("torch".to_owned(), local_files["fastapi"].clone()),
+            ("fastapi".to_owned(), local_files["torch"].clone()),
+        ]);
+        assert!(
+            validate_locked_install_report(&resolution, &from_files(&swapped), &local_files)
+                .is_err()
+        );
+        // A partly acquired set keeps network sources for the rest.
+        let torch_only =
+            std::collections::HashMap::from([("torch".to_owned(), local_files["torch"].clone())]);
+        validate_locked_install_report(&resolution, &from_files(&torch_only), &torch_only).unwrap();
+        assert!(validate_locked_install_report(
+            &resolution,
+            &from_files(&local_files),
+            &torch_only
+        )
+        .is_err());
     }
 }

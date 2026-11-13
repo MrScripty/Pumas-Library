@@ -16,6 +16,7 @@ pub enum RuntimeProfileBinaryLaunchKind {
     OllamaServe,
     LlamaCppRouter,
     LlamaCppDedicated,
+    OnnxHost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -77,6 +78,7 @@ impl From<ProviderBinaryLaunchTarget> for RuntimeProfileBinaryLaunchKind {
             ProviderBinaryLaunchTarget::OllamaServe => Self::OllamaServe,
             ProviderBinaryLaunchTarget::LlamaCppRouter => Self::LlamaCppRouter,
             ProviderBinaryLaunchTarget::LlamaCppDedicated => Self::LlamaCppDedicated,
+            ProviderBinaryLaunchTarget::OnnxHost => Self::OnnxHost,
         }
     }
 }
@@ -129,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn launch_strategy_maps_onnx_managed_profile_to_in_process_runtime() {
+    fn launch_strategy_maps_onnx_managed_profile_to_its_host_process() {
         let mut profile = RuntimeProfileConfig::default_ollama();
         profile.provider = RuntimeProviderId::OnnxRuntime;
         profile.provider_mode = RuntimeProviderMode::OnnxServe;
@@ -137,9 +139,7 @@ mod tests {
         assert_eq!(
             RuntimeProfileLaunchStrategy::for_profile(&profile, &ProviderBehavior::onnx_runtime())
                 .unwrap(),
-            RuntimeProfileLaunchStrategy::InProcessRuntime(
-                RuntimeProfileInProcessRuntimeKind::OnnxRuntime
-            )
+            RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost)
         );
     }
 

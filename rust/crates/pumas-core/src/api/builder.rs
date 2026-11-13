@@ -449,9 +449,11 @@ impl PumasApiBuilder {
                 registry::InstanceClaimResult::Occupied(instance) => {
                     return Err(PumasError::InvalidParams {
                     message: format!(
-                        "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                        "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access. If that process is no longer running (Pumas was killed or crashed), Pumas Library offers to release its entry, or run `pumas-rpc --release-stale-instance --launcher-root <library> --expected-pid {} --expected-started-at {}`.",
                         crate::platform::platform_display_path(&self.launcher_root),
-                        instance.pid
+                        instance.pid,
+                        instance.pid,
+                        instance.started_at
                     ),
                 });
                 }
@@ -680,13 +682,6 @@ impl PumasApiBuilder {
             }
         }
 
-        // Initialize conversion manager
-        let conversion_manager = Arc::new(conversion::ConversionManager::new(
-            self.launcher_root.clone(),
-            model_library.clone(),
-            Arc::new(model_library::ModelImporter::new(model_library.clone())),
-        ));
-
         // Spawn non-blocking orphan scan to adopt models missing metadata
         {
             let lib_clone = model_library.clone();
@@ -735,6 +730,20 @@ impl PumasApiBuilder {
         let provider_registry = crate::providers::ProviderRegistry::builtin();
         let runtime_provider_adapters = crate::runtime_profiles::RuntimeProviderAdapters::builtin();
         let hf_client = hf_client.map(Arc::new);
+        if let Some(client) = hf_client.clone() {
+            // Models that become complete record their sentence-transformers
+            // declarations; best-effort, aborted at shutdown (ADR 0007).
+            runtime_tasks.spawn(super::declarations::react_to_library_updates(
+                model_library.clone(),
+                client,
+                super::declarations::scratch_under(&self.launcher_root),
+            ));
+        }
+        let conversion_manager = Arc::new(conversion::ConversionManager::new(
+            self.launcher_root.clone(),
+            model_library.clone(),
+            Arc::new(model_library::ModelImporter::new(model_library.clone())),
+        ));
         let intent_service = Arc::new(crate::intent::IntentService::new(
             model_library.clone(),
             hf_client.clone(),

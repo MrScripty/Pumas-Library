@@ -42,7 +42,7 @@ or newer, and LFM3-VL needs b12088 or newer.
 | S1 | Runtime modality facts: one bounded llama.cpp probe (`/props` modalities and `/v1/models` architecture) that the vision and decision checks share; static declarations for other providers; additive discovery fields | Done |
 | S2 | Primitive layer: shared text, image and audio validation and budget; chat, embeddings and systemone encoders. Image code moves unchanged; audio packs PCM as WAV | Done |
 | S3 | Grammar and resolution: audio parts in messages and content items, decision `audio`; acceptance gated by declared modalities; image-only messages still resolve to `image_to_text` | Done |
-| S4 | Live qualification of the five models, docs, release notes | In progress: docs and release notes done; LFM3-Audio-2B verified (router, CPU); the other four need their files |
+| S4 | Live qualification of the five models, docs, release notes | Done for acceptance 4 except a literal spoken question (2026-11-12, llama.cpp b12099, dedicated GPU profile): LFM3-VL-2B described a test image exactly; LFM3-Omni-2B named the circle's colour and transcribed a speech clip verbatim; d1-2B and d1-Omni-2B answered text and image decisions correctly (≥0.97), and d1-Omni-2B answered an audio decision about the clip (0.89). The only clip is a speech, not a spoken question, so that case was run with a text question about audio. Acceptance 5 (speech output reported unavailable) not re-checked. LFM3-Audio-2B was verified earlier. |
 | S5 | `json` output primitive: chat structured output against a caller schema; decisions and rankings expressed as `json` results | Planned |
 
 Later, outside 0.8.0: video input (llama.cpp needs `ffmpeg` for it), speech

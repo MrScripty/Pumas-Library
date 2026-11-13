@@ -1072,8 +1072,8 @@ async fn copied_import_metadata_notifier_observes_write_paths_without_authorizin
     let paths = notifications.lock().unwrap().clone();
     assert_eq!(
         paths.len(),
-        2,
-        "Pending and Ready metadata writes both notify"
+        3,
+        "Pending metadata, the owned publication destination and Ready metadata notify"
     );
     assert_eq!(paths[0].file_name().unwrap(), "metadata.json");
     assert!(paths[0]
@@ -1087,7 +1087,10 @@ async fn copied_import_metadata_notifier_observes_write_paths_without_authorizin
         !paths[0].exists(),
         "notification is the former stage path, not retained filesystem authority"
     );
+    // Publication is an owned move: its destination is announced before the
+    // rename so the watcher never mistakes it for an external change.
     assert_eq!(paths[1], fixture.target().join("metadata.json"));
+    assert_eq!(paths[2], fixture.target().join("metadata.json"));
     assert!(fixture.target().join("metadata.json").is_file());
     fixture.tasks.shutdown_owned().await.unwrap();
 }

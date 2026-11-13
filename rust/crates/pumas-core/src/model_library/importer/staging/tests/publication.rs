@@ -416,7 +416,9 @@ async fn copied_import_final_metadata_notifier_keeps_checksum_as_historical_evid
     fixture
         .library
         .set_metadata_write_notifier(Some(Arc::new(move |path| {
-            if observed.fetch_add(1, Ordering::SeqCst) == 1 {
+            // Call 1 announces the publication destination before its rename;
+            // call 2 is the final metadata write in the published directory.
+            if observed.fetch_add(1, Ordering::SeqCst) == 2 {
                 let weights = path.parent().unwrap().join("model.onnx");
                 let bytes = std::fs::read(&weights).unwrap();
                 std::fs::write(weights, vec![b'x'; bytes.len()]).unwrap();
@@ -424,7 +426,7 @@ async fn copied_import_final_metadata_notifier_keeps_checksum_as_historical_evid
         })));
     let result = fixture.importer.import(&fixture.spec).await.unwrap();
     assert!(result.success);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
     assert_eq!(receipt_at(&fixture.target())["state"], "confirmed");
     let metadata = fixture
         .library

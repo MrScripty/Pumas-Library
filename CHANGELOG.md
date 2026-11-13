@@ -220,6 +220,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and a retry checks only the wheels it still has to download. A retry whose
   kept selection cannot be read or no longer applies replaces the earlier
   download the same way instead of failing on it.
+- A paused Hugging Face download that already published some regular
+  (non-LFS) files can resume. Those files have no published SHA-256, and the
+  resumed download refused them with "Existing selected file … has no verified
+  receipt or supplied checksum". Each file a download publishes now gets a
+  durable receipt first, so a resumed download recognizes its own files without
+  downloading or hashing them again. Downloads started before this change have
+  no receipts: Pumas transfers such a file again from the same immutable
+  revision and keeps the existing copy when it is byte-identical, retrying
+  within the same resume if that transfer is cut off. A partial copy left by an
+  earlier refusal is discarded when all of its bytes are already in the final
+  file. A file that really differs, or one a receipt-keeping download did not
+  publish, is still refused with both files kept and their sizes and SHA-256
+  values in the reason.
 
 ## [0.8.0] - 2026-11-08
 

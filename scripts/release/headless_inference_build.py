@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Opt-in local inference candidate production; no download or publication.
 
-Caller-reviewed compatibility/runtime records remain mandatory. Older 0.7
+Caller-reviewed compatibility records remain mandatory. The archive packages no
+inference runtime; Pumas installs runtimes through its version manager. Older 0.7
 sources are refused before Cargo; this command never grants inference acceptance.
 """
 
@@ -106,21 +107,6 @@ def artifact_evidence(stdout, repository, target):
     return observed
 
 
-def validate_runtime_inputs(runtime_inputs, runtime):
-    require(
-        type(runtime_inputs) is dict and set(runtime_inputs) == set(runtime["files"]),
-        "exact explicit runtime closure required",
-    )
-    for name, path in runtime_inputs.items():
-        path = Path(path)
-        item = runtime["files"][name]
-        require(path.is_file() and not path.is_symlink(), "runtime must be regular local files")
-        require(
-            path.stat().st_size == item["bytes"] and package.sha256(path) == item["sha256"],
-            "runtime bytes mismatch",
-        )
-
-
 def core_projection(rpc):
     """Undo only discovery.rs's RPC additions to the shared library identity."""
     core = copy.deepcopy(rpc)
@@ -145,25 +131,20 @@ def produce(
     repository,
     target_id,
     contract,
-    runtime,
-    runtime_inputs,
     schema,
     license_file,
     notices_file,
     output,
     runner=subprocess.run,
     environment=None,
-    runtime_notices=(),
 ):
     """Build one native source-bound candidate; supplied records must be pinned first."""
     repository, output = Path(repository).resolve(), Path(output).resolve()
     # Detach caller metadata. No changing records can modify the admitted cohort.
-    contract, runtime, runtime_inputs = copy.deepcopy((contract, runtime, runtime_inputs))
+    contract = copy.deepcopy(contract)
     expected = package.validate_contract(contract)  # Deliberately first: 0.7 never builds.
     target = TARGETS[target_id]
     package.discovery.validate_pins(expected, target["rust_target"])
-    package.validate_runtime_record(runtime, target)
-    validate_runtime_inputs(runtime_inputs, runtime)
     require(not output.is_relative_to(repository), "candidate output must be outside checkout")
     require(not output.exists(), "refusing to overwrite candidate evidence")
     require(
@@ -300,7 +281,6 @@ def produce(
         package.sha256(license_file) == package.sha256(repository / "LICENSE"),
         "supplied license changed during build",
     )
-    validate_runtime_inputs(runtime_inputs, runtime)
     build = {
         "version": compiled["package_version"],
         "target": compiled["target"],
@@ -315,22 +295,13 @@ def produce(
         "rustc": rustc_version,
     }
     package.validate_build_record(build, target, expected)
-    if runtime_notices:
-        combined = output / "THIRD-PARTY-NOTICES.txt"
-        combined.write_bytes(
-            Path(notices_file).read_bytes()
-            + b"\n\nONNX Runtime native distribution notices\n\n"
-            + b"\n\n".join(runtime_notices)
-        )
-        notices_file = combined
     inputs = {
         target["binary"]: binary,
         "LICENSE.txt": license_file,
         "THIRD-PARTY-NOTICES.txt": notices_file,
-        **runtime_inputs,
     }
     archive = output / (f"pumas-rpc-inference-{version}-{target_id}.{target['format']}")
-    _, archive_sha = package.assemble(inputs, build, runtime, contract, schema, archive)
+    _, archive_sha = package.assemble(inputs, build, contract, schema, archive)
     (output / "build-record.json").write_bytes(package.canonical(build))
     evidence = {
         "schema_version": 1,
@@ -346,6 +317,7 @@ def produce(
         "cargo_stderr_sha256": package.sha256(errors),
         "archive": str(archive),
         "archive_sha256": archive_sha,
+        "bundled_runtimes": [],
         "runtime_loading": "unqualified",
         "real_inference": "unqualified",
     }
@@ -357,9 +329,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, default=package.ROOT)
     parser.add_argument("--target", choices=TARGETS, required=True)
-    for name in ("contract", "runtime-record", "runtime-inputs"):
-        parser.add_argument(f"--{name}", type=Path, required=True)
-        parser.add_argument(f"--{name}-sha256", required=True)
+    parser.add_argument("--contract", type=Path, required=True)
+    parser.add_argument("--contract-sha256", required=True)
     for name in ("schema", "license", "notices", "output-dir"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     args = parser.parse_args()
@@ -367,8 +338,6 @@ def main():
         args.repository,
         args.target,
         package.read_pinned_json(args.contract, args.contract_sha256),
-        package.read_pinned_json(args.runtime_record, args.runtime_record_sha256),
-        package.read_pinned_json(args.runtime_inputs, args.runtime_inputs_sha256),
         package.metadata_bytes(args.schema),
         args.license,
         args.notices,

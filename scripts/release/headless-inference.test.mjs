@@ -16,7 +16,7 @@ test('opt-in inference build production and fail-closed source admission', () =>
     { cwd: directory, stdio: 'pipe', timeout: 30_000 });
 });
 
-test('pinned native staging and packaged environment admission', () => {
+test('Pumas-installed runtime lifecycle and packaged environment admission', () => {
   const directory = fileURLToPath(new URL('.', import.meta.url));
   execFileSync(process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3'),
     ['-m', 'unittest', '-v', 'test_inference_release'],

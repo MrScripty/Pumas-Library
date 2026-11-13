@@ -190,6 +190,25 @@ impl DownloadRecoveryDestination {
         self.capture_copied_import_payload(identity.files)
     }
 
+    /// Reread every payload file and compare its SHA-256 with the receipt's.
+    /// Readiness observes names, sizes and identities; this is the content
+    /// proof an explicit recovery requires.
+    pub(crate) fn import_payload_hashes_match(
+        &self,
+        expected: &ImportPayloadIdentity,
+    ) -> Result<bool> {
+        for (path, member) in &expected.files {
+            let observed = crate::model_library::hashing::compute_dual_hash_reader(
+                &mut self.open_import_file(path)?,
+            )?
+            .sha256;
+            if !observed.eq_ignore_ascii_case(&member.sha256) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub(crate) fn verify_import_bindings(&self, expected: &ImportPayloadIdentity) -> Result<()> {
         self.require_import_bound()?;
         let (observed, _) = self.observe_import_payload()?;

@@ -2,7 +2,7 @@ import type {
   RuntimeProfileConfig,
   RuntimeProfileStatus,
 } from '../../../types/api-runtime-profiles';
-import { modeLabel, providerLabel } from './RuntimeProfileSettingsShared';
+import { modeLabel, providerLabel, runtimeStatusLabel } from './RuntimeProfileSettingsShared';
 
 type RuntimeProfileListProps = {
   profiles: RuntimeProfileConfig[];
@@ -39,8 +39,8 @@ export function RuntimeProfileList({
               <span className="font-medium text-[hsl(var(--launcher-text-primary))] truncate">
                 {profile.name}
               </span>
-              <span className="text-[hsl(var(--launcher-text-muted))]">
-                {status?.state ?? 'unknown'}
+              <span className="text-[hsl(var(--launcher-text-muted))] truncate">
+                {runtimeStatusLabel(status)}
               </span>
             </div>
             <div className="mt-1 text-[hsl(var(--launcher-text-muted))] truncate">

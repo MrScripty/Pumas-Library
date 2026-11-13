@@ -119,6 +119,7 @@ describe('useModels', () => {
       models: {
         alpha: makeRecord('alpha'),
       },
+      unavailable_records: [],
     });
     scanSharedStorageMock.mockResolvedValue({
       success: true,
@@ -130,6 +131,7 @@ describe('useModels', () => {
       success: true,
       models: [makeRecord('search-hit')],
       query_time_ms: 12,
+      unavailable_records: [],
     });
     groupCatalogModelsMock.mockImplementation((records: ModelRecord[]) =>
       grouped(records.map((record) => record.id))
@@ -158,8 +160,23 @@ describe('useModels', () => {
     });
     expect(Number.isFinite(Date.parse(String(stored['writtenAt'])))).toBe(true);
     expect(result.current.libraryDiagnostics).toEqual({
-      loadError: null, scanError: null, searchError: null, snapshotWrittenAt: null,
+      loadError: null, scanError: null, searchError: null, snapshotWrittenAt: null, unavailableRecords: [],
     });
+  });
+
+  it('reports records the backend left out without failing the load', async () => {
+    const left = [{ model_id: 'audio/acme/broken', reason: 'dependency_bindings is missing' }];
+    getModelsMock.mockResolvedValue({
+      success: true,
+      models: { alpha: makeRecord('alpha') },
+      unavailable_records: left,
+    });
+    const { result } = renderModelsHook();
+    await flushMicrotasks();
+
+    expect(result.current.libraryLoadStatus).toBe('ready');
+    expect(result.current.modelGroups).toEqual(grouped(['alpha']));
+    expect(result.current.libraryDiagnostics.unavailableRecords).toEqual(left);
   });
 
   it('keeps live rows actionable while a refresh is in flight', async () => {

@@ -13,8 +13,8 @@ use tokio::{
 };
 
 use super::{
-    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    OnnxSessionStatus,
+    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxHostEndpoint, OnnxLoadRequest, OnnxModelId,
+    OnnxRerankRequest, OnnxRerankResponse, OnnxRuntimeError, OnnxSessionStatus,
 };
 
 /// One admitted operation's share of [`OnnxSessionManager`]'s concurrency limit.
@@ -73,6 +73,17 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
         result
     }
 
+    /// [`Self::load_leased`] into the ONNX host of a runtime profile. Backends
+    /// that hold their sessions themselves load locally and ignore the host.
+    async fn load_leased_on_host(
+        &self,
+        request: OnnxLoadRequest,
+        _host: OnnxHostEndpoint,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        self.load_leased(request, lease).await
+    }
+
     /// [`Self::embed_with_admission`] while `lease` is held for as long as the
     /// work may run. The default suits backends whose work stops when this
     /// future is dropped.
@@ -85,6 +96,25 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
         let result = self.embed_with_admission(request, admission).await;
         drop(lease);
         result
+    }
+
+    /// Score rerank pairs on a cross-encoder session while `lease` is held for
+    /// as long as the work may run. Backends without cross-encoder support
+    /// refuse with the reason.
+    async fn rerank_leased(
+        &self,
+        request: OnnxRerankRequest,
+        _admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        drop(lease);
+        Err(OnnxRuntimeError::validation(
+            "model",
+            format!(
+                "this ONNX backend cannot rerank with {}",
+                request.model_id.as_str()
+            ),
+        ))
     }
 }
 
@@ -129,6 +159,16 @@ where
         self.backend.load_leased(request, lease).await
     }
 
+    /// Load into the ONNX host of the runtime profile at `host`.
+    pub async fn load_on_host(
+        &self,
+        request: OnnxLoadRequest,
+        host: OnnxHostEndpoint,
+    ) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        let lease = OnnxOperationLease::new(self.operation_permit().await?);
+        self.backend.load_leased_on_host(request, host, lease).await
+    }
+
     pub async fn unload(
         &self,
         model_id: &OnnxModelId,
@@ -158,6 +198,16 @@ where
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
         let lease = OnnxOperationLease::new(self.operation_permit().await?);
         self.backend.embed_leased(request, admission, lease).await
+    }
+
+    /// Score rerank pairs; waiting for capacity is not admission.
+    pub async fn rerank_with_admission(
+        &self,
+        request: OnnxRerankRequest,
+        admission: Option<&AtomicBool>,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        let lease = OnnxOperationLease::new(self.operation_permit().await?);
+        self.backend.rerank_leased(request, admission, lease).await
     }
 
     /// Controlled test custody of the real operation queue; never inference evidence.

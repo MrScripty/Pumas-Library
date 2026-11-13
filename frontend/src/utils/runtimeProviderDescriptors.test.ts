@@ -19,7 +19,7 @@ function model(overrides: Partial<ModelInfo> = {}): ModelInfo {
 }
 
 describe('runtime provider descriptors', () => {
-  it('declares existing provider labels, modes, and capability flags', () => {
+  it('declares provider labels and presentation flags', () => {
     expect(providerLabel('ollama')).toBe('Ollama');
     expect(providerLabel('llama_cpp')).toBe('llama.cpp');
     expect(providerLabel('onnx_runtime')).toBe('ONNX Runtime');
@@ -28,27 +28,26 @@ describe('runtime provider descriptors', () => {
     expect(deviceModeLabel('specific_device')).toBe('Specific device');
 
     expect(getRuntimeProviderDescriptor('ollama')).toMatchObject({
-      profileModes: ['ollama_serve'],
       supportsGpuLayers: false,
       supportsContextSize: false,
       defaultContextSize: null,
     });
     expect(getRuntimeProviderDescriptor('llama_cpp')).toMatchObject({
-      profileModes: ['llama_cpp_router', 'llama_cpp_dedicated'],
       dedicatedPlacementModes: ['llama_cpp_dedicated'],
       supportsGpuLayers: true,
       supportsContextSize: true,
       defaultContextSize: '4096',
     });
     expect(getRuntimeProviderDescriptor('onnx_runtime')).toMatchObject({
-      profileModes: ['onnx_serve'],
-      managementModes: ['managed'],
-      deviceModes: ['auto', 'cpu'],
       compatibleExecutableFormats: ['onnx'],
       supportsGpuLayers: false,
       supportsContextSize: false,
       defaultContextSize: null,
     });
+    // Runtime app ids and modes are discovered from the backend registry.
+    for (const field of ['managedRuntimeAppId', 'profileModes', 'managementModes', 'deviceModes']) {
+      expect(getRuntimeProviderDescriptor('onnx_runtime')).not.toHaveProperty(field);
+    }
   });
 
   it('uses descriptor executable formats for model compatibility', () => {

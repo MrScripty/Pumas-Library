@@ -8,7 +8,6 @@ function lifecycleState(overrides = {}) {
     isStarting: false,
     isStopping: false,
     launchError: null,
-    installedVersions: [],
     ...overrides,
   };
 }
@@ -22,14 +21,17 @@ describe('decorateManagedApps', () => {
         ram: { usage: 0, total: 2000 },
         disk: { usage: 0, total: 1, free: 1 },
       },
-      ollama: lifecycleState({
-        isRunning: true,
-        installedVersions: ['v1'],
-        ramMemory: 500,
-        gpuMemory: 250,
-      }),
-      llamaCpp: lifecycleState({ isStarting: true, installedVersions: ['b9082'] }),
-      torch: lifecycleState(),
+      installedVersionsByAppId: {
+        ollama: ['v1'],
+        'llama-cpp': ['b9082'],
+        'onnx-runtime': ['v1.24.2+cpu'],
+        torch: [],
+      },
+      processes: {
+        ollama: lifecycleState({ isRunning: true, ramMemory: 500, gpuMemory: 250 }),
+        'llama-cpp': lifecycleState({ isStarting: true }),
+        torch: lifecycleState(),
+      },
     });
 
     expect(decorated.map((app) => app.id)).toEqual([
@@ -46,5 +48,21 @@ describe('decorateManagedApps', () => {
     });
     expect(decorated.find((app) => app.id === 'llama-cpp')?.iconState).toBe('starting');
     expect(decorated.find((app) => app.id === 'onnx-runtime')?.iconState).toBe('offline');
+    expect(decorated.find((app) => app.id === 'torch')).toMatchObject({
+      status: 'idle',
+      iconState: 'uninstalled',
+    });
+  });
+
+  it('leaves an app untouched when it has neither a process nor version management', () => {
+    const decorated = decorateManagedApps(DEFAULT_APPS, {
+      installedVersionsByAppId: { ollama: ['v1'] },
+      processes: {},
+    });
+
+    expect(decorated.find((app) => app.id === 'ollama')?.iconState).toBe('offline');
+    expect(decorated.find((app) => app.id === 'onnx-runtime')).toBe(
+      DEFAULT_APPS.find((app) => app.id === 'onnx-runtime')
+    );
   });
 });

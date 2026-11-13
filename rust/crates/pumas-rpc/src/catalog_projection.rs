@@ -170,7 +170,7 @@ mod tests {
         let result = client.models(Vec::new(), PathBuf::new()).await.unwrap();
         assert_eq!(
             serde_json::to_value(result).unwrap(),
-            serde_json::json!({"success":true,"models":{}})
+            serde_json::json!({"success":true,"models":{},"unavailable_records":[]})
         );
         worker.shutdown().await.unwrap();
     }

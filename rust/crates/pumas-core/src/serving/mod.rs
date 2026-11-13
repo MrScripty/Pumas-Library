@@ -569,9 +569,10 @@ fn validate_provider_artifact_compatibility(
             return vec![ModelServeError::non_critical(
                 ModelServeErrorCode::InvalidFormat,
                 "this reranker GGUF has no ranking head (cls.output.weight), so llama.cpp would \
-                 return meaningless relevance scores; use a GGUF converted for reranking, such \
-                 as ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF, or change the model's category if \
-                 it is a generative model",
+                 return meaningless relevance scores; derive one with the gguf_to_ranking_gguf \
+                 conversion, use a GGUF converted for reranking, such as \
+                 ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF, or change the model's category if it \
+                 is a generative model",
             )
             .for_model(model_id)
             .for_profile(request.config.profile_id.clone())

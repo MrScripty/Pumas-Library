@@ -1,6 +1,6 @@
 import { Play, Save, Square, Trash2 } from 'lucide-react';
 import type { RuntimeProfileStatus } from '../../../types/api-runtime-profiles';
-import type { RuntimeProfileDraft } from './RuntimeProfileSettingsShared';
+import { runtimeStatusLabel, type RuntimeProfileDraft } from './RuntimeProfileSettingsShared';
 
 type RuntimeProfileSettingsActionsProps = {
   draft: RuntimeProfileDraft;
@@ -39,7 +39,7 @@ export function RuntimeProfileSettingsActions({
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="text-xs text-[hsl(var(--launcher-text-muted))]">
-        {selectedStatus ? `State: ${selectedStatus.state}` : 'State: unknown'}
+        {`State: ${runtimeStatusLabel(selectedStatus)}`}
         {draft.provider_mode === 'llama_cpp_dedicated' && isManagedProfile && (
           <span className="ml-2">Dedicated profiles start from a model&apos;s Serving page.</span>
         )}

@@ -187,6 +187,7 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   if (
     method === 'set_hf_token'
     || method === 'delete_model_with_cascade'
+    || method === 'finish_retained_import'
     || method === 'get_links_for_model'
     || method === 'import_model'
     || method === 'import_batch'
@@ -206,7 +207,8 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
     if (method === 'set_hf_token' && (decoded.value as { token: string }).token.trim().length === 0) {
       throw new Error('Invalid API params for method: set_hf_token: token must not be empty');
     }
-    if ((method === 'delete_model_with_cascade' || method === 'get_links_for_model')
+    if ((method === 'delete_model_with_cascade' || method === 'finish_retained_import'
+      || method === 'get_links_for_model')
       && (decoded.value as { model_id: string }).model_id.trim().length === 0) {
       throw new Error(`Invalid API params for method: ${method}: model_id must not be empty`);
     }

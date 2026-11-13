@@ -10,9 +10,8 @@
 use pumas_library::models::{
     ModelArtifactState, ModelEntryPathState, ModelFactFamily, ModelLibraryChangeKind,
     ModelLibraryRefreshScope, ModelLibrarySelectorSnapshotRequest, ModelPackageFactsSummaryStatus,
-    RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeManagementMode,
-    RuntimePort, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId, RuntimeProviderMode,
-    ServedModelLoadState, ServedModelStatus,
+    RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeManagementMode, RuntimePort,
+    RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId, RuntimeProviderMode,
 };
 use pumas_library::{AppId, PumasApi, PumasError};
 use std::path::Path;
@@ -405,6 +404,7 @@ async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
         port: RuntimePort::parse(18080).ok(),
         device: Default::default(),
         scheduler: Default::default(),
+        runtime_version: None,
     };
     api.upsert_runtime_profile(profile).await.unwrap();
 
@@ -469,6 +469,7 @@ async fn test_launch_llama_cpp_dedicated_profile_requires_model_binding() {
         port: RuntimePort::parse(18081).ok(),
         device: Default::default(),
         scheduler: Default::default(),
+        runtime_version: None,
     };
     api.upsert_runtime_profile(profile).await.unwrap();
 
@@ -541,14 +542,15 @@ async fn test_stop_runtime_profile_without_pid_is_profile_scoped() {
 }
 
 #[tokio::test]
-async fn test_shutdown_managed_runtime_profiles_clears_served_models() {
+async fn test_onnx_profile_without_a_host_is_refused_and_leaves_no_shutdown_work() {
     let temp_dir = create_test_env();
     let _registry = registry_test_guard(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
     let profile_id = RuntimeProfileId::parse("onnx-shutdown-profile").unwrap();
 
-    // Qualify shutdown with a started, backend-owned in-process runtime.
-    // A configured external profile with no owned process is not shutdown work.
+    // ONNX Runtime runs in an ONNX host process per profile, never in the
+    // backend. A backend that registered no host executable refuses the
+    // launch with the reason, so shutdown has no ONNX work to do.
     let profile = RuntimeProfileConfig {
         profile_id: profile_id.clone(),
         provider: RuntimeProviderId::OnnxRuntime,
@@ -560,48 +562,31 @@ async fn test_shutdown_managed_runtime_profiles_clears_served_models() {
         port: None,
         device: Default::default(),
         scheduler: Default::default(),
+        runtime_version: None,
     };
     api.upsert_runtime_profile(profile).await.unwrap();
+    let refusal = api
+        .launch_runtime_profile(profile_id.clone(), "in-process", temp_dir.path())
+        .await
+        .unwrap_err()
+        .to_string();
+    // Builds without ONNX Runtime support refuse for that reason instead.
     assert!(
-        api.launch_runtime_profile(profile_id.clone(), "in-process", temp_dir.path())
-            .await
-            .unwrap()
-            .success
+        refusal.contains("registered no ONNX host executable")
+            || refusal.contains("no ONNX Runtime support"),
+        "{refusal}"
     );
-    api.record_served_model(ServedModelStatus {
-        model_id: "models/shutdown-test".to_string(),
-        model_alias: Some("shutdown-test".to_string()),
-        provider: RuntimeProviderId::OnnxRuntime,
-        profile_id: profile_id.clone(),
-        load_state: ServedModelLoadState::Loaded,
-        device_mode: RuntimeDeviceMode::Auto,
-        device_id: None,
-        gpu_layers: None,
-        tensor_split: None,
-        context_size: None,
-        keep_loaded: true,
-        endpoint_url: None,
-        memory_bytes: None,
-        loaded_at: None,
-        last_error: None,
-    })
-    .await
-    .unwrap();
 
     let summary = api.stop_all_managed_runtime_profiles().await.unwrap();
-
-    assert!(summary.profiles_processed >= 1);
+    assert_eq!(summary.processes_stopped, 0);
     assert!(summary.errors.is_empty());
-    let serving_status = api.get_serving_status().await.unwrap();
-    assert!(serving_status.snapshot.served_models.is_empty());
     let runtime_status = api.get_runtime_profiles_snapshot().await.unwrap();
-    let status = runtime_status
+    assert!(runtime_status
         .snapshot
         .statuses
         .iter()
-        .find(|status| status.profile_id == profile_id)
-        .unwrap();
-    assert_eq!(status.state, RuntimeLifecycleState::Stopped);
+        .filter(|status| status.profile_id == profile_id)
+        .all(|status| status.state != RuntimeLifecycleState::Running));
 }
 
 #[tokio::test]

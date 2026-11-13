@@ -84,7 +84,7 @@ async fn serve_onnx_model_is_idempotent_for_loaded_session() {
     create_onnx_model_fixture(&state, &request.model_id);
 
     let operation = state.api.begin_serving_load(&request).unwrap();
-    let first = serve_onnx_model(&state, request.clone(), &operation)
+    let first = serve_onnx_model_inner(&state, request.clone(), &operation, Some(fake_host()))
         .await
         .unwrap();
     assert_eq!(first["loaded"], true);
@@ -101,7 +101,9 @@ async fn serve_onnx_model_is_idempotent_for_loaded_session() {
         .unwrap()
         .to_string();
 
-    let second = serve_onnx_model(&state, request, &operation).await.unwrap();
+    let second = serve_onnx_model_inner(&state, request, &operation, Some(fake_host()))
+        .await
+        .unwrap();
     assert_eq!(second["loaded"], true);
     assert_eq!(second["loaded_models_unchanged"], true);
     assert_eq!(
@@ -111,6 +113,49 @@ async fn serve_onnx_model_is_idempotent_for_loaded_session() {
         Some(first_cursor.as_str())
     );
     assert_eq!(state.onnx_session_manager.list().await.unwrap().len(), 1);
+}
+
+/// Any loopback endpoint: the fake backend keeps sessions itself.
+fn fake_host() -> OnnxHostEndpoint {
+    OnnxHostEndpoint::parse("http://127.0.0.1:9").unwrap()
+}
+
+#[tokio::test]
+async fn serving_without_an_installed_onnx_runtime_is_refused_with_the_reason() {
+    let (_temp_dir, state) = serving_test_state().await;
+    let request = onnx_serving_request();
+    create_onnx_model_fixture(&state, &request.model_id);
+    state
+        .api
+        .upsert_runtime_profile(pumas_library::models::RuntimeProfileConfig {
+            profile_id: request.config.profile_id.clone(),
+            provider: RuntimeProviderId::OnnxRuntime,
+            provider_mode: pumas_library::models::RuntimeProviderMode::OnnxServe,
+            management_mode: pumas_library::models::RuntimeManagementMode::Managed,
+            name: "ONNX CPU".into(),
+            enabled: true,
+            endpoint_url: None,
+            port: None,
+            device: Default::default(),
+            scheduler: Default::default(),
+            runtime_version: None,
+        })
+        .await
+        .unwrap();
+
+    let operation = state.api.begin_serving_load(&request).unwrap();
+    let response = serve_onnx_model(&state, request, &operation).await.unwrap();
+
+    assert_eq!(response["loaded"], false);
+    let message = response
+        .pointer("/load_error/message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        message.contains("Version manager not initialized for ONNX Runtime"),
+        "{response}"
+    );
+    assert!(state.onnx_session_manager.list().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -164,4 +209,22 @@ async fn unserve_onnx_model_removes_stale_status_when_session_is_absent() {
         .snapshot
         .served_models
         .is_empty());
+}
+
+#[test]
+fn load_refusals_carry_pumas_reasons_but_not_backend_internals() {
+    let refused = OnnxRuntimeError::validation(
+        "graph",
+        "the graph takes `pixel_values`, which text models cannot supply",
+    );
+    assert_eq!(
+        onnx_load_failure_message(&refused),
+        "ONNX Runtime could not load the selected model: the graph takes `pixel_values`, which text models cannot supply"
+    );
+    let backend = OnnxRuntimeError {
+        code: OnnxRuntimeErrorCode::Backend,
+        field: None,
+        message: "ort internal: /tmp/xyz CUDA failure".into(),
+    };
+    assert!(!onnx_load_failure_message(&backend).contains("ort internal"));
 }

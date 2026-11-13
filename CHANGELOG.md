@@ -220,6 +220,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and a retry checks only the wheels it still has to download. A retry whose
   kept selection cannot be read or no longer applies replaces the earlier
   download the same way instead of failing on it.
+- A Hugging Face download whose GGUF declares a llama.cpp decision head
+  (`<arch>.decision.type`, as Kev does) is classified `decision` before it
+  downloads. The download preflight reads only the metadata headers of the
+  same files classification reads after download (top-level, non-projector
+  GGUFs, first shard of a split package) with bounded HTTP Range requests, so
+  a `config.json` or task tag no longer files it as `llm`. A header that breaks
+  the GGUF metadata bounds is logged with the reason and the download is
+  classified from repository metadata; for a pinned revision a failed header
+  read fails the plan instead of changing its model ID. Replays of durable
+  bound targets keep the category their model ID was recorded under, so
+  existing bindings such as Kev under `llm/` stay valid. GGUF identification
+  now reads every model key, rather than stopping after 100 keys.
+- Reclassifying the library while a download holds the library root defers
+  the affected models (`ReclassifyResult.deferred` and
+  `FfiReclassifyResult.deferred`, with the reason) instead of reporting
+  "Download library root is busy" as an error, and runs again once the
+  download releases the root.
 - A paused Hugging Face download that already published some regular
   (non-LFS) files can resume. Those files have no published SHA-256, and the
   resumed download refused them with "Existing selected file … has no verified

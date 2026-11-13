@@ -16,6 +16,7 @@ pub(crate) mod store;
 pub(crate) mod task_custody;
 mod workspace;
 
+pub(crate) use http::parse_content_range;
 pub use http::{AcquisitionHttpClient, HttpAttemptHost};
 pub use local::AcquisitionLocalSource;
 #[cfg(feature = "s3")]

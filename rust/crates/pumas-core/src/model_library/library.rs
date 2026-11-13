@@ -4972,6 +4972,20 @@ impl ModelLibrary {
                         result.changes.push((model_id, new_id));
                     }
                     Ok(None) => { /* unchanged */ }
+                    // A running download holds the library root. Its model is
+                    // classified from its files when the download finishes,
+                    // and any other model is retried by the next pass.
+                    Err(PumasError::DownloadRootBusy) => {
+                        tracing::info!(
+                            "Deferred reclassifying {}: a download holds the library root",
+                            model_id
+                        );
+                        result.deferred.push((
+                            model_id,
+                            "A download holds the library root; reclassified after it finishes"
+                                .to_string(),
+                        ));
+                    }
                     Err(e) => {
                         tracing::warn!("Failed to reclassify {}: {}", model_id, e);
                         result.errors.push((model_id, e.to_string()));
@@ -4981,9 +4995,10 @@ impl ModelLibrary {
         }
 
         tracing::info!(
-            "Reclassify complete: {}/{} reclassified, {} errors",
+            "Reclassify complete: {}/{} reclassified, {} deferred, {} errors",
             result.reclassified,
             result.total,
+            result.deferred.len(),
             result.errors.len()
         );
 
@@ -5767,6 +5782,10 @@ pub struct ReclassifyResult {
     pub changes: Vec<(String, String)>,
     /// List of (model_id, error_message) for models that failed.
     pub errors: Vec<(String, String)>,
+    /// List of (model_id, reason) for models left for a later pass, such as
+    /// while a download holds the library root.
+    #[serde(default)]
+    pub deferred: Vec<(String, String)>,
 }
 
 /// Report for duplicate repo_id cleanup pass.

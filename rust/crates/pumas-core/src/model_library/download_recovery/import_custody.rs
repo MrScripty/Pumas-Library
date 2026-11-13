@@ -404,6 +404,15 @@ impl DownloadRecoveryDestination {
     }
 }
 
+/// Root control documents are not payload. Neither is the staging sibling a
+/// concurrent atomic replacement of one of them briefly makes visible: it is
+/// never bound, and its transient presence must not fail payload proof.
+fn is_import_mutable_document_entry(name: &str) -> bool {
+    IMPORT_MUTABLE_DOCUMENTS.iter().any(|document| {
+        name == *document || crate::metadata::is_durable_staging_name(document, name)
+    })
+}
+
 fn observe_directory(
     directory: &Dir,
     relative: &Path,
@@ -417,7 +426,13 @@ fn observe_directory(
             .to_str()
             .ok_or_else(invalid_capability_path)?
             .replace(std::path::MAIN_SEPARATOR, "/");
-        let metadata = directory.symlink_metadata(&name)?;
+        let root_document = relative.as_os_str().is_empty()
+            && name.to_str().is_some_and(is_import_mutable_document_entry);
+        let metadata = match directory.symlink_metadata(&name) {
+            // A concurrent atomic replacement renamed its staging file away.
+            Err(error) if root_document && error.kind() == io::ErrorKind::NotFound => continue,
+            result => result?,
+        };
         if metadata.is_symlink() {
             return Err(invalid_capability_path().into());
         }
@@ -434,11 +449,7 @@ fn observe_directory(
                 }),
             );
         } else if metadata.is_file() {
-            if relative.as_os_str().is_empty()
-                && name
-                    .to_str()
-                    .is_some_and(|name| IMPORT_MUTABLE_DOCUMENTS.contains(&name))
-            {
+            if root_document {
                 continue;
             }
             let mut options = OpenOptions::new();
@@ -574,5 +585,46 @@ mod tests {
             std::fs::read(stage.display_path().join("component/sentinel")).unwrap(),
             b"preserve"
         );
+    }
+
+    #[test]
+    fn concurrent_document_staging_is_not_payload_but_other_entries_are() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = DownloadDestinationRoot::open(temp.path()).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let stage = root.create_import_stage().unwrap();
+        stage
+            .create_import_file("weights")
+            .unwrap()
+            .write_all(b"weights")
+            .unwrap();
+        let proof = stage.capture_import_payload(&["weights".into()]).unwrap();
+        let directory = stage.display_path().to_path_buf();
+        // An atomic replacement of a root document stages beside it.
+        let staging = format!("metadata.json.{}.0.tmp", uuid::Uuid::new_v4());
+        assert!(crate::metadata::is_durable_staging_name(
+            "metadata.json",
+            &staging
+        ));
+        std::fs::write(directory.join(&staging), b"{}").unwrap();
+        stage.verify_import_bindings(&proof).unwrap();
+        std::fs::remove_file(directory.join(&staging)).unwrap();
+        // Lookalikes, staging names of payload files, out-of-range attempts and
+        // staging-named directories are unbound entries that refuse the proof.
+        for name in [
+            "metadata.json.unbound.0.tmp".to_string(),
+            format!("weights.{}.0.tmp", uuid::Uuid::new_v4()),
+            format!("metadata.json.{}.256.tmp", uuid::Uuid::new_v4()),
+        ] {
+            std::fs::write(directory.join(&name), b"x").unwrap();
+            assert!(stage.verify_import_bindings(&proof).is_err(), "{name}");
+            std::fs::remove_file(directory.join(&name)).unwrap();
+        }
+        let staged_directory = directory.join(&staging);
+        std::fs::create_dir(&staged_directory).unwrap();
+        assert!(stage.verify_import_bindings(&proof).is_err());
+        std::fs::remove_dir(&staged_directory).unwrap();
+        stage.verify_import_bindings(&proof).unwrap();
+        stage.remove_import_stage_all().unwrap();
     }
 }

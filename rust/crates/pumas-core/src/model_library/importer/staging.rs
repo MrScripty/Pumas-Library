@@ -484,6 +484,11 @@ impl ModelImporter {
         if let Err(error) = self.import_boundary(ImportBoundary::DescendantsReleased, &stage) {
             return settle_released(&publication, &stage, error, spec, security_tier);
         }
+        // Publication indexes the model itself below. Like other owned moves,
+        // its destination must not reach the watcher as an external change,
+        // or reconciliation reclassifies the model concurrently with the
+        // importer's own finalization and its callers' first observations.
+        self.library.notify_owned_move_destination(&target_path);
         let publication_outcome = match stage.publish_model_directory_noreplace(&target) {
             Err(error) => return settle_released(&publication, &stage, error, spec, security_tier),
             Ok(outcome) => outcome,

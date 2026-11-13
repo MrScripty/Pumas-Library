@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   shares one raw device number and its library root is this library's own
   folder, the receipt adopts the library's stable volume; the file bindings
   and the SHA-256 rehash are still checked.
+- Torch installs on Windows no longer fail with "Could not install packages
+  due to an OSError: [Errno 22] Invalid argument" while pip installs numba.
+  Pumas gave pip and uv their temporary directory as a canonical `\\?\`
+  path, which Windows does not resolve `..` in, and wheels such as numba
+  install their scripts through `lib/python/../../bin`. Child processes now
+  get the ordinary form of the same path.
 
 ## [0.8.0] - 2026-11-13
 

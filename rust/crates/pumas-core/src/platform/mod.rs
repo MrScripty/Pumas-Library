@@ -36,7 +36,8 @@ pub(crate) mod store_lifetime;
 
 // Re-export commonly used items
 pub use paths::{
-    apps_dir, desktop_dir, platform_display_path, pumas_config_dir, registry_db_path, venv_python,
+    apps_dir, child_process_path, desktop_dir, platform_display_path, pumas_config_dir,
+    registry_db_path, venv_python,
 };
 pub use permissions::set_executable;
 pub use process::{

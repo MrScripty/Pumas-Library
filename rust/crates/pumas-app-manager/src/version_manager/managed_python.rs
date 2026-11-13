@@ -438,7 +438,7 @@ impl ManagedPythonProvider {
         command.env("UV_NO_SYSTEM_CONFIG", "1");
         command.env("UV_MANAGED_PYTHON", "1");
         command.env("UV_NO_MODIFY_PATH", "1");
-        let temporary = self.root.join("tmp");
+        let temporary = pumas_library::platform::child_process_path(&self.root.join("tmp"));
         command.env("TMPDIR", &temporary);
         command.env("TEMP", &temporary);
         command.env("TMP", &temporary);

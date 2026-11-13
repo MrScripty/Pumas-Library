@@ -193,6 +193,25 @@ pub fn platform_display_path(path: &Path) -> String {
     }
 }
 
+/// A path to hand a child process, for example as `TEMP`.
+///
+/// On Windows, `std::fs::canonicalize` returns verbatim (`\\?\`) paths. Tools
+/// such as pip join relative segments like `../../bin` onto their temporary
+/// directory, and a verbatim path does not resolve `..`, so those joins fail.
+/// The verbatim prefix is removed without any filesystem access; other
+/// platforms return the path unchanged.
+pub fn child_process_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        strip_windows_verbatim_prefix(path)
+    }
+
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
 #[cfg(windows)]
 fn normalize_windows_display_path(path: &Path) -> PathBuf {
     expand_windows_long_path(&strip_windows_verbatim_prefix(path))
@@ -325,6 +344,24 @@ mod tests {
                 std::path::PathBuf::from(display)
             );
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn child_process_paths_resolve_parent_segments_from_a_canonical_directory() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let canonical = std::fs::canonicalize(directory.path()).unwrap();
+        assert!(canonical.as_os_str().to_string_lossy().starts_with(r"\\?\"));
+        let child = super::child_process_path(&canonical);
+        assert!(!child.as_os_str().to_string_lossy().starts_with(r"\\?\"));
+        std::fs::create_dir_all(child.join("lib").join("python")).unwrap();
+        std::fs::create_dir(child.join("bin")).unwrap();
+        // pip writes wheel scripts through `<target>/lib/python/../../bin`.
+        std::fs::write(child.join(r"lib\python\..\..\bin\tool"), b"script").unwrap();
+        assert_eq!(
+            std::fs::read(child.join("bin").join("tool")).unwrap(),
+            b"script"
+        );
     }
 
     #[test]

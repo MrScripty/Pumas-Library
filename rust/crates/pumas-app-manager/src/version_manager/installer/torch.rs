@@ -2998,7 +2998,7 @@ impl VersionInstaller {
     ) -> Result<std::process::ExitStatus> {
         self.check_cancelled()?;
         if let Some(stage_lease) = &stage_lease {
-            let scratch = stage_lease.scratch_path()?;
+            let scratch = pumas_library::platform::child_process_path(&stage_lease.scratch_path()?);
             command
                 .env("TMPDIR", &scratch)
                 .env("TMP", &scratch)

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A copied import no longer reaches the file watcher as an external change,
+  so a background reclassification cannot race the import's own finalization.
+  Payload proof also ignores the brief staging sibling of an atomic
+  `metadata.json` replacement; any other unbound entry is still refused.
 - A copied import finished before stable volume identities, such as a GGUF
   reranker or audio model, can again be finished with "Verify and finish
   import" after a reboot renumbers its drive. Its receipt recorded a raw

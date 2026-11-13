@@ -234,6 +234,27 @@ impl DurablePublicationAdapter for PublicationSyncFault {
 
 struct OsDurablePublicationAdapter;
 
+/// Whether `name` is exactly a staging name the durable publisher creates
+/// beside `target` (`<target>.<uuid>.<attempt>.tmp`). A concurrent atomic
+/// replacement of `target` makes such a sibling briefly visible.
+pub(crate) fn is_durable_staging_name(target: &str, name: &str) -> bool {
+    let Some(rest) = name
+        .strip_prefix(target)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let Some((uuid, attempt)) = rest.split_once('.') else {
+        return false;
+    };
+    uuid.len() == 36
+        && Uuid::try_parse(uuid).is_ok()
+        && !attempt.is_empty()
+        && attempt.bytes().all(|byte| byte.is_ascii_digit())
+        && attempt.parse::<u8>().is_ok()
+}
+
 impl DurablePublicationAdapter for OsDurablePublicationAdapter {
     fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
         let mut name = target.to_os_string();

@@ -365,7 +365,7 @@
     },
     {
       "name": "flate2",
-      "version": "1.1.10"
+      "version": "1.1.11"
     },
     {
       "name": "fnv",
@@ -665,7 +665,7 @@
     },
     {
       "name": "lzma-rust2",
-      "version": "0.24.0"
+      "version": "0.25.0"
     },
     {
       "name": "lzma-sys",
@@ -933,15 +933,15 @@
     },
     {
       "name": "regex",
-      "version": "1.12.3"
+      "version": "1.13.1"
     },
     {
       "name": "regex-automata",
-      "version": "0.4.13"
+      "version": "0.4.18"
     },
     {
       "name": "regex-syntax",
-      "version": "0.8.8"
+      "version": "0.8.11"
     },
     {
       "name": "reqwest",
@@ -1117,7 +1117,7 @@
     },
     {
       "name": "tempfile",
-      "version": "3.25.0"
+      "version": "3.27.0"
     },
     {
       "name": "thiserror",
@@ -1269,7 +1269,7 @@
     },
     {
       "name": "uuid",
-      "version": "1.29.0"
+      "version": "1.29.2"
     },
     {
       "name": "vcpkg",
@@ -1425,7 +1425,7 @@
     },
     {
       "name": "zip",
-      "version": "9.4.0"
+      "version": "9.4.1"
     },
     {
       "name": "zmij",
@@ -2947,9 +2947,9 @@
     },
     {
       "name": "flate2",
-      "version": "1.1.10",
+      "version": "1.1.11",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/flate2/1.1.10/download",
+      "source": "https://crates.io/api/v1/crates/flate2/1.1.11/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -4166,9 +4166,9 @@
     },
     {
       "name": "lzma-rust2",
-      "version": "0.24.0",
+      "version": "0.25.0",
       "license_declared": "Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/lzma-rust2/0.24.0/download",
+      "source": "https://crates.io/api/v1/crates/lzma-rust2/0.25.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5309,9 +5309,9 @@
     },
     {
       "name": "regex",
-      "version": "1.12.3",
+      "version": "1.13.1",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/regex/1.12.3/download",
+      "source": "https://crates.io/api/v1/crates/regex/1.13.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5326,9 +5326,9 @@
     },
     {
       "name": "regex-automata",
-      "version": "0.4.13",
+      "version": "0.4.18",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/regex-automata/0.4.13/download",
+      "source": "https://crates.io/api/v1/crates/regex-automata/0.4.18/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5343,9 +5343,9 @@
     },
     {
       "name": "regex-syntax",
-      "version": "0.8.8",
+      "version": "0.8.11",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/regex-syntax/0.8.8/download",
+      "source": "https://crates.io/api/v1/crates/regex-syntax/0.8.11/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6075,9 +6075,9 @@
     },
     {
       "name": "tempfile",
-      "version": "3.25.0",
+      "version": "3.27.0",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/tempfile/3.25.0/download",
+      "source": "https://crates.io/api/v1/crates/tempfile/3.27.0/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6701,9 +6701,9 @@
     },
     {
       "name": "uuid",
-      "version": "1.29.0",
+      "version": "1.29.2",
       "license_declared": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/uuid/1.29.0/download",
+      "source": "https://crates.io/api/v1/crates/uuid/1.29.2/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7340,9 +7340,9 @@
     },
     {
       "name": "zip",
-      "version": "9.4.0",
+      "version": "9.4.1",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/zip/9.4.0/download",
+      "source": "https://crates.io/api/v1/crates/zip/9.4.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -8542,7 +8542,7 @@
     "electron/package.json": "3e902205adafb729cd89d4aaf4d30d47e1230d2a314f3e2419dcb0db5347d155",
     "frontend/package.json": "40efa0eda6eb46b604188b751f0b9c4045ce00d3a101329ea33098c2193f20b7",
     "pnpm-lock.yaml": "32aceb7112faace4a0beb1783fc7ed3c42a86015f86711fbe5f7672f242e8435",
-    "rust/Cargo.lock": "d925ca5065188c6b904be4ce5fb0ebdc9c3f86deb3e27bff968814f2c93eeef5",
+    "rust/Cargo.lock": "a62c8337fab4db0dbe264fffefac3d12989f4db37aa2e6fb5b81da44c34e4692",
     "rust/Cargo.toml": "00c0190be6071f0755fb649da835d7f2a5b1275bcccca3e4f7187137555eadb2",
     "rust/crates/pumas-app-manager/Cargo.toml": "6e6116d6f5396204cbb6abfed86f804ec4590e0a4935ea8ee9fe842a403a197a",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "f39cc48ba0350d63a65521adf5a53bd91e084ac1f6741b68a7a87b1142bfbdc4",
@@ -8556,5 +8556,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "d88fe3e73f1821d3eb2b4aac2c42862cccc2eebd7cefce21850d79cddd248861"
+  "notices_sha256": "e472d27424f0ef75a7c58f5a6a96e0532772d24f0e8c00fe7886f90891a6eda0"
 }

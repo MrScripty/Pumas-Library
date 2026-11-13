@@ -206,12 +206,13 @@ describe('TorchPanel shared version controls', () => {
       get_torch_runtime_options: vi.fn().mockResolvedValue({
         builds: ['cpu'], defaultBuild: 'auto', pythons: [],
         adapters: ['none'], defaultAdapter: 'none',
+        modalities: ['text', 'image', 'audio'], extras: [],
         verified: [], adapterRequirements: [],
       }),
       preview_torch_runtime: vi.fn().mockResolvedValue({
         status: 'ready', preview: {
           previewId: 'preview-1', expiresInSeconds: 300, tag: candidateTag, build: 'auto', python: 'auto',
-          adapter: 'none', qualification: 'unverified', artifacts: [],
+          adapter: 'none', extras: [], qualification: 'unverified', artifacts: [],
         },
       }),
       get_torch_runtime_probe: vi.fn().mockResolvedValue({

@@ -138,7 +138,8 @@ Electron installation, CUDA/MPS device use, or image adapters. The
 [cross-platform runtime plan](../docs/plans/torch-cross-platform-runtime-management/plan.md)
 retains those acceptance gates and the provider-attribution follow-up.
 The sidecar is embedded in the Pumas app,
-so no Pumas-hosted Torch release bundle is required. Adapter dependencies are
+so no Pumas-hosted Torch release bundle is required (see
+[Sidecar and runtime layout](#sidecar-and-runtime-layout)). Adapter dependencies are
 outside the core automatic install; an unavailable adapter affects its feature,
 not the installation of Torch itself.
 
@@ -154,8 +155,10 @@ Version rules:
   Installed versions stay inspectable offline.
 - Installing a version does not activate it. Selecting, setting the default,
   starting and stopping are separate explicit operations.
-- One Torch version serves at a time. Unload its models and stop the Torch
-  process before changing its runtime.
+- A runtime profile may pin an installed Torch version; otherwise it uses the
+  active one. Profiles pinned to different versions run side by side, each in
+  its own sidecar process. A running instance keeps its version until it is
+  restarted, and a version cannot be removed while an instance uses it.
 - Nunchaku is installed from its project's `1.2.0+torch2.9` wheel, which is
   built only for Torch 2.9.1, CUDA 13.0, CPython 3.12 and Linux x86_64, so the
   `nunchaku` adapter installs only there. Runtimes installed by the former
@@ -164,6 +167,46 @@ Version rules:
 
 Not yet supported: native NVFP4 encoder serving, LLaDA, image adapters outside
 Linux, and upgrading in place between two upstream Torch tags.
+
+## Sidecar and runtime layout
+
+An installed runtime (`torch-versions/<tag>/`) supplies only the interpreter
+environment (`venv/`), its packages and their records (`runtime.json`,
+`resolution.json`, the hash lock and pip reports, `probe-results.json`). The
+sidecar code always comes from the running Pumas:
+
+- Every file of this directory that the sidecar needs (the `*.py` modules,
+  `loaders/`, `resolve_runtime.py`, `probe_runtime.py`, `runtime_compat.py`)
+  and the project `LICENSE` are compiled into `pumas-rpc`
+  (`rust/crates/pumas-core/src/runtime_profiles/torch_sidecar.rs`). Desktop,
+  no-inference and headless distributions therefore all carry it without a
+  separate resource, and a source checkout runs whatever this directory
+  held when the backend was built.
+- Before an install or launch, Pumas writes those files once to
+  `launcher-data/torch-sidecar/<pumas version>-<content digest>/`. The
+  directory is published whole, never edited in place, compared with the
+  embedded bytes before each use (a changed, missing or extra file replaces it)
+  and directories of earlier builds are pruned. Upgrading Pumas therefore
+  changes the sidecar for every installed runtime with no reinstall.
+- Every Torch process runs `<runtime>/venv/.../python -B <sidecar>/serve.py`
+  with the runtime directory as its working directory. Install-time checks run
+  the resolver and `probe_runtime.py --runtime <runtime>` from the same
+  directory. No process writes bytecode or state next to the shared scripts,
+  so several Torch instances, of the same or different runtime versions, can
+  run from it at once. PID records stay where they were (the profile's
+  `runtime.pid`, or `torch.pid` in the runtime for the legacy Linux launch), and
+  process identity is the interpreter's executable, so it does not depend on
+  the script path.
+- Before every launch Pumas runs `runtime_compat.py` under the runtime's
+  interpreter (isolated, standard library only). It lists every package the
+  sidecar imports at startup with the oldest release its code works with
+  (floors, never pins). A runtime missing one, carrying an older release, or
+  using an interpreter older than 3.10 is refused with each reason; remove and
+  reinstall that version, or install another, to resolve current packages.
+
+Runtimes installed before this layout still hold their own copy of the sidecar
+files. Pumas no longer runs those copies; they are left in place, so an older
+Pumas can still use the runtime, and are removed with the runtime.
 
 ## Network Safety
 

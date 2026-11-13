@@ -10,8 +10,9 @@ use async_trait::async_trait;
 
 use super::{
     validate_dimensions, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingRequest,
-    OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    OnnxSessionState, OnnxSessionStatus, DEFAULT_FAKE_EMBEDDING_DIMENSIONS,
+    OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxLoadRequest, OnnxModelId, OnnxOperationLease,
+    OnnxRerankRequest, OnnxRerankResponse, OnnxRerankScore, OnnxRuntimeError, OnnxSessionState,
+    OnnxSessionStatus, OnnxSessionTask, DEFAULT_FAKE_EMBEDDING_DIMENSIONS,
 };
 
 #[derive(Debug, Default)]
@@ -39,6 +40,7 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
             state: OnnxSessionState::Loaded,
             // The fake reads no model config, so it declares no token limit.
             max_input_tokens: None,
+            task: request.options.task,
         };
         let mut sessions = self
             .sessions
@@ -91,6 +93,12 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
                 .cloned()
                 .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?
         };
+        if matches!(status.task, OnnxSessionTask::Rerank { .. }) {
+            return Err(OnnxRuntimeError::validation(
+                "model",
+                "this ONNX session is a cross-encoder; it scores rerank pairs, not embeddings",
+            ));
+        }
         let dimensions = request.dimensions.unwrap_or(status.embedding_dimensions);
         validate_dimensions(dimensions)?;
 
@@ -115,6 +123,59 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
         Ok(OnnxEmbeddingResponse {
             model: request.model_id.as_str().to_string(),
             data,
+            usage: OnnxEmbeddingUsage {
+                prompt_tokens,
+                total_tokens: prompt_tokens,
+            },
+        })
+    }
+
+    /// Deterministic scores: the share of the query's words each document
+    /// contains. Not a relevance model.
+    async fn rerank_leased(
+        &self,
+        request: OnnxRerankRequest,
+        admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        let _lease = lease;
+        let task = self
+            .sessions
+            .lock()
+            .map_err(|_| OnnxRuntimeError::backend("ONNX fake backend lock poisoned"))?
+            .get(&request.model_id)
+            .map(|status| status.task)
+            .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?;
+        if !matches!(task, OnnxSessionTask::Rerank { .. }) {
+            return Err(OnnxRuntimeError::validation(
+                "model",
+                "this ONNX session produces embeddings, not rerank scores",
+            ));
+        }
+        if let Some(marker) = admission {
+            marker.store(true, Ordering::Release);
+        }
+        let words: Vec<&str> = request.query.split_whitespace().collect();
+        let mut prompt_tokens = 0usize;
+        let results = request
+            .documents
+            .iter()
+            .enumerate()
+            .map(|(index, document)| {
+                prompt_tokens += fake_token_count(&request.query) + fake_token_count(document);
+                let hits = words
+                    .iter()
+                    .filter(|word| document.contains(**word))
+                    .count();
+                OnnxRerankScore {
+                    index,
+                    relevance_score: hits as f32 / words.len().max(1) as f32,
+                }
+            })
+            .collect();
+        Ok(OnnxRerankResponse {
+            model: request.model_id.as_str().to_string(),
+            results,
             usage: OnnxEmbeddingUsage {
                 prompt_tokens,
                 total_tokens: prompt_tokens,

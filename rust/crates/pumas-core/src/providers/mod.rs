@@ -75,6 +75,8 @@ pub enum ProviderBinaryLaunchTarget {
     OllamaServe,
     LlamaCppRouter,
     LlamaCppDedicated,
+    /// The ONNX host process (`pumas-rpc --onnx-host`) of an ONNX Runtime profile.
+    OnnxHost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -290,25 +292,30 @@ impl ProviderBehavior {
         Self {
             provider: RuntimeProviderId::OnnxRuntime,
             provider_modes: vec![RuntimeProviderMode::OnnxServe],
-            device_modes: vec![RuntimeDeviceMode::Auto, RuntimeDeviceMode::Cpu],
+            device_modes: vec![
+                RuntimeDeviceMode::Auto,
+                RuntimeDeviceMode::Cpu,
+                RuntimeDeviceMode::Gpu,
+            ],
             local_artifact_formats: vec![ExecutableArtifactFormat::Onnx],
-            serving_tasks: vec![ServingTask::Embedding],
+            serving_tasks: vec![ServingTask::Embedding, ServingTask::Reranking],
             openai_endpoints: vec![
                 OpenAiGatewayEndpoint::Models,
                 OpenAiGatewayEndpoint::Embeddings,
+                OpenAiGatewayEndpoint::Rerank,
             ],
-            launch_kinds: vec![ProviderLaunchKind::InProcessRuntime],
+            launch_kinds: vec![ProviderLaunchKind::BinaryProcess],
             managed_launch_strategies: vec![ProviderManagedLaunchStrategy {
                 provider_mode: RuntimeProviderMode::OnnxServe,
-                target: ProviderManagedLaunchTarget::InProcessRuntime(
-                    ProviderInProcessRuntimeTarget::OnnxRuntime,
+                target: ProviderManagedLaunchTarget::BinaryProcess(
+                    ProviderBinaryLaunchTarget::OnnxHost,
                 ),
             }],
             managed_runtime_app_id: "onnx-runtime".to_string(),
-            managed_runtime_uninitialized_message: "ONNX Runtime session manager not initialized"
-                .to_string(),
+            managed_runtime_uninitialized_message:
+                "Version manager not initialized for ONNX Runtime".to_string(),
             managed_runtime_no_active_version_message:
-                "ONNX Runtime is provided by the Pumas Rust runtime".to_string(),
+                "No ONNX Runtime version is installed and active; install one from the ONNX Runtime versions".to_string(),
             managed_runtime_path_segment: "onnx-runtime".to_string(),
             managed_runtime_base_port: 19_080,
             provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
@@ -331,10 +338,16 @@ impl ProviderBehavior {
             provider_modes: vec![RuntimeProviderMode::TorchServe],
             device_modes: vec![RuntimeDeviceMode::Gpu, RuntimeDeviceMode::Hybrid],
             local_artifact_formats: vec![ExecutableArtifactFormat::Safetensors],
-            serving_tasks: vec![ServingTask::ImageGeneration],
+            serving_tasks: vec![
+                ServingTask::ImageGeneration,
+                ServingTask::Embedding,
+                ServingTask::Reranking,
+            ],
             openai_endpoints: vec![
                 OpenAiGatewayEndpoint::Models,
                 OpenAiGatewayEndpoint::ImagesGenerations,
+                OpenAiGatewayEndpoint::Embeddings,
+                OpenAiGatewayEndpoint::Rerank,
             ],
             launch_kinds: vec![ProviderLaunchKind::BinaryProcess],
             managed_launch_strategies: vec![ProviderManagedLaunchStrategy {
@@ -584,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn onnx_runtime_behavior_declares_embedding_only_in_process_surface() {
+    fn onnx_runtime_behavior_declares_an_embedding_host_process_surface() {
         let registry = ProviderRegistry::builtin();
         let behavior = registry.get(RuntimeProviderId::OnnxRuntime).unwrap();
 
@@ -594,13 +607,15 @@ mod tests {
         assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::Models));
         assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::Embeddings));
         assert!(!behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::ChatCompletions));
-        assert!(behavior.supports_launch_kind(ProviderLaunchKind::InProcessRuntime));
+        assert!(behavior.supports_launch_kind(ProviderLaunchKind::BinaryProcess));
+        assert!(!behavior.supports_launch_kind(ProviderLaunchKind::InProcessRuntime));
         assert_eq!(
             behavior.managed_launch_target(RuntimeProviderMode::OnnxServe),
-            Some(ProviderManagedLaunchTarget::InProcessRuntime(
-                ProviderInProcessRuntimeTarget::OnnxRuntime
+            Some(ProviderManagedLaunchTarget::BinaryProcess(
+                ProviderBinaryLaunchTarget::OnnxHost
             ))
         );
+        assert!(behavior.device_modes.contains(&RuntimeDeviceMode::Gpu));
         assert_eq!(
             behavior.serving_adapter_kind,
             ProviderServingAdapterKind::OnnxRuntime

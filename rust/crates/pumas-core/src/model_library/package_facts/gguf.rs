@@ -133,6 +133,144 @@ fn read_gguf_serving_facts<R: Read + Seek>(reader: &mut R) -> Result<GgufServing
     Ok(facts)
 }
 
+/// A file name that can carry a package's decision-head evidence: a GGUF
+/// that is not a projector (`mmproj`) and, for a split package
+/// (`name-00002-of-00003.gguf`), its first shard, which holds the model keys.
+/// The download preflight and classification after download read the same
+/// set: top-level files with such a name.
+pub(crate) fn is_primary_gguf_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    let Some(stem) = lower.strip_suffix(".gguf") else {
+        return false;
+    };
+    if lower.contains("mmproj") {
+        return false;
+    }
+    match stem
+        .rsplit_once("-of-")
+        .and_then(|(head, _)| head.rsplit_once('-'))
+    {
+        Some((_, index)) if index.len() == 5 && index.bytes().all(|b| b.is_ascii_digit()) => {
+            index == "00001"
+        }
+        _ => true,
+    }
+}
+
+/// A GGUF header with string-valued keys, as llama.cpp writes them, followed
+/// by `tail` zero bytes standing in for the rest of the file.
+#[cfg(test)]
+pub(crate) fn test_gguf_with_string_keys(keys: &[(&str, &str)], tail: usize) -> Vec<u8> {
+    let mut bytes = GGUF_MAGIC.to_vec();
+    bytes.extend_from_slice(&3_u32.to_le_bytes());
+    bytes.extend_from_slice(&0_u64.to_le_bytes());
+    bytes.extend_from_slice(&(keys.len() as u64).to_le_bytes());
+    for (key, value) in keys {
+        bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(key.as_bytes());
+        bytes.extend_from_slice(&8_u32.to_le_bytes());
+        bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(value.as_bytes());
+    }
+    bytes.resize(bytes.len() + tail, 0);
+    bytes
+}
+
+/// Bytes a decision-head read may need: the header and the bounded metadata
+/// section. A remote header read never buffers more than this.
+pub(crate) const MAX_GGUF_METADATA_PREFIX_BYTES: u64 = GGUF_HEADER_LEN + MAX_METADATA_BYTES;
+
+/// What a GGUF's model keys show about a llama.cpp decision head
+/// (`<arch>.decision.type`, which precedes the tokenizer keys).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GgufDecisionHeadProbe {
+    /// The model keys were read to their end (the first `tokenizer.*` key, or
+    /// the declared key count).
+    Declared(bool),
+    /// The bytes end before the model keys do.
+    NeedMore,
+    /// Not a GGUF, or its metadata breaks a bound; the reason says which.
+    Unreadable(String),
+}
+
+/// Whether the GGUF at `path` declares a decision head. `None` when it is not
+/// a readable GGUF. Classification after download uses this; the download
+/// preflight reads the same keys from a remote header prefix.
+pub(crate) fn gguf_declares_decision_head(path: &Path) -> Option<bool> {
+    let mut file = File::open(path).ok()?;
+    read_gguf_decision_head(&mut file).ok()
+}
+
+/// Read the decision-head evidence from the first bytes of a GGUF.
+/// `complete_file` says the prefix is the whole file, so running out of bytes
+/// is a malformed file rather than a reason to read further.
+pub(crate) fn probe_gguf_decision_head(
+    prefix: &[u8],
+    complete_file: bool,
+) -> GgufDecisionHeadProbe {
+    let mut reader = PrefixReader {
+        inner: std::io::Cursor::new(prefix),
+        ran_out: false,
+    };
+    match read_gguf_decision_head(&mut reader) {
+        Ok(declared) => GgufDecisionHeadProbe::Declared(declared),
+        Err(_) if reader.ran_out && !complete_file => GgufDecisionHeadProbe::NeedMore,
+        Err(error) => GgufDecisionHeadProbe::Unreadable(error.to_string()),
+    }
+}
+
+fn read_gguf_decision_head<R: Read + Seek>(reader: &mut R) -> Result<bool> {
+    let mut cursor = BoundedGgufReader::new(reader);
+    let header = cursor.read_array::<24>()?;
+    if &header[..4] != GGUF_MAGIC {
+        return Err(PumasError::Other("not a GGUF file".into()));
+    }
+    let metadata_kv_count = u64::from_le_bytes(header[16..24].try_into().unwrap());
+    if metadata_kv_count > MAX_METADATA_KV_COUNT {
+        return Err(PumasError::Other(format!(
+            "GGUF key count {metadata_kv_count} exceeds bounded limit {MAX_METADATA_KV_COUNT}"
+        )));
+    }
+    for _ in 0..metadata_kv_count {
+        let key = cursor.read_string()?;
+        // Model keys precede the (large) tokenizer arrays.
+        if key.starts_with("tokenizer.") {
+            return Ok(false);
+        }
+        if key.ends_with(".decision.type") {
+            return Ok(true);
+        }
+        let value_type = cursor.read_u32()?;
+        read_value(&mut cursor, value_type)?;
+    }
+    Ok(false)
+}
+
+/// A byte prefix that records whether a read or seek ran past its end.
+struct PrefixReader<'a> {
+    inner: std::io::Cursor<&'a [u8]>,
+    ran_out: bool,
+}
+
+impl Read for PrefixReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        if read < buf.len() {
+            self.ran_out = true;
+        }
+        Ok(read)
+    }
+}
+
+impl Seek for PrefixReader<'_> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        let offset = self.inner.seek(position)?;
+        if offset > self.inner.get_ref().len() as u64 {
+            self.ran_out = true;
+        }
+        Ok(offset)
+    }
+}
 pub(crate) fn invalid_gguf_package_evidence(companion_artifacts: &[String]) -> GgufPackageEvidence {
     GgufPackageEvidence {
         status: PackageFactStatus::Invalid,

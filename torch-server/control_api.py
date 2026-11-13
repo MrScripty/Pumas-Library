@@ -39,7 +39,10 @@ SupportedModelType = Literal[
     "cohere-asr",
     "nunchaku-z-image-turbo",
     "flux2-klein-9b-kv-fp8",
+    "text-embedding",
+    "text-rerank",
 ]
+TEXT_ENCODER_MODEL_TYPES = ("text-embedding", "text-rerank")
 
 
 def failure(status: int, code: str, message: str) -> HTTPException:
@@ -69,6 +72,8 @@ class LoadModelRequest(BaseModel):
     model_type: Optional[SupportedModelType] = None
     pipeline_path: Optional[str] = None
     vae_path: Optional[str] = None
+    # Pumas' validated sentence-transformers declarations (text encoders only).
+    declarations: Optional[dict] = None
 
     @field_validator("model_path")
     @classmethod
@@ -93,6 +98,8 @@ class LoadModelRequest(BaseModel):
             )
         if self.vae_path is not None and self.model_type != FLUX2_KLEIN:
             raise ValueError(f"vae_path requires model_type {FLUX2_KLEIN}")
+        if self.declarations is not None and self.model_type not in TEXT_ENCODER_MODEL_TYPES:
+            raise ValueError("declarations require model_type text-embedding or text-rerank")
         return self
 
     @field_validator("model_name")
@@ -161,6 +168,8 @@ async def load_model(req: LoadModelRequest, request: Request):
         options = {"pipeline_path": req.pipeline_path} if req.pipeline_path is not None else {}
         if req.vae_path is not None:
             options["vae_path"] = req.vae_path
+        if req.declarations is not None:
+            options["declarations"] = req.declarations
         load = asyncio.create_task(
             manager.load(
                 model_path=req.model_path,

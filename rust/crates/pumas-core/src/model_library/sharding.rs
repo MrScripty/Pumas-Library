@@ -376,7 +376,7 @@ const WEIGHT_EXTENSIONS: &[&str] = &[
 ];
 
 /// Returns true if the filename has a weight-file extension.
-fn is_weight_file(filename: &str) -> bool {
+pub(crate) fn is_weight_file(filename: &str) -> bool {
     let lower = filename.to_lowercase();
     WEIGHT_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
 }

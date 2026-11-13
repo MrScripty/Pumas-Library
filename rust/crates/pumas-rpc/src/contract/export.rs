@@ -329,6 +329,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
                     quant: "Q4_K_M".into(),
                     size_bytes: Some(42),
                     file_group: None,
+                    companion_size_bytes: None,
                 },
                 pumas_library::models::DownloadOption {
                     quant: "Original precision".into(),
@@ -341,6 +342,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
                         shard_count: 2,
                         label: "nested/model.safetensors".into(),
                     }),
+                    companion_size_bytes: None,
                 },
             ],
         },
@@ -541,6 +543,13 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         fixtures[key] = value.clone();
     }
     for (key, value) in super::torch_runtime_fixtures()?
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        fixtures[key] = value.clone();
+    }
+    for (key, value) in super::runtime_provider_fixtures()?
         .as_object()
         .into_iter()
         .flatten()
@@ -827,6 +836,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         StatusTelemetryUpdateNotification,
         ModelDownloadUpdateOutcome,
         ModelsOutcome,
+        FinishRetainedImportOutcome,
         ModelLookupParams,
         ModelLookupOutcome,
         CatalogSearchOutcome,
@@ -900,6 +910,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         TorchTrialHealthStatus,
         TorchTrialCleanup,
         TorchRuntimeOptionsOutcome,
+        RuntimeProvidersOutcome,
         TorchPythonChoice,
         TorchVerifiedRuntime,
         TorchVerifiedPackage,
@@ -986,6 +997,7 @@ fn pull_snapshot_fixtures() -> anyhow::Result<Value> {
                 pid: Some(4242),
                 log_path: Some("/fixture/logs/ollama.log".into()),
                 last_error: Some("fixture error".into()),
+                runtime_version: None,
             }],
             profiles: vec![profile.clone(), llama],
             ..RuntimeProfilesSnapshot::empty()
@@ -1041,6 +1053,7 @@ fn pull_snapshot_fixtures() -> anyhow::Result<Value> {
                 shard_count: 1,
                 label: "model-Q4_K_M.gguf".into(),
             }),
+            companion_size_bytes: None,
         }],
         url: "https://huggingface.co/example/model".into(),
         release_date: Some("2026-01-01T00:00:00Z".into()),
@@ -1545,7 +1558,9 @@ fn refine_named(name: &str, schema: &mut Value) {
                 "totalSize",
                 "archiveSize",
                 "dependenciesSize",
-                "installing"
+                "installing",
+                "unavailableReason",
+                "installAvailability"
             ]),
         );
     }
@@ -1881,6 +1896,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "CheckVersionDependenciesOutcome"
             | "InstallVersionStarted"
             | "ModelsOutcome"
+            | "FinishRetainedImportOutcome"
             | "CatalogSearchOutcome"
             | "DownloadListOutcome"
             | "DownloadStartedSuccess"
@@ -1897,7 +1913,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "ModelCategoryOutcome"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"
-            | "ModelIndexRefreshOutcome" => Some(true),
+            | "ModelIndexRefreshOutcome"
+            | "RuntimeProvidersOutcome" => Some(true),
             "InstallVersionFailed"
             | "DownloadStartedFailure"
             | "DownloadStatusMissingOutcome"

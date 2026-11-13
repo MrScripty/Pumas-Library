@@ -1037,6 +1037,31 @@ fn source_task_preserves_classification_semantics_instead_of_only_modalities() {
     );
 }
 
+#[test]
+fn a_classification_tagged_reranker_reranks_but_a_classifier_does_not() {
+    let task = Some("text-classification");
+    for provider in [RuntimeProviderId::LlamaCpp, RuntimeProviderId::OnnxRuntime] {
+        assert_eq!(
+            semantic_match(Capability::Rerank, task, Some("reranker"), provider),
+            Some(true)
+        );
+        assert_eq!(
+            semantic_match(Capability::Rerank, task, Some("decision"), provider),
+            Some(false)
+        );
+    }
+    // An ONNX reranker without a task tag is not offered as an embedder.
+    assert_eq!(
+        semantic_match(
+            Capability::TextEmbedding,
+            None,
+            Some("reranker"),
+            RuntimeProviderId::OnnxRuntime
+        ),
+        Some(false)
+    );
+}
+
 // Synthetic session only: no ONNX runtime or model inference is performed.
 async fn controlled_embedding_state() -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();

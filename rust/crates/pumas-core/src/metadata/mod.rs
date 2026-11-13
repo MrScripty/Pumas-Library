@@ -8,6 +8,7 @@
 mod atomic;
 mod manager;
 
+pub(crate) use atomic::is_durable_staging_name;
 pub use atomic::{atomic_read_json, atomic_write_json};
 pub(crate) use atomic::{
     AtomicJsonTarget, AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind,

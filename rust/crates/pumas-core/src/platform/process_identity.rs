@@ -27,6 +27,8 @@ const IDENTITY_SCHEMA: u32 = 1;
 
 /// The suffix appended to a PID file path to name its identity sidecar.
 pub const IDENTITY_SUFFIX: &str = ".identity";
+/// Suffix of the sidecar naming the runtime version a PID file's process runs.
+pub const RUNTIME_VERSION_SUFFIX: &str = ".version";
 
 /// What a recorded start time is measured in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,9 +192,37 @@ pub fn read_record(pid_file: &Path) -> io::Result<Option<PidRecord>> {
     Ok(Some(PidRecord::Verified(identity)))
 }
 
-/// Remove a PID file and its identity sidecar. Missing files are not errors.
+/// The sidecar path that names the installed runtime version a PID file's
+/// process was launched from.
+pub fn runtime_version_path(pid_file: &Path) -> PathBuf {
+    let mut name = pid_file.as_os_str().to_owned();
+    name.push(RUNTIME_VERSION_SUFFIX);
+    PathBuf::from(name)
+}
+
+/// Record which installed runtime version the process behind `pid_file` runs.
+/// The version manager reads it to refuse removing a version still in use.
+pub fn write_runtime_version(pid_file: &Path, version: &str) -> io::Result<()> {
+    std::fs::write(runtime_version_path(pid_file), version)
+}
+
+/// The installed runtime version recorded for `pid_file`, if any.
+pub fn read_runtime_version(pid_file: &Path) -> io::Result<Option<String>> {
+    match std::fs::read_to_string(runtime_version_path(pid_file)) {
+        Ok(version) => Ok(Some(version.trim().to_string())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Remove a PID file and its identity and runtime-version sidecars. Missing
+/// files are not errors.
 pub fn remove_record(pid_file: &Path) -> io::Result<()> {
-    for path in [identity_path(pid_file), pid_file.to_path_buf()] {
+    for path in [
+        identity_path(pid_file),
+        runtime_version_path(pid_file),
+        pid_file.to_path_buf(),
+    ] {
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}

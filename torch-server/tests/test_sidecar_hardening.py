@@ -490,6 +490,32 @@ class TextWeightFormatTests(unittest.TestCase):
             (Path(root) / "model.safetensors").write_bytes(b"")
             _require_safetensors_weights(Path(root))
 
+    def test_auto_map_code_that_pumas_will_not_run_is_named_in_the_refusal(self):
+        from loaders import _refuse_unexecuted_custom_code
+
+        transformers = types.ModuleType("transformers")
+        transformers.CONFIG_MAPPING = {"llama": object()}
+        auto_map = {
+            "AutoConfig": "configuration_trado.TradoConfig",
+            "AutoModelForCausalLM": "modeling_trado.TradoForCausalLM",
+        }
+        with (
+            tempfile.TemporaryDirectory() as root,
+            patch.dict(sys.modules, {"transformers": transformers}),
+        ):
+            config = Path(root) / "config.json"
+            config.write_text(json.dumps({"model_type": "trado", "auto_map": auto_map}))
+            with self.assertRaisesRegex(
+                validation.ModelLoadRefusal,
+                r"configuration_trado\.py, modeling_trado\.py.*never executes",
+            ):
+                _refuse_unexecuted_custom_code(Path(root))
+            # A natively implemented architecture loads without its auto_map code.
+            config.write_text(json.dumps({"model_type": "llama", "auto_map": auto_map}))
+            _refuse_unexecuted_custom_code(Path(root))
+            config.write_text(json.dumps({"model_type": "trado"}))
+            _refuse_unexecuted_custom_code(Path(root))
+
 
 @unittest.skipUnless(hasattr(psutil, "Process"), "requires psutil process inspection")
 class ParentWatchdogTests(unittest.TestCase):

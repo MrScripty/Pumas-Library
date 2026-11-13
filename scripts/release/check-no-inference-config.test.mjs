@@ -50,7 +50,11 @@ test('no-inference packaging config matches the artifact plan', () => {
   );
   assert.deepEqual(config.extraResources.find(resource => resource.from === 'resources/bin').filter,
     ['pumas-rpc', 'pumas-rpc.exe']);
+  // No runtime is packaged: Pumas installs ONNX Runtime, llama.cpp and Torch
+  // through its version manager. The backend binary is the only native resource.
   const full = base.extraResources.find(resource => resource.from === 'resources/bin').filter;
-  assert.ok(full.includes('ONNX-LICENSE.txt'));
-  assert.ok(full.includes('ONNX-NOTICES.txt'));
+  assert.deepEqual(full, ['pumas-rpc', 'pumas-rpc.exe']);
+  for (const resource of [...base.extraResources, ...config.extraResources]) {
+    assert.doesNotMatch(JSON.stringify(resource), /onnxruntime|llama|ggml|torch/i);
+  }
 });

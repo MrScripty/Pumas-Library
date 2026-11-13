@@ -28,6 +28,7 @@ from contextlib import AsyncExitStack
 import torch
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from validation import MODEL_NAME_MAX_LENGTH
 
 from diffusion import GenerationCancelled
 
@@ -40,7 +41,7 @@ MAX_PNG_BYTES = 8 * 1024 * 1024
 
 class ImageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    model_id: str = Field(min_length=1, max_length=256)
+    model_id: str = Field(min_length=1, max_length=MODEL_NAME_MAX_LENGTH)
     prompt: str = Field(min_length=1, max_length=4000)
     width: int = Field(gt=0)
     height: int = Field(gt=0)

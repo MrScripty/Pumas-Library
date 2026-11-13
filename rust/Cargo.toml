@@ -65,6 +65,8 @@ zstd = "0.13"
 
 # Hashing
 sha2 = "0.10"
+# Git blob ids: the Hub's published content hash for non-LFS files.
+sha1 = "0.11"
 blake3 = "1"
 hex = "0.4"
 

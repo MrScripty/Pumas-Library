@@ -17,7 +17,15 @@ logger = logging.getLogger(__name__)
 EXPECTED_LOAD_ERRORS = (OSError, RuntimeError, ValueError, KeyError)
 EXPECTED_UNLOAD_ERRORS = (OSError, RuntimeError, AttributeError)
 # Loader-detected types that are not causal text generators.
-NON_TEXT_MODEL_TYPES = frozenset({"cohere-asr", "nunchaku-z-image-turbo", "flux2-klein-9b-kv-fp8"})
+NON_TEXT_MODEL_TYPES = frozenset(
+    {
+        "cohere-asr",
+        "nunchaku-z-image-turbo",
+        "flux2-klein-9b-kv-fp8",
+        "text-embedding",
+        "text-rerank",
+    }
+)
 
 
 class SlotConflict(RuntimeError):
@@ -117,6 +125,7 @@ class ModelManager:
         model_type: Optional[str] = None,
         pipeline_path: Optional[str] = None,
         vae_path: Optional[str] = None,
+        declarations: Optional[dict] = None,
     ) -> ModelSlot:
         """Load and publish a slot while retaining device custody through cancellation.
 
@@ -167,7 +176,7 @@ class ModelManager:
                         )
                     else:
                         worker = asyncio.create_task(
-                            self._load_model(model_path, resolved_device, model_type)
+                            self._load_model(model_path, resolved_device, model_type, declarations)
                         )
                     loaded = await asyncio.shield(worker)
                     # Every loader retains the device until READY is published,
@@ -338,13 +347,35 @@ class ModelManager:
         async with lock:
             yield slot._loaded
 
+    @asynccontextmanager
+    async def text_encoder_lease(self, model_name: str, kind: str):
+        """Hold the slot's device lease for one embedding or rerank request.
+
+        Queued work is refused rather than waited for, matching image_lease.
+        """
+        slot = next((s for s in self.slots.values() if s.model_name == model_name), None)
+        if slot is None or slot.state != SlotState.READY or slot._loaded is None:
+            raise KeyError(model_name)
+        if slot.model_type != kind:
+            operation = "embeddings" if kind == "text-embedding" else "rerank scores"
+            raise ValueError(f"Selected model does not produce {operation}")
+        lock = self._get_device_lock(slot.device)
+        if lock.locked():
+            raise SlotConflict("runtime_busy", "Text runtime is busy")
+        async with lock:
+            yield slot._loaded
+
     def _load_sync(
-        self, model_path: str, device: torch.device, model_type: Optional[str]
+        self,
+        model_path: str,
+        device: torch.device,
+        model_type: Optional[str],
+        declarations: Optional[dict] = None,
     ) -> LoadedModel:
         """Synchronous model loading (runs in executor)."""
         from loaders import load_model
 
-        model, tokenizer, detected_type = load_model(model_path, device, model_type)
+        model, tokenizer, detected_type = load_model(model_path, device, model_type, declarations)
         return LoadedModel(
             model=model,
             tokenizer=tokenizer,
@@ -353,11 +384,15 @@ class ModelManager:
         )
 
     async def _load_model(
-        self, model_path: str, device: torch.device, model_type: Optional[str]
+        self,
+        model_path: str,
+        device: torch.device,
+        model_type: Optional[str],
+        declarations: Optional[dict] = None,
     ) -> LoadedModel:
         """Load a model without blocking the event loop."""
         return await asyncio.get_event_loop().run_in_executor(
-            None, self._load_sync, model_path, device, model_type
+            None, self._load_sync, model_path, device, model_type, declarations
         )
 
     async def unload(self, slot_id: str) -> None:

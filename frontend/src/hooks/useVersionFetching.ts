@@ -11,6 +11,7 @@ import type { VersionRelease, VersionStatus, CacheStatus } from '../types/versio
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 import { useAvailableVersionState } from './useAvailableVersionState';
+import { useCurrentAppGuard } from './useCurrentAppGuard';
 
 const logger = getLogger('useVersionFetching');
 
@@ -55,6 +56,7 @@ export function useVersionFetching({
   const [defaultVersion, setDefaultVersionState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isCurrentApp = useCurrentAppGuard(resolvedAppId);
   const {
     availableVersions,
     cacheStatus,
@@ -87,8 +89,10 @@ export function useVersionFetching({
 
     try {
       const result = await api.get_installed_versions(resolvedAppId);
+      if (!isCurrentApp(resolvedAppId)) return;
       setInstalledVersions([...result.versions]);
     } catch (error) {
+      if (!isCurrentApp(resolvedAppId)) return;
       if (error instanceof APIError) {
         logger.error('API error fetching installed versions', { error: error.message, endpoint: error.endpoint });
         setError(error.message);
@@ -100,7 +104,7 @@ export function useVersionFetching({
         setError(String(error));
       }
     }
-  }, [isEnabled, resolvedAppId]);
+  }, [isCurrentApp, isEnabled, resolvedAppId]);
 
   // Fetch active version
   const fetchActiveVersion = useCallback(async () => {
@@ -110,8 +114,10 @@ export function useVersionFetching({
 
     try {
       const result = await api.get_active_version(resolvedAppId);
+      if (!isCurrentApp(resolvedAppId)) return;
       setActiveVersion(result.version === '' ? null : result.version);
     } catch (error) {
+      if (!isCurrentApp(resolvedAppId)) return;
       if (error instanceof APIError) {
         logger.error('API error fetching active version', { error: error.message, endpoint: error.endpoint });
         setError(error.message);
@@ -123,7 +129,7 @@ export function useVersionFetching({
         setError(String(error));
       }
     }
-  }, [isEnabled, resolvedAppId]);
+  }, [isCurrentApp, isEnabled, resolvedAppId]);
 
   // Fetch default version
   const fetchDefaultVersion = useCallback(async () => {
@@ -133,6 +139,7 @@ export function useVersionFetching({
 
     try {
       const result = await api.get_default_version(resolvedAppId);
+      if (!isCurrentApp(resolvedAppId)) return;
       setDefaultVersionState(result.version === '' ? null : result.version);
     } catch (error) {
       // non-fatal - log but don't set error state
@@ -144,7 +151,7 @@ export function useVersionFetching({
         logger.warn('Unknown error fetching default version', { error });
       }
     }
-  }, [isEnabled, resolvedAppId]);
+  }, [isCurrentApp, isEnabled, resolvedAppId]);
 
   // Fetch comprehensive version status
   const fetchVersionStatus = useCallback(async () => {
@@ -154,9 +161,11 @@ export function useVersionFetching({
 
     try {
       const result = await api.get_version_status(resolvedAppId);
+      if (!isCurrentApp(resolvedAppId)) return;
       setVersionStatus(result.status);
       setDefaultVersionState(result.status.defaultVersion || null);
     } catch (error) {
+      if (!isCurrentApp(resolvedAppId)) return;
       if (error instanceof APIError) {
         logger.error('API error fetching version status', { error: error.message, endpoint: error.endpoint });
         setError(error.message);
@@ -168,7 +177,7 @@ export function useVersionFetching({
         setError(String(error));
       }
     }
-  }, [isEnabled, resolvedAppId]);
+  }, [isCurrentApp, isEnabled, resolvedAppId]);
 
   // Set default version
   const setDefaultVersion = useCallback(async (tag: string | null) => {
@@ -178,6 +187,7 @@ export function useVersionFetching({
 
     try {
       const result = await api.set_default_version(tag, resolvedAppId);
+      if (!isCurrentApp(resolvedAppId)) return;
       if (result.success) {
         setDefaultVersionState(tag);
         await fetchVersionStatus();
@@ -185,6 +195,7 @@ export function useVersionFetching({
         throw new APIError('Failed to set default version', 'set_default_version');
       }
     } catch (error) {
+      if (!isCurrentApp(resolvedAppId)) throw error;
       if (error instanceof APIError) {
         logger.error('API error setting default version', { error: error.message, endpoint: error.endpoint, tag });
         setError(error.message);
@@ -197,7 +208,7 @@ export function useVersionFetching({
       }
       throw error;
     }
-  }, [fetchVersionStatus, isEnabled, resolvedAppId]);
+  }, [fetchVersionStatus, isCurrentApp, isEnabled, resolvedAppId]);
 
   // Refresh all version data
   const refreshAll = useCallback(async (forceRefresh: boolean = false) => {
@@ -217,6 +228,7 @@ export function useVersionFetching({
       if (trackAvailableVersions) {
         requests.push(
           fetchAvailableVersions(forceRefresh).catch((fetchError: unknown) => {
+            if (!isCurrentApp(resolvedAppId)) return;
             if (fetchError instanceof Error) {
               setError(fetchError.message);
             } else {
@@ -236,7 +248,9 @@ export function useVersionFetching({
         logger.error('Unknown error refreshing version data', { error });
       }
     } finally {
-      setIsLoading(false);
+      if (isCurrentApp(resolvedAppId)) {
+        setIsLoading(false);
+      }
     }
   }, [
     fetchInstalledVersions,
@@ -244,7 +258,9 @@ export function useVersionFetching({
     fetchDefaultVersion,
     fetchAvailableVersions,
     fetchVersionStatus,
+    isCurrentApp,
     isEnabled,
+    resolvedAppId,
     trackAvailableVersions,
   ]);
 

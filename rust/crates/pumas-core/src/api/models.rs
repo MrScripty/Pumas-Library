@@ -858,6 +858,20 @@ impl PumasApi {
         self.try_primary()?;
         self.primary().model_library.reclassify_all_models().await
     }
+
+    /// Finish a copied import that is Ready on disk but whose final index
+    /// commit was never acknowledged, after re-verifying its confirmed receipt
+    /// and rehashing its payload. Refuses, with the reason, anything else.
+    pub async fn finish_retained_import(
+        &self,
+        model_id: &str,
+    ) -> Result<model_library::RetainedImportOutcome> {
+        self.try_primary()?;
+        self.primary()
+            .model_library
+            .finish_retained_import(model_id)
+            .await
+    }
 }
 
 #[cfg(test)]

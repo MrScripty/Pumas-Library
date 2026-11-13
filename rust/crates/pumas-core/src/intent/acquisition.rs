@@ -204,8 +204,24 @@ pub(crate) async fn prepare_bound_intent_download(
             )],
         }));
     }
+    // The replay keeps the category its bound model ID was recorded under,
+    // even where classification evidence has since improved (for example a
+    // GGUF decision head now read before download).
+    let recorded_category = expected_model_ref
+        .model_id
+        .split('/')
+        .next()
+        .filter(|category| !category.is_empty())
+        .map(str::to_owned);
     let prepared = match observe_upstream_result(
-        PumasApi::prepare_hf_download_owned_at_revision(library, client, &request, revision).await,
+        PumasApi::prepare_hf_download_owned_keeping_category(
+            library,
+            client,
+            &request,
+            revision,
+            recorded_category,
+        )
+        .await,
     )? {
         Ok(prepared) => prepared,
         Err(error) => return Ok(Err(classify_admission_error(error))),

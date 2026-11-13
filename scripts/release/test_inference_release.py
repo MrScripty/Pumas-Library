@@ -1,4 +1,4 @@
-"""Synthetic archives and real subprocess environment checks; no model inference."""
+"""Fake RPC, process and mapping fixtures; no runtime download, ORT or model inference."""
 
 import hashlib
 import importlib.util
@@ -6,18 +6,14 @@ import copy
 import io
 import json
 import os
-import shutil
 from pathlib import Path
 import subprocess
 import sys
-import tarfile
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 import headless_inference_ci as ci
-import onnx_runtime_stage as stage
-import onnx_runtime_probe as native_probe
 import packaged_onnx_support as support
 import synthetic_onnx_fixture as synthetic
 import verify_synthetic_packaged_onnx as synthetic_check
@@ -30,40 +26,42 @@ STAGE_SPEC.loader.exec_module(desktop)
 
 
 class ReleaseTests(unittest.TestCase):
-    def test_desktop_staging_uses_only_pinned_payloads_and_preserves_old_stage_on_refusal(self):
+    def test_only_shared_libraries_count_as_a_mapped_onnx_runtime(self):
+        # ONNX Runtime 1.31 maps its own cache database; it is not a library.
+        for name, expected in [
+            ("/x/onnx-runtime-versions/v1.31.1+cpu/lib/libonnxruntime.so", True),
+            ("/x/lib/libonnxruntime.so.1.31.1", True),
+            ("/x/lib/libonnxruntime.dylib", True),
+            ("C:/x/lib/onnxruntime.dll", True),
+            ("/home/u/.cache/Microsoft/DeveloperTools/.onnxruntime/onnxruntime.db-shm", False),
+            ("/x/onnxruntime.db", False),
+            ("/x/lib/libother.so", False),
+        ]:
+            self.assertEqual(support.is_runtime_library(name), expected, name)
+
+    def test_desktop_staging_packages_only_the_backend_never_onnx_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source, runtime, target = root / "source", root / "runtime", root / "stage"
+            source, target = root / "source", root / "stage"
             source.mkdir()
-            runtime.mkdir()
             target.mkdir()
             binary = "pumas-rpc.exe" if os.name == "nt" else "pumas-rpc"
-            (source / binary).write_bytes(b"test RPC, not executable")
-            (source / "ambient.dll").write_bytes(b"must never copy")
-            payloads = {"native.dll": b"test native", "ONNX-LICENSE.txt": b"test notice"}
-            selected = {"files": {}, "notices": {}}
-            for name, data in payloads.items():
-                (runtime / name).write_bytes(data)
-                selected["notices" if name.endswith(".txt") else "files"][name] = {
-                    "bytes": len(data),
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                }
-            pins = root / "pins.json"
-            pins.write_text(json.dumps({"targets": {"test-native": selected}}))
             (target / "sentinel").write_bytes(b"prior usable stage")
-            with (
-                patch.object(desktop, "PINS", pins),
-                patch.object(desktop, "native_target", return_value="test-native"),
-            ):
-                (runtime / "native.dll").write_bytes(b"corrupt0000")
-                with self.assertRaises(ValueError):
-                    desktop.stage_rpc(source, target, runtime, "test-native")
-                self.assertEqual((target / "sentinel").read_bytes(), b"prior usable stage")
-                (runtime / "native.dll").write_bytes(payloads["native.dll"])
-                desktop.stage_rpc(source, target, runtime, "test-native")
-                self.assertEqual({p.name for p in target.iterdir()}, {binary, *payloads})
-                for name, data in payloads.items():
-                    self.assertEqual((target / name).read_bytes(), data)
+            with self.assertRaises(ValueError):
+                desktop.stage_rpc(source, target)
+            self.assertEqual((target / "sentinel").read_bytes(), b"prior usable stage")
+            (source / binary).write_bytes(b"test RPC, not executable")
+            # ONNX Runtime is downloaded by the desktop at runtime; libraries
+            # beside the build output must never be staged into a package.
+            for name in [
+                "onnxruntime.dll",
+                "libonnxruntime.so",
+                "libonnxruntime.dylib",
+                "ONNX-LICENSE.txt",
+            ]:
+                (source / name).write_bytes(b"must never copy")
+            desktop.stage_rpc(source, target)
+            self.assertEqual({p.name for p in target.iterdir()}, {binary})
 
     def test_windows_module_paths_drop_the_verbatim_prefix(self):
         # A module loaded through a canonical path is reported as \\?\D:\...
@@ -90,38 +88,6 @@ class ReleaseTests(unittest.TestCase):
         paths = support.native_modules(os.getpid(), support.native_target())
         self.assertTrue(paths)
         self.assertTrue(any(path.is_file() for path in paths))
-
-    def test_nonlinux_observer_requires_packaged_runtime_and_refuses_ambient_runtime(self):
-        for target, name in (
-            ("windows-x86_64", "onnxruntime.dll"),
-            ("macos-arm64", "libonnxruntime.dylib"),
-        ):
-            with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary).resolve()
-                runtime = root / name
-                runtime.write_bytes(b"test-only observed mapping")
-                with (
-                    patch.object(support, "native_target", return_value=target),
-                    patch.object(support, "verify_runtime", return_value={"files": {name: {}}}),
-                ):
-                    for paths in (
-                        [],
-                        [Path("/ambient") / name],
-                        [runtime, Path("/ambient") / name],
-                    ):
-                        with patch.object(support, "native_modules", return_value=paths):
-                            with self.assertRaises(ValueError):
-                                support.loaded_runtime(123, root)
-                    with patch.object(support, "native_modules", return_value=[runtime]):
-                        observed = support.loaded_runtime(123, root)
-                        self.assertEqual(
-                            observed["loader_sha256"],
-                            hashlib.sha256(runtime.read_bytes()).hexdigest(),
-                        )
-                        self.assertEqual(
-                            observed["mapped_file_object_identity"], "unavailable on this platform"
-                        )
-                        self.assertEqual(observed["mapping"], "packaged-module-path-observed")
 
     def test_forced_shutdown_and_nonzero_exit_never_pass(self):
         process = Mock(returncode=-9)
@@ -159,37 +125,6 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual((root / name).stat().st_size, entry["bytes"])
             with self.assertRaises(FileExistsError):
                 synthetic.create_fixture(root)
-
-    def test_synthetic_receipt_binds_binary_source_and_excludes_pretrained_claims(self):
-        source = "a" * 40
-        evidence = {"source": {"head": source, "tree": "b" * 40}, "archive_sha256": "c" * 64}
-        manifest = {
-            "compatibility": {"expected": {"source_commit": source, "source_tree": "b" * 40}},
-            "files": {"pumas-rpc": {"sha256": "d" * 64}},
-        }
-        result = {
-            "binary_sha256": "d" * 64,
-            "import": "passed",
-            "load": "passed",
-            "unload": "passed",
-            "embedding_dimensions": 256,
-            "finite": True,
-            "runtime": {"mapping": "packaged-file-identity-observed"},
-        }
-        record = synthetic_check.bind_result(source, evidence, manifest, {}, result)
-        self.assertIs(record["pretrained_model_acceptance"], False)
-        self.assertEqual(record["archive_sha256"], evidence["archive_sha256"])
-        self.assertEqual(record["qualification"], "synthetic_execution_only")
-        for changed in (
-            {**result, "binary_sha256": "e" * 64},
-            {**result, "finite": False},
-            {**result, "unload": "failed"},
-            {**result, "runtime": {"mapping": "unobserved"}},
-        ):
-            with self.assertRaises(ValueError):
-                synthetic_check.bind_result(source, evidence, manifest, {}, changed)
-        with self.assertRaises(ValueError):
-            synthetic_check.bind_result("f" * 40, evidence, manifest, {}, result)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux owned process group")
     def test_synthetic_verifier_timeout_stops_its_process_group(self):
@@ -285,116 +220,6 @@ class ReleaseTests(unittest.TestCase):
             self.assertNotIn("ORT_DYLIB_PATH", observed)
             self.assertEqual(observed["PUMAS_REGISTRY_DB_PATH"], str(Path(tmp) / "registry.db"))
 
-    def test_stage_hashes_snapshot_and_rejects_drift_links_and_duplicates(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            for case in ("valid", "hash", "member", "link", "duplicate"):
-                archive = root / f"{case}.tgz"
-                data = b"synthetic native bytes, not ORT"
-                with tarfile.open(archive, "w:gz") as stream:
-                    member = tarfile.TarInfo("upstream/lib/runtime.so")
-                    member.size = len(data)
-                    if case == "link":
-                        member.type = tarfile.SYMTYPE
-                        member.linkname = "/outside"
-                        member.size = 0
-                    stream.addfile(member, io.BytesIO(data))
-                    if case == "duplicate":
-                        stream.addfile(member, io.BytesIO(data))
-                pin = {
-                    "member": member.name,
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                    "bytes": len(data),
-                }
-                pins = {
-                    "version": "1.24.2",
-                    "targets": {
-                        "linux-x86_64": {
-                            "url": "https://example.invalid/synthetic.tgz",
-                            "target": "x86_64-unknown-linux-gnu",
-                            "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-                            "archive_bytes": archive.stat().st_size,
-                            "files": {"libonnxruntime.so": pin},
-                            "notices": {},
-                        }
-                    },
-                }
-                if case == "hash":
-                    pins["targets"]["linux-x86_64"]["archive_sha256"] = "0" * 64
-                if case == "member":
-                    pin["sha256"] = "0" * 64
-                destination = root / case
-                if case == "valid":
-                    result = stage.stage("linux-x86_64", archive, destination, pins)
-                    self.assertEqual((destination / "libonnxruntime.so").read_bytes(), data)
-                    self.assertEqual(result["files"]["libonnxruntime.so"]["sha256"], pin["sha256"])
-                    with self.assertRaises(ValueError):
-                        stage.stage("linux-x86_64", archive, destination, pins)
-                else:
-                    with self.assertRaises(ValueError):
-                        stage.stage("linux-x86_64", archive, destination, pins)
-                    self.assertFalse(destination.exists())
-
-    def test_native_probe_refuses_bad_bytes_before_loader_effect(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "libonnxruntime.so").write_bytes(b"not ORT")
-            with (
-                patch.object(native_probe.platform, "system", return_value="Linux"),
-                patch.object(native_probe.platform, "machine", return_value="x86_64"),
-                patch.object(native_probe, "probe_api") as loader,
-            ):
-                with self.assertRaisesRegex(ValueError, "checked pin"):
-                    native_probe.worker(root, "linux-x86_64")
-                loader.assert_not_called()
-
-    def test_native_probe_timeout_cannot_write_success_evidence(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "evidence.json"
-            with patch.object(
-                native_probe.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 30)
-            ) as runner:
-                with self.assertRaises(subprocess.TimeoutExpired):
-                    native_probe.probe(Path(tmp), "linux-x86_64", output)
-                self.assertFalse(output.exists())
-                self.assertNotIn("ORT_DYLIB_PATH", runner.call_args.kwargs["env"])
-                self.assertNotIn("LD_PRELOAD", runner.call_args.kwargs["env"])
-                self.assertIn("-I", runner.call_args.args[0])
-
-    @unittest.skipUnless(
-        sys.platform == "linux" and shutil.which("cc"), "Controlled Linux C ABI fixture"
-    )
-    def test_native_c_api_version_and_availability_refusals(self):
-        # These are compiled fake C tables, not ORT or model inference.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            for name, version, available in (
-                ("valid", "1.24.2", True),
-                ("version", "1.24.1", True),
-                ("api", "1.24.2", False),
-            ):
-                source = root / f"{name}.c"
-                library = root / f"{name}.so"
-                source.write_text(
-                    "#include <stdint.h>\n"
-                    "static int token;\n"
-                    "static const void *api(uint32_t v) { return v == 24 && "
-                    + ("1" if available else "0")
-                    + " ? &token : 0; }\n"
-                    'static const char *version(void) { return "' + version + '"; }\n'
-                    "struct base { const void *(*api)(uint32_t); const char *(*version)(void); };\n"
-                    "static struct base table = {api,version};\n"
-                    "const struct base *OrtGetApiBase(void) { return &table; }\n"
-                )
-                subprocess.run(
-                    ["cc", "-shared", "-fPIC", str(source), "-o", str(library)], check=True
-                )
-                if name == "valid":
-                    self.assertIsNotNone(native_probe.probe_api(library))
-                else:
-                    with self.assertRaises(ValueError):
-                        native_probe.probe_api(library)
-
     def test_current_unbumped_source_cannot_be_relabelled(self):
         with tempfile.TemporaryDirectory() as tmp:
             repository = Path(tmp)
@@ -414,26 +239,424 @@ class ReleaseTests(unittest.TestCase):
                     contract["expected"]["core_build_info"],
                 )
 
-    @unittest.skipUnless(sys.platform == "linux", "Linux /proc mapping contract")
-    def test_linux_mapping_refuses_ambient_or_unobserved_runtime(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            runtime = root / "libonnxruntime.so"
-            runtime.write_bytes(b"synthetic")
-            with patch.object(
-                support, "verify_runtime", return_value={"files": {runtime.name: {}}}
+
+def release(tag, prerelease=False):
+    return {"tagName": tag, "prerelease": prerelease}
+
+
+class FakeRpc:
+    """Scripted JSON-RPC results; records every call. Never a real Pumas."""
+
+    def __init__(self, results):
+        self.results = {method: list(values) for method, values in results.items()}
+        self.calls = []
+
+    def __call__(self, method, params=None):
+        self.calls.append((method, params))
+        values = self.results[method]
+        return values.pop(0) if len(values) > 1 else values[0]
+
+    def methods(self):
+        return [method for method, _ in self.calls]
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+TAG = "v1.31.1+cpu"
+DONE = {"tag": TAG, "completedAt": "2026-11-12T00:00:00Z", "success": True}
+QUIET = {"log": lambda *args, **kwargs: None}
+
+
+class InstalledRuntimeTests(unittest.TestCase):
+    def test_selects_the_newest_stable_cpu_build_by_version_not_listing_order(self):
+        listing = {
+            "success": True,
+            "versions": [
+                release("v1.31.1+cuda13"),
+                release("v1.32.0+cpu", prerelease=True),
+                release("v1.9.9+cpu"),
+                release(TAG),
+                release("v1.30.0+cpu"),
+                release("v1.31.1+cuda12"),
+                {"name": "no tag"},
+            ],
+        }
+        self.assertEqual(support.select_cpu_release(listing), TAG)
+
+    def test_listing_refusals_carry_their_reason(self):
+        for listing, reason in (
+            ({"success": False, "rate_limited": True, "retry_after_secs": 30}, "retry after 30"),
+            ({"success": False, "error": "offline"}, "offline"),
+            ({"success": True, "versions": [release("v1.31.1+cuda12")]}, "v1.31.1\\+cuda12"),
+            ({"success": True, "versions": []}, "no stable \\+cpu"),
+            (None, "unexpected ONNX Runtime listing"),
+        ):
+            with self.subTest(listing=listing), self.assertRaisesRegex(ValueError, reason):
+                support.select_cpu_release(listing)
+
+    def install(self, rpc, timeout=10):
+        clock = FakeClock()
+        return support.install_runtime(
+            rpc, TAG, timeout=timeout, interval=1, clock=clock, sleep=clock.sleep
+        )
+
+    def test_install_waits_for_completed_progress_then_confirms_installation(self):
+        rpc = FakeRpc(
+            {
+                "install_version": [{"success": True, "message": "started"}],
+                "get_installation_progress": [{"tag": TAG, "stage": "download"}, DONE],
+                "get_installed_versions": [{"success": True, "versions": [TAG]}],
+            }
+        )
+        self.assertEqual(self.install(rpc)["tag"], TAG)
+        self.assertEqual(rpc.calls[0], ("install_version", {"app_id": "onnx-runtime", "tag": TAG}))
+        self.assertEqual(
+            rpc.methods(),
+            [
+                "install_version",
+                "get_installation_progress",
+                "get_installation_progress",
+                "get_installed_versions",
+            ],
+        )
+
+    def test_install_accepts_a_cleared_progress_record_once_installed(self):
+        rpc = FakeRpc(
+            {
+                "install_version": [{"success": True, "message": "started"}],
+                "get_installation_progress": [None],
+                "get_installed_versions": [
+                    {"success": True, "versions": []},
+                    {"success": True, "versions": [TAG]},
+                ],
+            }
+        )
+        self.assertEqual(self.install(rpc)["installed_versions"], [TAG])
+
+    def test_install_failures_refuse_with_the_reason(self):
+        cases = {
+            "refused": (
+                {"install_version": [{"success": False, "error": "disk full"}]},
+                "refused to install.*disk full",
+            ),
+            "failed": (
+                {
+                    "install_version": [{"success": True}],
+                    "get_installation_progress": [
+                        {**DONE, "success": False, "error": "checksum mismatch", "logPath": "x"}
+                    ],
+                },
+                "installation failed: checksum mismatch",
+            ),
+            "other": (
+                {
+                    "install_version": [{"success": True}],
+                    "get_installation_progress": [{"tag": "v1.30.0+cpu"}],
+                },
+                "another ONNX Runtime installation",
+            ),
+            "timeout": (
+                {
+                    "install_version": [{"success": True}],
+                    "get_installation_progress": [{"tag": TAG, "stage": "download"}],
+                },
+                "did not finish within 10 seconds; last stage download",
+            ),
+            "missing": (
+                {
+                    "install_version": [{"success": True}],
+                    "get_installation_progress": [DONE],
+                    "get_installed_versions": [{"success": True, "versions": []}],
+                },
+                "reported complete but is not installed",
+            ),
+        }
+        for name, (results, reason) in cases.items():
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, reason):
+                self.install(FakeRpc(results))
+
+    def lifecycle_results(self, **changes):
+        return {
+            "get_available_versions": [{"success": True, "versions": [release(TAG)]}],
+            "install_version": [{"success": True}],
+            "get_installation_progress": [DONE],
+            "get_installed_versions": [{"success": True, "versions": [TAG]}],
+            "upsert_runtime_profile": [{"success": True, "profile_id": "onnx-verification"}],
+            "launch_runtime_profile": [{"success": True, "ready": True}],
+            "import_model_in_place": [{"success": True, "model_id": "embedding/fixture/m"}],
+            "serve_model": [{"loaded": True}],
+            "unserve_model": [{"unloaded": True}],
+            **changes,
+        }
+
+    def test_lifecycle_pins_a_managed_cpu_profile_to_the_installed_version(self):
+        rpc = FakeRpc(self.lifecycle_results())
+        posts, observed = [], []
+
+        def post(path, body):
+            posts.append((path, body))
+            return {"data": [{"embedding": [0.5] * 256}]}
+
+        def observe(tag):
+            # The runtime must be observed while the model is still served.
+            observed.append((tag, rpc.methods()[-1]))
+            return {"mapping": "pumas-installed-runtime-observed", "runtime_version": tag}
+
+        result = support.exercise_installed_runtime(rpc, post, Path("/model"), observe, **QUIET)
+        self.assertEqual(
+            rpc.methods(),
+            [
+                "get_available_versions",
+                "install_version",
+                "get_installation_progress",
+                "get_installed_versions",
+                "upsert_runtime_profile",
+                "launch_runtime_profile",
+                "import_model_in_place",
+                "serve_model",
+                "unserve_model",
+            ],
+        )
+        calls = dict(rpc.calls)
+        self.assertEqual(calls["get_available_versions"]["app_id"], "onnx-runtime")
+        self.assertEqual(
+            calls["upsert_runtime_profile"]["profile"],
+            {
+                "profile_id": "onnx-verification",
+                "provider": "onnx_runtime",
+                "provider_mode": "onnx_serve",
+                "management_mode": "managed",
+                "name": "Installer verification",
+                "device": {"mode": "cpu"},
+                "runtime_version": TAG,
+            },
+        )
+        self.assertEqual(calls["launch_runtime_profile"], {"profile_id": "onnx-verification"})
+        served = calls["serve_model"]["request"]["config"]
+        self.assertEqual(
+            (served["profile_id"], served["device_mode"]), ("onnx-verification", "cpu")
+        )
+        self.assertEqual(posts[0][0], "/v1/embeddings")
+        self.assertEqual(observed, [(TAG, "serve_model")])
+        self.assertEqual(result["runtime_version"], TAG)
+        for name in ("runtime_install", "import", "load", "unload"):
+            self.assertEqual(result[name], "passed")
+
+    def test_lifecycle_refuses_profile_launch_and_nonfinite_failures(self):
+        good = [0.5] * 256
+        for name, changes, vector, reason in (
+            (
+                "profile",
+                {"upsert_runtime_profile": [{"success": False, "error": "bad version"}]},
+                good,
+                "refused the ONNX runtime profile.*bad version",
+            ),
+            (
+                "launch",
+                {"launch_runtime_profile": [{"success": False, "error": "not installed"}]},
+                good,
+                "did not launch: not installed",
+            ),
+            ("nonfinite", {}, [float("nan")] * 256, "finite"),
+            ("dimensions", {}, [0.5] * 8, "256"),
+        ):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, reason):
+                support.exercise_installed_runtime(
+                    FakeRpc(self.lifecycle_results(**changes)),
+                    lambda path, body, vector=vector: {"data": [{"embedding": vector}]},
+                    Path("/model"),
+                    lambda tag: {},
+                    **QUIET,
+                )
+
+    def test_runtime_beside_the_rpc_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("pumas-rpc", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt", "manifest.json"):
+                (root / name).write_bytes(b"controlled")
+            support.require_no_bundled_runtime(root)
+            for name in (
+                "libonnxruntime.so.1.31.1",
+                "onnxruntime.dll",
+                "libllama.so",
+                "ggml-cpu.dll",
+                "torch_cpu.dll",
             ):
-                for maps in ("", "0000-1000 r-xp 0 00:00 1 /ambient/libonnxruntime.so\n"):
-                    with patch.object(Path, "read_text", return_value=maps):
-                        with self.assertRaises(ValueError):
-                            support.loaded_runtime(123, root)
-                stat = runtime.stat()
-                maps = f"0000-1000 r-xp 0 {os.major(stat.st_dev):x}:{os.minor(stat.st_dev):x} {stat.st_ino} {runtime}\n"
-                with patch.object(Path, "read_text", return_value=maps):
-                    self.assertEqual(
-                        support.loaded_runtime(123, root)["mapping"],
-                        "packaged-file-identity-observed",
-                    )
+                runtime = root / name
+                runtime.write_bytes(b"controlled bytes, not a runtime")
+                with (
+                    self.subTest(name=name),
+                    self.assertRaisesRegex(ValueError, name.replace(".", "\\.")),
+                ):
+                    support.require_no_bundled_runtime(root)
+                runtime.unlink()
+
+    def test_runtime_telemetry_storage_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "cache" / "Microsoft" / "DeveloperTools").mkdir(parents=True)
+            (root / "cache" / "unrelated" / ".onnxruntime").mkdir(parents=True)
+            support.require_no_runtime_telemetry_storage(root)
+            storage = root / "cache" / "Microsoft" / "DeveloperTools" / ".onnxruntime"
+            storage.mkdir()
+            (storage / "onnxruntime.db").write_bytes(b"controlled")
+            with self.assertRaisesRegex(ValueError, "telemetry storage"):
+                support.require_no_runtime_telemetry_storage(root)
+
+    def test_process_tree_follows_descendants_only(self):
+        parents = {1: 0, 10: 1, 11: 10, 12: 11, 13: 1, 20: 99, 21: 20, 30: 30}
+        self.assertEqual(support.process_tree(10, parents), {10, 11, 12})
+        self.assertEqual(support.process_tree(30, parents), {30})
+
+    def test_linux_parent_map_reads_stat_with_parenthesized_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            proc = Path(temporary)
+            for pid, text in {
+                "10": "10 (pumas-rpc) S 1 10 10",
+                "11": "11 (onnx host (x) y) S 10 10 10",
+                "self": "ignored",
+            }.items():
+                (proc / pid).mkdir()
+                (proc / pid / "stat").write_text(text)
+            self.assertEqual(support.linux_parent_map(proc), {10: 1, 11: 10})
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux /proc mapping contract")
+    def test_linux_mappings_bind_device_and_inode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            library = root / "libonnxruntime.so.1.31.1"
+            library.write_bytes(b"controlled bytes, not ORT")
+            other = root / "libc.so.6"
+            other.write_bytes(b"controlled")
+            stat = library.stat()
+            device = f"{os.major(stat.st_dev):x}:{os.minor(stat.st_dev):x}"
+            (root / "7").mkdir()
+            maps = root / "7" / "maps"
+            maps.write_text(
+                f"0000-1000 r-xp 0 {device} {stat.st_ino} {library}\n"
+                f"1000-2000 r-xp 0 {device} {other.stat().st_ino} {other}\n"
+                "2000-3000 rw-p 0 00:00 0\n"
+            )
+            self.assertEqual(support.linux_mapped_runtimes(7, root), {library})
+            maps.write_text(f"0000-1000 r-xp 0 {device} {stat.st_ino + 1} {library}\n")
+            with self.assertRaisesRegex(ValueError, "identity changed"):
+                support.linux_mapped_runtimes(7, root)
+
+    def test_runtime_must_load_from_the_pumas_installed_version(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            version = root / "onnx-runtime-versions" / TAG / "lib"
+            version.mkdir(parents=True)
+            installed = version / "libonnxruntime.so.1.31.1"
+            installed.write_bytes(b"controlled bytes, not ORT")
+            ambient = root / "ambient" / "libonnxruntime.so"
+            ambient.parent.mkdir()
+            ambient.write_bytes(b"controlled ambient bytes")
+            parents = {100: 1, 101: 100, 200: 1}
+
+            def observe(mappings, target="linux-x86_64"):
+                with (
+                    patch.object(support, "parent_map", return_value=parents),
+                    patch.object(
+                        support,
+                        "mapped_runtimes",
+                        side_effect=lambda pid, _: mappings.get(pid, set()),
+                    ),
+                ):
+                    return support.installed_runtime(100, root, TAG, target)
+
+            # The out-of-process host (a descendant) maps the installed version.
+            evidence = observe({101: {installed}})
+            self.assertEqual(evidence["mapping"], "pumas-installed-runtime-observed")
+            self.assertEqual(evidence["runtime_version"], TAG)
+            self.assertEqual(
+                evidence["libraries"],
+                {
+                    "lib/libonnxruntime.so.1.31.1": hashlib.sha256(
+                        installed.read_bytes()
+                    ).hexdigest()
+                },
+            )
+            self.assertEqual(evidence["identity_observation"], "mapped-device-inode")
+            self.assertEqual(
+                observe({101: {installed}}, "macos-arm64")["identity_observation"],
+                "native-module-path",
+            )
+            # Unrelated processes are never attributed to the owned tree.
+            with self.assertRaisesRegex(ValueError, "no ONNX Runtime library was observed"):
+                observe({200: {installed}})
+            with self.assertRaisesRegex(ValueError, "outside the Pumas-installed"):
+                observe({100: {ambient}, 101: {installed}})
+            with self.assertRaisesRegex(ValueError, "is missing"):
+                support.installed_runtime(100, root, "v9.9.9+cpu", "linux-x86_64")
+
+    def test_vanished_child_is_skipped_but_not_counted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            version = root / "onnx-runtime-versions" / TAG
+            version.mkdir(parents=True)
+            installed = version / "onnxruntime.dll"
+            installed.write_bytes(b"controlled")
+
+            def mapped(pid, target):
+                if pid == 101:
+                    raise FileNotFoundError(pid)
+                return {installed}
+
+            with (
+                patch.object(support, "parent_map", return_value={101: 100}),
+                patch.object(support, "mapped_runtimes", side_effect=mapped),
+            ):
+                evidence = support.installed_runtime(100, root, TAG, "windows-x86_64")
+            self.assertEqual(evidence["observing_process_count"], 1)
+
+    def test_synthetic_receipt_binds_binary_source_and_installed_runtime(self):
+        source = "a" * 40
+        evidence = {"source": {"head": source, "tree": "b" * 40}, "archive_sha256": "c" * 64}
+        manifest = {
+            "compatibility": {"expected": {"source_commit": source, "source_tree": "b" * 40}},
+            "files": {"pumas-rpc": {"sha256": "d" * 64}},
+        }
+        result = {
+            "binary_sha256": "d" * 64,
+            "bundled_runtimes": [],
+            "runtime_install": "passed",
+            "runtime_version": TAG,
+            "import": "passed",
+            "load": "passed",
+            "unload": "passed",
+            "embedding_dimensions": 256,
+            "finite": True,
+            "runtime": {"mapping": "pumas-installed-runtime-observed", "runtime_version": TAG},
+        }
+        record = synthetic_check.bind_result(source, evidence, manifest, {}, result)
+        self.assertIs(record["pretrained_model_acceptance"], False)
+        self.assertEqual(record["archive_sha256"], evidence["archive_sha256"])
+        self.assertEqual(record["qualification"], "synthetic_execution_only")
+        self.assertEqual(record["runtime_version"], TAG)
+        for changed in (
+            {**result, "binary_sha256": "e" * 64},
+            {**result, "finite": False},
+            {**result, "unload": "failed"},
+            {**result, "runtime_install": "skipped"},
+            {**result, "bundled_runtimes": ["libonnxruntime.so"]},
+            {**result, "runtime_version": "v1.31.1+cuda12"},
+            {**result, "runtime": {"mapping": "packaged-file-identity-observed"}},
+            {**result, "runtime": {**result["runtime"], "runtime_version": "v1.30.0+cpu"}},
+        ):
+            with self.assertRaises(ValueError):
+                synthetic_check.bind_result(source, evidence, manifest, {}, changed)
+        with self.assertRaises(ValueError):
+            synthetic_check.bind_result("f" * 40, evidence, manifest, {}, result)
 
 
 if __name__ == "__main__":

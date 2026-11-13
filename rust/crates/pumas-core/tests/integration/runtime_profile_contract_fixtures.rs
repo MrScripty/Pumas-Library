@@ -39,7 +39,10 @@ fn onnx_runtime_provider_capabilities_fixture_shape_is_stable() {
 
     assert_eq!(encoded["provider"], "onnx_runtime");
     assert_eq!(encoded["provider_modes"], serde_json::json!(["onnx_serve"]));
-    assert_eq!(encoded["device_modes"], serde_json::json!(["auto", "cpu"]));
+    assert_eq!(
+        encoded["device_modes"],
+        serde_json::json!(["auto", "cpu", "gpu"])
+    );
     assert_eq!(encoded["supports_managed_profiles"], true);
     assert_eq!(encoded["supports_external_profiles"], false);
     assert_eq!(encoded["supports_model_catalog"], true);

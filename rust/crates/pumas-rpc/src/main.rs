@@ -12,6 +12,8 @@ mod http_rejection;
 mod http_transport;
 mod launch;
 mod local_enumeration;
+#[cfg(feature = "inference-plugins")]
+mod onnx_host;
 mod owner_retention;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
@@ -36,7 +38,12 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 const RPC_WORKER_THREADS: usize = 4;
 const RPC_MAX_BLOCKING_THREADS: usize = 16;
 #[cfg(feature = "inference-plugins")]
-const VERSION_MANAGED_APPS: &[AppId] = &[AppId::Ollama, AppId::Torch, AppId::LlamaCpp];
+const VERSION_MANAGED_APPS: &[AppId] = &[
+    AppId::Ollama,
+    AppId::Torch,
+    AppId::LlamaCpp,
+    AppId::OnnxRuntime,
+];
 
 async fn finish_signal_observer(task: &mut tokio::task::JoinHandle<Result<()>>) -> Result<()> {
     if !task.is_finished() {
@@ -97,6 +104,26 @@ struct Args {
     #[cfg(feature = "export-contract")]
     #[arg(long)]
     export_desktop_fixtures: bool,
+    /// Release the library's instance entry left by a Pumas process that is no
+    /// longer running, after an operator confirmed it. Needs the entry's PID and
+    /// start time as reported in the `stale-instance` startup failure.
+    #[arg(long, requires_all = ["launcher_root", "expected_pid", "expected_started_at"], conflicts_with_all = ["build_info", "discover_local", "describe_local_http", "attach_or_start_local_http", "retain_local_http_owner", "migrate_download_store_offline"])]
+    release_stale_instance: bool,
+    /// The confirmed entry's PID (with --release-stale-instance).
+    #[arg(long, requires = "release_stale_instance")]
+    expected_pid: Option<u32>,
+    /// The confirmed entry's start time (with --release-stale-instance).
+    #[arg(long, requires = "release_stale_instance")]
+    expected_started_at: Option<String>,
+    /// Run as the ONNX host of one ONNX Runtime profile. Pumas launches this
+    /// itself; it is not a user command.
+    #[cfg(feature = "inference-plugins")]
+    #[arg(long, conflicts_with_all = ["build_info", "discover_local", "describe_local_http", "attach_or_start_local_http", "retain_local_http_owner", "migrate_download_store_offline", "launcher_root"])]
+    onnx_host: bool,
+    /// The ONNX host profile's device mode (auto, cpu, gpu).
+    #[cfg(feature = "inference-plugins")]
+    #[arg(long, requires = "onnx_host")]
+    onnx_device_mode: Option<String>,
     /// Port to listen on (0 = auto-assign)
     #[arg(short, long, default_value = "0")]
     port: u16,
@@ -128,6 +155,10 @@ fn main() -> Result<()> {
     // Before any thread or child process can observe the environment.
     launch::take_from_env()?;
     let args = Args::parse();
+    #[cfg(feature = "inference-plugins")]
+    if args.onnx_host {
+        return onnx_host::run(&args.host, args.port, args.onnx_device_mode.as_deref());
+    }
     if args.migrate_download_store_offline {
         let backup = pumas_library::model_library::DownloadPersistence::migrate_library_offline(
             args.launcher_root
@@ -142,6 +173,17 @@ fn main() -> Result<()> {
     }
     if args.discover_local {
         return local_enumeration::write();
+    }
+    if args.release_stale_instance {
+        return release_stale_instance(
+            args.launcher_root
+                .as_deref()
+                .expect("clap requires launcher root"),
+            args.expected_pid.expect("clap requires expected pid"),
+            args.expected_started_at
+                .as_deref()
+                .expect("clap requires expected start"),
+        );
     }
     if args.retain_local_http_owner {
         let runtime = Builder::new_current_thread().enable_all().build()?;
@@ -202,6 +244,36 @@ fn main() -> Result<()> {
         .build()?;
 
     runtime.block_on(run(args, host, http_policy))
+}
+
+/// Release exactly the confirmed stale entry, re-checking it first.
+fn release_stale_instance(root: &std::path::Path, pid: u32, started_at: &str) -> Result<()> {
+    FmtSubscriber::builder()
+        .with_env_filter(EnvFilter::new(DEFAULT_LOG_FILTER))
+        .with_target(false)
+        .compact()
+        .with_writer(std::io::stderr)
+        .init();
+    let root = pumas_library::platform::paths::absolute_launcher_root(root)?;
+    let registry = pumas_library::registry::LibraryRegistry::open()?;
+    let stale = registry.inspect_stale_instance(&root)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "The library has no releasable instance entry: it is not registered, its process is running, or a running Pumas still holds it"
+        )
+    })?;
+    if stale.pid != pid || stale.started_at != started_at {
+        anyhow::bail!(
+            "The library's instance entry changed since it was confirmed (now pid {}, started {}); check it again",
+            stale.pid,
+            stale.started_at
+        );
+    }
+    registry.release_stale_instance(&root, &stale)?;
+    println!(
+        "{}",
+        serde_json::json!({ "released": true, "pid": stale.pid })
+    );
+    Ok(())
 }
 
 /// Resolves when stdin reaches end of file or fails; never when `enabled` is
@@ -358,7 +430,7 @@ async fn run(
                 }
                 _ => unreachable!(),
             };
-            startup_failure::write(&error, &mut std::io::stdout().lock())?;
+            startup_failure::write_for_root(&error, &launcher_root, &mut std::io::stdout().lock())?;
             return Err(match signal_result {
                 Ok(()) => error,
                 Err(signal) => {
@@ -476,9 +548,13 @@ mod tests {
     fn version_managed_apps_are_the_installable_inference_runtimes() {
         assert_eq!(
             VERSION_MANAGED_APPS,
-            &[AppId::Ollama, AppId::Torch, AppId::LlamaCpp]
+            &[
+                AppId::Ollama,
+                AppId::Torch,
+                AppId::LlamaCpp,
+                AppId::OnnxRuntime
+            ]
         );
-        assert!(!VERSION_MANAGED_APPS.contains(&AppId::OnnxRuntime));
         assert!(VERSION_MANAGED_APPS.iter().all(AppId::has_version_manager));
     }
 }

@@ -639,3 +639,48 @@ async fn copied_import_oversized_evidence_is_per_model_unavailable_in_public_que
     }
     tasks.shutdown_owned().await.unwrap();
 }
+
+/// A GGUF header whose model keys declare a llama.cpp decision head.
+fn decision_gguf() -> Vec<u8> {
+    crate::model_library::test_gguf_with_string_keys(
+        &[
+            ("general.architecture", "qwen35"),
+            ("general.name", "Kev-4B"),
+            ("qwen35.decision.type", "kev"),
+        ],
+        0,
+    )
+}
+
+#[tokio::test]
+async fn reclassify_defers_models_while_a_download_holds_the_root() {
+    let (_temp, library, tasks) = fixture().await;
+    let id = "llm/qwen35/kev-4b";
+    let path = insert_model(&library, id, ModelMetadata::default(), false);
+    std::fs::write(path.join("Kev-4B-Q8_0.gguf"), decision_gguf()).unwrap();
+    let authority = library.mutation_authority().unwrap();
+    let download = authority.root().try_acquire_execution_grant().unwrap();
+    let busy = library.reclassify_all_models().await.unwrap();
+    assert!(busy.errors.is_empty(), "{:?}", busy.errors);
+    assert_eq!(busy.deferred.len(), 1);
+    assert_eq!(busy.deferred[0].0, id);
+    assert!(busy.deferred[0]
+        .1
+        .contains("download holds the library root"));
+    // Deferred work waits on this signal: releasing the grant wakes it, even
+    // through another handle opened for the same physical root.
+    let other_handle =
+        crate::model_library::DownloadDestinationRoot::open(library.library_root()).unwrap();
+    let mut released = other_handle.release_signal();
+    drop(download);
+    tokio::time::timeout(std::time::Duration::from_secs(5), released.changed())
+        .await
+        .expect("releasing the root must signal deferred work")
+        .unwrap();
+    let after = library.reclassify_all_models().await.unwrap();
+    assert!(after.deferred.is_empty());
+    let metadata: ModelMetadata =
+        serde_json::from_slice(&std::fs::read(path.join(METADATA_FILENAME)).unwrap()).unwrap();
+    assert_eq!(metadata.model_type.as_deref(), Some("decision"));
+    tasks.shutdown_owned().await.unwrap();
+}

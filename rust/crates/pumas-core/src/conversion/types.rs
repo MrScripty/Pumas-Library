@@ -64,6 +64,10 @@ pub enum ConversionDirection {
     /// Quantize Safetensors to 1.25-bit ternary via Sherry / AngelSlim QAT.
     /// Requires GPU with sufficient VRAM for quantization-aware training.
     SafetensorsToSherryQat,
+    /// Copy a causal-LM GGUF and add a llama.cpp ranking head derived from the
+    /// model's recorded sentence-transformers `LogitScore` declaration. The
+    /// output is a reranker GGUF; the source is not modified.
+    GgufToRankingGguf,
 }
 
 /// Status of a conversion or quantization operation.

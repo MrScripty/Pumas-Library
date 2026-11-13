@@ -2,6 +2,7 @@ import type { DownloadLocationReport, DownloadResolutionRequest } from '@pumas/d
 import type { S3TransferRetryParams, S3TransferRetryState, S3PersistedImportsWire, S3DiscoveryParams, S3AuthenticatedDiscoveryParams, S3DiscoveryOutcome } from '@pumas/desktop-contract';
 import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportParams, S3AuthenticatedImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '@pumas/desktop-contract';
 import type { BaseResponse } from './api-common';
+import type { CompanionBackfillReport, ModelDocumentsResponse } from './api-companion-files';
 import type {
   CheckFilesWritableResponse,
   DetectShardedSetsResponse,
@@ -195,6 +196,22 @@ export interface DesktopBridgeModelAPI {
     metadata: Record<string, unknown> | null;
     error?: string;
   }>;
+
+  /**
+   * Read the model card, license documents and code stored with a model.
+   */
+  get_model_documents(modelId: string): Promise<ModelDocumentsResponse>;
+
+  /**
+   * Fetch the card, license, code and metadata files a model is missing, at
+   * its recorded revision. A dry run reports the plan without fetching.
+   */
+  backfill_model_companion_files(modelId: string, dryRun: boolean): Promise<CompanionBackfillReport>;
+
+  /**
+   * Backfill every library model in turn.
+   */
+  backfill_library_companion_files(dryRun: boolean): Promise<CompanionBackfillReport>;
 
   // ========================================
   // Model Library Import (Phase 1A - Part 6)

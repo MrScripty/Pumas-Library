@@ -563,6 +563,15 @@ pub trait AcquisitionHost: HttpAttemptHost {
         None
     }
 
+    /// Whether a partial file may be discarded and fetched again from byte
+    /// zero when its source refuses to continue it (a full body or 416 for a
+    /// range request). Applies only to a file with an expected SHA-256, so the
+    /// fresh transfer is still verified, and at most once per file per
+    /// acquisition. The default keeps the partial and fails, as before.
+    fn restart_refused_continuation(&self) -> bool {
+        false
+    }
+
     /// Optional observation only: an exact manifest member is about to acquire.
     /// Default no-op preserves existing hosts and transfer/publication policy.
     fn file_started(&mut self, _index: usize) {}
@@ -1084,7 +1093,7 @@ impl AcquisitionService {
         let store = self.store.clone();
         let origin = context.clone();
         owned(context, "admit durable acquisition", move || {
-            store.update_acquisitions(|records| {
+            store.update_acquisitions_tracking_new(|records| {
                 if let Some(existing) = records.values().find(|record| record.demand == demand) {
                     if existing.manifest != manifest || existing.workspace != workspace { return Err(invalid("Exact acquisition demand changed selection or workspace")); }
                     if matches!(existing.phase, AcquisitionPhase::Using { .. }) {
@@ -1227,45 +1236,106 @@ impl AcquisitionService {
             .await?;
             return Ok(operation.record.files[file_index].bytes);
         }
+        let ledger_store = self.store.clone();
+        let ledger_id = operation.record.id;
+        let ledger = owned(context, "read published acquisition files", move || {
+            ledger_store.published_files(ledger_id)
+        })
+        .await?;
         let inspect = workspace.clone();
         let path = file.logical_path().to_owned();
         let existing = owned(context, "inspect acquisition final file", move || {
             inspect.file_len(&path, false)
         })
         .await?;
-        let existing_without_receipt = match existing {
-            Some(size) => {
-                if file
-                    .expected_size()
-                    .is_some_and(|expected| expected != size)
+        if let Some(receipt) = ledger
+            .as_ref()
+            .and_then(|ledger| ledger.files.get(&file_index))
+            .cloned()
+        {
+            // This operation recorded the receipt before publishing the file.
+            let admit = workspace.clone();
+            let selected = file.clone();
+            let recorded = receipt.clone();
+            let published = owned(context, "admit published acquisition file", move || {
+                if admit.file_len(selected.logical_path(), false)?.is_some() {
+                    admit.admit_published_receipt(&selected, &recorded)?;
+                    return Ok(true);
+                }
+                // Interrupted between recording and renaming: the staged file
+                // is published only if it is still exactly the recorded bytes.
+                if admit.file_len(selected.logical_path(), true)? == Some(recorded.bytes)
+                    && admit.verify_file(&selected, true)? == recorded
                 {
-                    return Err(invalid(
-                        "Existing selected file size conflicts with selection",
-                    ));
+                    admit.publish_part(&selected, false)?;
+                    return Ok(true);
                 }
-                if file.expected_sha256().is_some() {
-                    let verify = workspace.clone();
-                    let selected = file.clone();
-                    let receipt = owned(context, "verify existing acquisition file", move || {
-                        verify.verify_file(&selected, false)
-                    })
-                    .await?;
-                    return Ok(receipt.bytes);
-                }
-                if operation.record.manifest.source().revision().strength()
-                    != super::RevisionStrength::Immutable
-                {
-                    return Err(invalid(
-                        "Existing file has no digest or custody receipt for its mutable source",
-                    ));
-                }
-                true
+                Ok(false)
+            })
+            .await?;
+            if published {
+                return Ok(receipt.bytes);
             }
-            None => false,
-        };
+            let forget = self.store.clone();
+            let record = operation.record.clone();
+            owned(
+                context,
+                "forget unpublished acquisition receipt",
+                move || forget.forget_published_file(&record, file_index),
+            )
+            .await?;
+        } else if let Some(size) = existing {
+            if file
+                .expected_size()
+                .is_some_and(|expected| expected != size)
+            {
+                return Err(invalid(
+                    "Existing selected file size conflicts with selection",
+                ));
+            }
+            if file.expected_sha256().is_some() {
+                let verify = workspace.clone();
+                let selected = file.clone();
+                let receipt = owned(context, "verify existing acquisition file", move || {
+                    verify.verify_file(&selected, false)
+                })
+                .await?;
+                self.record_published(context, operation, file_index, receipt.clone())
+                    .await?;
+                return Ok(receipt.bytes);
+            }
+            if operation.record.manifest.source().revision().strength()
+                != super::RevisionStrength::Immutable
+            {
+                return Err(invalid(
+                    "Existing file has no digest or custody receipt for its mutable source",
+                ));
+            }
+            if ledger.as_ref().is_some_and(|ledger| ledger.complete) {
+                // Every file this operation published has a receipt, so this
+                // one came from somewhere else.
+                return Err(PumasError::Validation {
+                    field: "download.integrity".into(),
+                    message: format!(
+                        "Existing selected file {} ({size} bytes) was not published by this download and has no supplied checksum; preserving it for reconciliation",
+                        file.logical_path()
+                    ),
+                });
+            }
+        }
+        // A transfer that began before published-file receipts were recorded
+        // may have published this file itself. The fresh transfer below proves
+        // it by byte equality at publication.
+        let existing_without_receipt = existing.is_some()
+            && ledger
+                .as_ref()
+                .and_then(|ledger| ledger.files.get(&file_index))
+                .is_none()
+            && !ledger.as_ref().is_some_and(|ledger| ledger.complete);
         let key = (operation.record.id, file_index);
         let started = Instant::now();
         let mut attempt = 0_u32;
+        let mut restarted_refused_continuation = false;
         loop {
             if transfer_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now()) {
                 return Err(match source {
@@ -1310,6 +1380,7 @@ impl AcquisitionService {
             })
             .await?
             .unwrap_or(0);
+            let mut physical_length = physical_length;
             // A publisher digest can independently verify a complete partial.
             // Immutable revision and length alone cannot establish completion.
             if !existing_without_receipt
@@ -1318,18 +1389,9 @@ impl AcquisitionService {
                 && file.expected_sha256().is_some()
             {
                 self.forget_checkpoint(key)?;
-                let publish = workspace.clone();
-                let selected = file.clone();
-                return owned(
-                    context,
-                    "publish digest-verified acquisition partial",
-                    move || {
-                        publish
-                            .publish_part(&selected, false)
-                            .map(|receipt| receipt.bytes)
-                    },
-                )
-                .await;
+                return self
+                    .publish_acquired_part(context, operation, workspace, file_index, false)
+                    .await;
             }
             let checkpoint = self.lookup_checkpoint(key)?;
             let checkpoint = checkpoint.filter(|checkpoint| {
@@ -1374,6 +1436,41 @@ impl AcquisitionService {
                 }
             } else {
                 self.forget_checkpoint(key)?;
+            }
+            // Beside an unreceipted final file, a partial without a live
+            // checkpoint (left by an earlier refused or interrupted attempt,
+            // in this session or another) is discarded only when every byte of
+            // it is already in the final file; the transfer then restarts from
+            // byte zero and publication compares the complete result.
+            if existing_without_receipt
+                && physical_length > 0
+                && resume == 0
+                && !matches!(source, AcquisitionSource::Local { .. })
+            {
+                let compare = workspace.clone();
+                let path = file.logical_path().to_owned();
+                let retained = owned(context, "compare retained acquisition partial", move || {
+                    compare.discard_part_duplicating_final(&path)
+                })
+                .await?;
+                match retained {
+                    super::workspace::RetainedPart::Absent
+                    | super::workspace::RetainedPart::Discarded => physical_length = 0,
+                    super::workspace::RetainedPart::Differs {
+                        part_bytes,
+                        part_sha256,
+                        final_bytes,
+                        final_sha256,
+                    } => {
+                        return Err(PumasError::Validation {
+                            field: "download.integrity".into(),
+                            message: format!(
+                                "Existing selected file {} ({final_bytes} bytes, SHA-256 {final_sha256}) and its retained partial ({part_bytes} bytes, SHA-256 {part_sha256}) differ, and neither has a verified receipt or supplied checksum; preserving both files for reconciliation",
+                                file.logical_path()
+                            ),
+                        })
+                    }
+                }
             }
             // A lost runtime checkpoint is not permission to discard bytes.
             // Sources can continue under a selected publisher digest: only the
@@ -1547,19 +1644,43 @@ impl AcquisitionService {
                     if host.pause_requested_now() {
                         return Err(PumasError::DownloadPaused);
                     }
-                    let publish = workspace.clone();
-                    let selected = file.clone();
-                    return owned(context, "publish verified acquisition file", move || {
-                        publish
-                            .publish_part(&selected, existing_without_receipt)
-                            .map(|receipt| receipt.bytes)
-                    })
-                    .await;
+                    return self
+                        .publish_acquired_part(
+                            context,
+                            operation,
+                            workspace,
+                            file_index,
+                            existing_without_receipt,
+                        )
+                        .await;
                 }
                 Ok(HttpBodyOutcome::Paused) => return Err(PumasError::DownloadPaused),
                 Ok(HttpBodyOutcome::Cancelled) => {
                     self.forget_checkpoint(key)?;
                     return Err(PumasError::DownloadCancelled);
+                }
+                Err(error)
+                    if resume > 0
+                        && !restarted_refused_continuation
+                        && file.expected_sha256().is_some()
+                        && super::http::is_refused_continuation(&error)
+                        && host.restart_refused_continuation()
+                        && !host.cancel_requested() =>
+                {
+                    // The source cannot continue this representation. Under a
+                    // publisher digest a fresh full transfer is still verified,
+                    // so the consumer chose to restart rather than keep a
+                    // partial that can never complete.
+                    restarted_refused_continuation = true;
+                    self.forget_checkpoint(key)?;
+                    let discard = workspace.clone();
+                    let path = file.logical_path().to_owned();
+                    owned(context, "discard refused acquisition partial", move || {
+                        discard.remove_part(&path)
+                    })
+                    .await?;
+                    host.retry(attempt, None, Some(&error.to_string())).await?;
+                    continue;
                 }
                 Err(error) => {
                     if !error.is_retryable() || host.cancel_requested() {
@@ -1592,6 +1713,67 @@ impl AcquisitionService {
                 }
             }
         }
+    }
+
+    /// Publish a verified staged file. Its receipt is recorded first, so a
+    /// resumed operation recognizes the final file as its own even if it was
+    /// interrupted right after the rename. An unreceipted final file from an
+    /// earlier transfer is recorded only once the fresh transfer proved it.
+    async fn publish_acquired_part(
+        &self,
+        context: &TaskContext,
+        operation: &AcquisitionOperation,
+        workspace: &AcquisitionWorkspace,
+        file_index: usize,
+        existing_without_receipt: bool,
+    ) -> Result<u64> {
+        let file = operation
+            .record
+            .manifest
+            .files()
+            .get(file_index)
+            .ok_or_else(|| invalid("Selected file is unavailable"))?
+            .clone();
+        if !existing_without_receipt {
+            let stage = workspace.clone();
+            let selected = file.clone();
+            let staged = owned(context, "verify staged acquisition file", move || {
+                if stage.file_len(selected.logical_path(), false)?.is_some() {
+                    return Err(invalid(
+                        "A selected file appeared at its destination before publication",
+                    ));
+                }
+                stage.verify_file(&selected, true)
+            })
+            .await?;
+            self.record_published(context, operation, file_index, staged)
+                .await?;
+        }
+        let publish = workspace.clone();
+        let published = owned(context, "publish verified acquisition file", move || {
+            publish.publish_part(&file, existing_without_receipt)
+        })
+        .await?;
+        if existing_without_receipt {
+            self.record_published(context, operation, file_index, published.clone())
+                .await?;
+        }
+        Ok(published.bytes)
+    }
+
+    async fn record_published(
+        &self,
+        context: &TaskContext,
+        operation: &AcquisitionOperation,
+        file_index: usize,
+        receipt: VerifiedFile,
+    ) -> Result<()> {
+        let store = self.store.clone();
+        let record = operation.record.clone();
+        owned(context, "record published acquisition file", move || {
+            store.record_published_file(&record, file_index, receipt)
+        })
+        .await
     }
 
     /// Reopening `Using` requires an exact consumer reconciliation lease. The
@@ -1985,6 +2167,148 @@ impl AcquisitionConsumer {
     ) -> Result<T> {
         self.scope
             .run_worker_invocation(move |context| async move { owned(&context, name, work).await })
+            .await
+    }
+
+    /// Observe the records this consumer retains in the shared store, so it can
+    /// choose an exact demand to resume or settle. Observation grants no
+    /// filesystem, transfer, or settlement authority.
+    pub async fn retained_acquisitions(&self) -> Result<Vec<AcquisitionRecord>> {
+        let store = self.service.store.clone();
+        let owner = self.owner.clone();
+        self.run_blocking("observe retained consumer acquisitions", move || {
+            Ok(store
+                .acquisitions()?
+                .into_values()
+                .filter(|record| record.demand.consumer == owner)
+                .collect())
+        })
+        .await
+    }
+
+    /// Withdraw a retained `Using` lease that never received a completion
+    /// receipt, for a consumer whose output under that lease is disposable.
+    ///
+    /// The held workspace must match the exact retained selection and its
+    /// verified-file receipts. `cleanup` runs only after that check and must
+    /// revoke and reclaim whatever the interrupted consumer produced; only its
+    /// success permits withdrawal. A receipted use is refused (reconcile it
+    /// instead), and so is a terminal record. Returns `false` when the demand
+    /// has no record or only an unfinished transfer. Input files are not
+    /// removed unless `cleanup` removes them.
+    pub async fn withdraw_unreceipted_use(
+        &self,
+        demand: AcquisitionDemand,
+        manifest: ArtifactManifest,
+        workspace: AcquisitionWorkspace,
+        cleanup: impl FnOnce() -> Result<()> + Send + 'static,
+    ) -> Result<bool> {
+        if demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        let service = self.service.clone();
+        self.scope
+            .run_worker_invocation(move |context| async move {
+                service.require_schema(&context).await?;
+                let Some(proof) = service
+                    .reopen_using(&context, &demand, &manifest, &workspace)
+                    .await?
+                else {
+                    return Ok(false);
+                };
+                let record = proof.record().clone();
+                let AcquisitionPhase::Using { lease } = record.phase else {
+                    return Err(invalid("Retained consumer use has no exact lease"));
+                };
+                let use_handle = AcquiredArtifactUse {
+                    store: service.store.clone(),
+                    context: context.clone(),
+                    lease: AcquisitionUseLease {
+                        operation: AcquisitionOperation {
+                            record,
+                            context: context.clone(),
+                        },
+                        workspace,
+                        lease,
+                        context: context.clone(),
+                    },
+                };
+                use_handle.withdraw_after_cleanup(cleanup).await?;
+                Ok(true)
+            })
+            .await
+    }
+
+    /// Withdraw an unfinished transfer (`Transferring` or `FilesReady`) that
+    /// its consumer has superseded, so no later demand can resume its bytes.
+    ///
+    /// The caller must hold exclusive authority over `workspace`: no transfer
+    /// for this demand may be running. A live warm checkpoint for the record is
+    /// refused as evidence of one. `cleanup` runs after the exact unreceipted
+    /// record is rechecked and must reclaim the workspace's partial bytes; only
+    /// its success permits withdrawal. Returns `false` when the demand has no
+    /// record; a record under consumer use or already terminal is refused.
+    pub async fn withdraw_unfinished_transfer(
+        &self,
+        demand: AcquisitionDemand,
+        manifest: ArtifactManifest,
+        workspace: AcquisitionWorkspace,
+        cleanup: impl FnOnce() -> Result<()> + Send + 'static,
+    ) -> Result<bool> {
+        if demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        let service = self.service.clone();
+        self.scope
+            .run_worker_invocation(move |context| async move {
+                service.require_schema(&context).await?;
+                let store = service.store.clone();
+                let lookup = demand.clone();
+                let Some(record) = owned(&context, "observe unfinished transfer", move || {
+                    Ok(store
+                        .acquisitions()?
+                        .into_values()
+                        .find(|record| record.demand == lookup))
+                })
+                .await?
+                else {
+                    return Ok(false);
+                };
+                if record.manifest != manifest || &record.workspace != workspace.identity() {
+                    return Err(invalid(
+                        "Unfinished transfer does not match the supplied selection or workspace",
+                    ));
+                }
+                if !matches!(
+                    record.phase,
+                    AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady
+                ) {
+                    return Err(invalid(
+                        "Only an unfinished transfer can be withdrawn as superseded",
+                    ));
+                }
+                {
+                    let mut checkpoints = service
+                        .checkpoints
+                        .lock()
+                        .map_err(|_| invalid("Checkpoint owner poisoned"))?;
+                    checkpoints.retain(|_, checkpoint| checkpoint.owner.is_live());
+                    if checkpoints.keys().any(|(id, _)| *id == record.id) {
+                        return Err(invalid(
+                            "A live transfer still holds this acquisition's continuation",
+                        ));
+                    }
+                }
+                workspace.validate()?;
+                let operation = AcquisitionOperation {
+                    record,
+                    context: context.clone(),
+                };
+                service
+                    .cleanup_cancelled_transfer(&context, operation, Box::new(cleanup))
+                    .await?;
+                Ok(true)
+            })
             .await
     }
 
@@ -4131,38 +4455,85 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn promoted_digestless_file_without_receipt_is_preserved_for_reconciliation() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let stage = temp.path().join("stage");
-        std::fs::create_dir(&stage).unwrap();
-        let store = Arc::new(AcquisitionStore::new(temp.path()));
-        let service = Arc::new(AcquisitionService::new(store));
+    /// How a resume test leaves the workspace and ledger before resuming.
+    #[derive(Clone, Copy)]
+    struct ResumeFixture {
+        /// Drop the published-file ledger, as for a transfer that began
+        /// before receipts were recorded.
+        legacy: bool,
+        /// Replace the published final file with these bytes.
+        existing: Option<&'static [u8]>,
+        /// Leave a partial with these bytes beside the final file.
+        leftover_part: Option<&'static [u8]>,
+    }
+
+    /// What the source sees on resume.
+    enum ResumeSource {
+        /// Nothing may connect.
+        Untouched,
+        /// One complete `DATA` response.
+        Full,
+        /// A truncated `DA` body, then a complete `DATA` response.
+        TruncatedThenFull,
+    }
+
+    /// Serve `DATA` `responses` times, recording each request head.
+    async fn serve_requests(
+        listener: tokio::net::TcpListener,
+        bodies: Vec<(usize, &'static [u8])>,
+    ) -> (Vec<String>, tokio::net::TcpListener) {
+        let mut heads = Vec::new();
+        for (declared, body) in bodies {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = socket.read(&mut buffer).await.unwrap();
+                assert!(read > 0);
+                request.extend_from_slice(&buffer[..read]);
+            }
+            heads.push(String::from_utf8(request).unwrap().to_ascii_lowercase());
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(body).await.unwrap();
+        }
+        (heads, listener)
+    }
+
+    /// Acquire `payload.bin` (`DATA`) through `service` for the fixed demand.
+    async fn acquire_payload(
+        service: Arc<AcquisitionService>,
+        stage: std::path::PathBuf,
+        url: String,
+        retry: AcquisitionRetryPolicy,
+    ) -> Result<u64> {
         let scope = service
             .supervisor()
             .open_scope(|| async { Ok(()) })
             .unwrap();
-        let demand = AcquisitionDemand {
-            consumer: "fixture".into(),
-            operation: "exact-demand".into(),
-        };
-        let first_service = service.clone();
-        let first_stage = stage.clone();
-        let first_demand = demand.clone();
-        let (url, server) = serve(b"DATA").await;
-        scope
+        let result = scope
             .run_invocation(move |context| async move {
-                let grant = workspace(&first_stage);
-                let operation = first_service
+                let grant = workspace(&stage);
+                let operation = service
                     .begin(
                         &context,
-                        first_demand,
+                        AcquisitionDemand {
+                            consumer: "fixture".into(),
+                            operation: "exact-demand".into(),
+                        },
                         manifest("payload.bin"),
                         grant.identity().clone(),
                         None,
                     )
                     .await?;
-                first_service
+                service
                     .acquire_file(
                         &context,
                         &operation,
@@ -4171,91 +4542,348 @@ mod tests {
                         &reqwest::Client::new().into(),
                         &url,
                         None,
-                        &retry(),
+                        &retry,
                         &mut Host,
                     )
-                    .await?;
-                Ok(())
+                    .await
             })
-            .await
-            .unwrap();
-        server.await.unwrap();
+            .await;
         scope.shutdown().await.unwrap();
-        assert!(matches!(
+        result
+    }
+
+    /// Publish `payload.bin` from an immutable source, stop the service while
+    /// the acquisition is still Transferring (a pause), arrange `fixture`,
+    /// then resume against `source`. Returns the stage directory, the resume
+    /// result and the request heads the source received.
+    async fn resume_after_promoted_digestless_file(
+        fixture: ResumeFixture,
+        source: ResumeSource,
+    ) -> (tempfile::TempDir, Result<u64>, Vec<String>) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let service = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            temp.path(),
+        ))));
+        let (url, server) = serve(b"DATA").await;
+        assert_eq!(
+            acquire_payload(service.clone(), stage.clone(), url, retry())
+                .await
+                .unwrap(),
+            4
+        );
+        server.await.unwrap();
+        let record = service
+            .store
+            .acquisitions()
+            .unwrap()
+            .into_values()
+            .next()
+            .unwrap();
+        assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+        let ledger = service.store.published_files(record.id).unwrap().unwrap();
+        assert!(ledger.complete);
+        assert_eq!(ledger.files[&0].bytes, 4);
+        if fixture.legacy {
             service
                 .store
-                .acquisitions()
-                .unwrap()
-                .values()
-                .next()
-                .unwrap()
-                .phase,
-            AcquisitionPhase::Transferring
-        ));
+                .drop_published_ledger_for_test(record.id)
+                .unwrap();
+        }
         drop(service);
+        if let Some(existing) = fixture.existing {
+            std::fs::write(stage.join("payload.bin"), existing).unwrap();
+        }
+        if let Some(part) = fixture.leftover_part {
+            std::fs::write(stage.join("payload.bin.part"), part).unwrap();
+        }
 
-        // No durable receipt or supplied checksum authorizes the promoted file.
-        // Reacquisition must not manufacture verification by comparing local hashes.
         let reopened = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
             temp.path(),
         ))));
-        let scope = reopened
-            .supervisor()
-            .open_scope(|| async { Ok(()) })
-            .unwrap();
-        let owner = reopened.clone();
-        let use_stage = stage.clone();
-        let use_demand = demand.clone();
-        let (url, server) = serve(b"DATA").await;
-        let result = scope
-            .run_invocation(move |context| async move {
-                let grant = workspace(&use_stage);
-                let operation = owner
-                    .begin(
-                        &context,
-                        use_demand,
-                        manifest("payload.bin"),
-                        grant.identity().clone(),
-                        None,
-                    )
-                    .await?;
-                owner
-                    .acquire_file(
-                        &context,
-                        &operation,
-                        &grant,
-                        0,
-                        &reqwest::Client::new().into(),
-                        &url,
-                        None,
-                        &retry(),
-                        &mut Host,
-                    )
-                    .await?;
-                Ok(())
-            })
-            .await;
-        assert!(
-            matches!(result, Err(PumasError::Validation { field, message })
-            if field == "download.integrity" && message.contains("preserving both files"))
-        );
-        server.await.unwrap();
-        scope.shutdown().await.unwrap();
-        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
-        assert_eq!(
-            std::fs::read(stage.join("payload.bin.part")).unwrap(),
-            b"DATA"
-        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let (bodies, policy): (Vec<(usize, &'static [u8])>, _) = match source {
+            ResumeSource::Untouched => (Vec::new(), retry()),
+            ResumeSource::Full => (vec![(4, b"DATA")], retry()),
+            ResumeSource::TruncatedThenFull => (
+                vec![(4, b"DA"), (4, b"DATA")],
+                AcquisitionRetryPolicy {
+                    attempts: Some(3),
+                    elapsed: Duration::from_secs(20),
+                    backoff: crate::network::RetryConfig::new(),
+                },
+            ),
+        };
+        let server = tokio::spawn(serve_requests(listener, bodies));
+        let result = acquire_payload(reopened.clone(), stage.clone(), url, policy).await;
+        let (heads, listener) = server.await.unwrap();
+        // No connection beyond the scripted responses reached the source.
+        assert!(matches!(listener.into_std().unwrap().accept(), Err(error)
+            if error.kind() == std::io::ErrorKind::WouldBlock));
         let records = reopened.store.acquisitions().unwrap();
         assert_eq!(records.len(), 1);
         let record = records.values().next().unwrap();
         assert!(matches!(record.phase, AcquisitionPhase::Transferring));
         assert!(record.files.is_empty());
-        assert!(reopened
+        (temp, result, heads)
+    }
+
+    fn refusal(result: Result<u64>) -> String {
+        match result {
+            Err(PumasError::Validation { field, message }) if field == "download.integrity" => {
+                message
+            }
+            other => panic!("expected an integrity refusal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn published_file_ledger_is_pruned_when_files_are_ready() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let service = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            temp.path(),
+        ))));
+        let (url, server) = serve(b"DATA").await;
+        acquire_payload(service.clone(), stage.clone(), url, retry())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let downloads = std::fs::read_to_string(temp.path().join("downloads.json")).unwrap();
+        assert!(downloads.contains("acquisition_published_files"));
+
+        let scope = service
+            .supervisor()
+            .open_scope(|| async { Ok(()) })
+            .unwrap();
+        let owner = service.clone();
+        scope
+            .run_invocation(move |context| async move {
+                let grant = workspace(&stage);
+                let operation = owner
+                    .begin(
+                        &context,
+                        AcquisitionDemand {
+                            consumer: "fixture".into(),
+                            operation: "exact-demand".into(),
+                        },
+                        manifest("payload.bin"),
+                        grant.identity().clone(),
+                        None,
+                    )
+                    .await?;
+                let lease = owner.files_ready(&context, operation, grant).await?;
+                assert_eq!(lease.operation.record.files[0].bytes, 4);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        scope.shutdown().await.unwrap();
+        let record = service
             .store
-            .consumer_receipt(record.id)
+            .acquisitions()
             .unwrap()
-            .is_none());
+            .into_values()
+            .next()
+            .unwrap();
+        assert!(service.store.published_files(record.id).unwrap().is_none());
+        // Without an unfinished transfer the store carries no ledger at all,
+        // as a reader that predates it expects.
+        let downloads = std::fs::read_to_string(temp.path().join("downloads.json")).unwrap();
+        assert!(!downloads.contains("acquisition_published_files"));
+    }
+
+    #[tokio::test]
+    async fn resume_admits_its_own_published_file_by_receipt_without_the_source() {
+        // The operation recorded the file's receipt when it published it, so
+        // a resume neither re-downloads nor rehashes it.
+        let (temp, result, heads) = resume_after_promoted_digestless_file(
+            ResumeFixture {
+                legacy: false,
+                existing: None,
+                leftover_part: None,
+            },
+            ResumeSource::Untouched,
+        )
+        .await;
+        assert_eq!(result.unwrap(), 4);
+        assert!(heads.is_empty());
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+    }
+
+    #[tokio::test]
+    async fn receipt_recorded_before_an_interrupted_rename_publishes_the_staged_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let service = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            temp.path(),
+        ))));
+        let (url, server) = serve(b"DATA").await;
+        acquire_payload(service.clone(), stage.clone(), url, retry())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        drop(service);
+        // As if the process stopped after recording the receipt but before
+        // the rename.
+        std::fs::rename(stage.join("payload.bin"), stage.join("payload.bin.part")).unwrap();
+        let reopened = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            temp.path(),
+        ))));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        assert_eq!(
+            acquire_payload(reopened, stage.clone(), url, retry())
+                .await
+                .unwrap(),
+            4
+        );
+        assert!(matches!(listener.into_std().unwrap().accept(), Err(error)
+            if error.kind() == std::io::ErrorKind::WouldBlock));
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert!(!stage.join("payload.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn final_file_this_download_did_not_publish_is_refused_before_transfer() {
+        // A download that records receipts and finds an unreceipted final
+        // file knows the file is not its own, even when it is identical.
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("payload.bin"), b"DATA").unwrap();
+        let service = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            temp.path(),
+        ))));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let message = refusal(acquire_payload(service, stage.clone(), url, retry()).await);
+        assert!(
+            message.contains("was not published by this download"),
+            "{message}"
+        );
+        assert!(message.contains("4 bytes"), "{message}");
+        assert!(matches!(listener.into_std().unwrap().accept(), Err(error)
+            if error.kind() == std::io::ErrorKind::WouldBlock));
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+    }
+
+    #[tokio::test]
+    async fn legacy_unreceipted_file_is_proven_by_fresh_transfer_on_resume() {
+        // A transfer that began before receipts were recorded: the existing
+        // file is adopted only because the fresh transfer is byte-identical.
+        let (temp, result, heads) = resume_after_promoted_digestless_file(
+            ResumeFixture {
+                legacy: true,
+                existing: None,
+                leftover_part: None,
+            },
+            ResumeSource::Full,
+        )
+        .await;
+        assert_eq!(result.unwrap(), 4);
+        assert_eq!(heads.len(), 1);
+        assert!(!heads[0].contains("\r\nrange:"));
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert!(!stage.join("payload.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn legacy_duplicate_partial_is_discarded_and_resume_completes() {
+        // The user's folder: an earlier build refused publication and left
+        // the fresh copy (or part of it) as a partial.
+        for leftover in [b"DATA".as_slice(), b"DA".as_slice()] {
+            let (temp, result, heads) = resume_after_promoted_digestless_file(
+                ResumeFixture {
+                    legacy: true,
+                    existing: None,
+                    leftover_part: Some(leftover),
+                },
+                ResumeSource::Full,
+            )
+            .await;
+            assert_eq!(result.unwrap(), 4);
+            assert!(!heads[0].contains("\r\nrange:"));
+            let stage = temp.path().join("stage");
+            assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+            assert!(!stage.join("payload.bin.part").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn interrupted_fresh_transfer_restarts_within_the_same_resume() {
+        // The comparison transfer is cut off. The next attempt discards the
+        // prefix it left (all of it is in the final file) and starts again.
+        let (temp, result, heads) = resume_after_promoted_digestless_file(
+            ResumeFixture {
+                legacy: true,
+                existing: None,
+                leftover_part: None,
+            },
+            ResumeSource::TruncatedThenFull,
+        )
+        .await;
+        assert_eq!(result.unwrap(), 4);
+        assert_eq!(heads.len(), 2);
+        assert!(heads.iter().all(|head| !head.contains("\r\nrange:")));
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert!(!stage.join("payload.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn legacy_different_existing_file_is_preserved_with_both_digests() {
+        let (temp, result, _) = resume_after_promoted_digestless_file(
+            ResumeFixture {
+                legacy: true,
+                existing: Some(b"EVIL"),
+                leftover_part: None,
+            },
+            ResumeSource::Full,
+        )
+        .await;
+        let message = refusal(result);
+        assert!(message.contains("differs from the fresh immutable-source transfer"));
+        assert!(message.contains(&hex::encode(sha2::Sha256::digest(b"EVIL"))));
+        assert!(message.contains(&hex::encode(sha2::Sha256::digest(b"DATA"))));
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"EVIL");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_differing_partial_is_preserved_with_both_digests_before_transfer() {
+        // A later resume of the preserved pair keeps giving the full reason.
+        let (temp, result, heads) = resume_after_promoted_digestless_file(
+            ResumeFixture {
+                legacy: true,
+                existing: None,
+                leftover_part: Some(b"EV"),
+            },
+            ResumeSource::Untouched,
+        )
+        .await;
+        assert!(heads.is_empty());
+        let message = refusal(result);
+        assert!(message.contains("retained partial (2 bytes"), "{message}");
+        assert!(message.contains(&hex::encode(sha2::Sha256::digest(b"EV"))));
+        assert!(message.contains("payload.bin (4 bytes"), "{message}");
+        assert!(message.contains(&hex::encode(sha2::Sha256::digest(b"DATA"))));
+        let stage = temp.path().join("stage");
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"EV"
+        );
     }
 
     #[tokio::test]
@@ -4715,6 +5343,243 @@ mod tests {
     #[tokio::test]
     async fn cleanup_failure_retains_using_record_and_verified_file() {
         withdrawal_waits_for_consumer_effect(true).await;
+    }
+
+    #[tokio::test]
+    async fn superseded_unfinished_transfer_is_withdrawn_only_after_cleanup() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "superseded-selection".into(),
+        };
+        // The source is unavailable, so the transfer stays unfinished.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let failed = consumer
+            .acquire_http(
+                AcquisitionHttpRequest {
+                    demand: demand.clone(),
+                    manifest: manifest("payload.bin"),
+                    workspace: workspace(&stage),
+                    sources: vec![AcquisitionHttpSource {
+                        url,
+                        authorization: None,
+                    }],
+                    retry: retry(),
+                },
+                reqwest::Client::new(),
+                Box::new(Host),
+                |_use_handle| async move { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                |(), _receipt| async move { Ok::<(), PumasError>(()) },
+            )
+            .await;
+        assert!(failed.is_err());
+        server.await.unwrap();
+        assert_eq!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Transferring
+        );
+
+        let unknown = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "never-admitted".into(),
+        };
+        assert!(!consumer
+            .withdraw_unfinished_transfer(
+                unknown,
+                manifest("payload.bin"),
+                workspace(&stage),
+                || { Ok(()) }
+            )
+            .await
+            .unwrap());
+        // Another selection cannot withdraw this record.
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand.clone(),
+                manifest("other.bin"),
+                workspace(&stage),
+                || Ok(())
+            )
+            .await
+            .is_err());
+        // Failed cleanup keeps the unfinished transfer resumable.
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Err(PumasError::Validation {
+                    field: "fixture".into(),
+                    message: "partial still present".into(),
+                }),
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Transferring
+        );
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let observed = cleaned.clone();
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                move || {
+                    observed.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap());
+        assert!(cleaned.load(Ordering::SeqCst));
+        assert_eq!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Withdrawn
+        );
+        // A terminal record is not withdrawn again.
+        assert!(consumer
+            .withdraw_unfinished_transfer(
+                demand,
+                manifest("payload.bin"),
+                workspace(&stage),
+                || { Ok(()) }
+            )
+            .await
+            .is_err());
+        consumer.shutdown().await.unwrap();
+        service.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cold_unreceipted_use_is_withdrawn_only_after_consumer_cleanup() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "interrupted-disposable-use".into(),
+        };
+        {
+            // An interrupted consumer leaves a receiptless Using row behind.
+            let store = Arc::new(AcquisitionStore::new(temp.path()));
+            let service = Arc::new(AcquisitionService::new(store));
+            let consumer = service.open_consumer("fixture").unwrap();
+            let (url, server) = serve(b"DATA").await;
+            let result = consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: demand.clone(),
+                        manifest: manifest("payload.bin"),
+                        workspace: workspace(&stage),
+                        sources: vec![AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    |_use_handle| async move {
+                        Err::<((), Value), PumasError>(PumasError::Other("interrupted".into()))
+                    },
+                    |(), _receipt| async move { Ok::<(), PumasError>(()) },
+                )
+                .await;
+            assert!(matches!(result, Err(PumasError::Other(message)) if message == "interrupted"));
+            server.await.unwrap();
+            consumer.shutdown().await.unwrap();
+            service.shutdown().await.unwrap();
+        }
+
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let other = service.open_consumer("other").unwrap();
+        let retained = consumer.retained_acquisitions().await.unwrap();
+        assert_eq!(retained.len(), 1);
+        assert!(matches!(retained[0].phase, AcquisitionPhase::Using { .. }));
+        assert!(other.retained_acquisitions().await.unwrap().is_empty());
+        assert!(other
+            .withdraw_unreceipted_use(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Ok(())
+            )
+            .await
+            .is_err());
+
+        // Failed consumer cleanup keeps the retained lease and its input.
+        let failed = consumer
+            .withdraw_unreceipted_use(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Err(PumasError::Other("output still present".into())),
+            )
+            .await;
+        assert!(failed.is_err());
+        assert!(matches!(
+            consumer.retained_acquisitions().await.unwrap()[0].phase,
+            AcquisitionPhase::Using { .. }
+        ));
+
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let observed = cleaned.clone();
+        assert!(consumer
+            .withdraw_unreceipted_use(
+                demand.clone(),
+                manifest("payload.bin"),
+                workspace(&stage),
+                move || {
+                    observed.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap());
+        assert!(cleaned.load(Ordering::SeqCst));
+        let records = consumer.retained_acquisitions().await.unwrap();
+        assert_eq!(records[0].phase, AcquisitionPhase::Withdrawn);
+        // Withdrawal releases custody; it does not reclaim unremoved input bytes.
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        // A terminal row cannot be withdrawn again.
+        assert!(consumer
+            .withdraw_unreceipted_use(
+                demand,
+                manifest("payload.bin"),
+                workspace(&stage),
+                || Ok(())
+            )
+            .await
+            .is_err());
+        // The failed consumer cleanup stays visible to the scope owner.
+        assert!(matches!(
+            consumer.shutdown().await,
+            Err(PumasError::DownloadShutdownFailed { failures: 1 })
+        ));
+        other.shutdown().await.unwrap();
+        assert!(matches!(
+            service.shutdown().await,
+            Err(PumasError::DownloadShutdownFailed { failures: 1 })
+        ));
     }
 
     #[tokio::test]

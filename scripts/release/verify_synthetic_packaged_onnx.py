@@ -1,7 +1,10 @@
 """Run a bounded untrained lifecycle check on an exact produced Linux archive.
 
-This uses the producing job's own bytes. It is not pretrained Nomic acceptance,
-model-quality evidence, native closure qualification, or a release authorization.
+This uses the producing job's own bytes. The archive bundles no runtime: the
+lifecycle installs ONNX Runtime through the extracted Pumas (a network download)
+and runs the graph on a profile pinned to that version. It is not pretrained
+Nomic acceptance, model-quality evidence, native closure qualification, or a
+release authorization.
 """
 
 import argparse
@@ -12,7 +15,11 @@ import subprocess
 import sys
 
 import headless_inference as package
+from packaged_onnx_support import CPU_TAG
 from synthetic_onnx_fixture import create_fixture
+
+# Covers the ONNX Runtime download through Pumas as well as the lifecycle.
+LIFECYCLE_TIMEOUT_SECONDS = 900
 
 
 def run_lifecycle(command, output):
@@ -20,7 +27,7 @@ def run_lifecycle(command, output):
         command, stdout=output, stderr=subprocess.STDOUT, start_new_session=True
     )
     try:
-        returncode = process.wait(timeout=120)
+        returncode = process.wait(timeout=LIFECYCLE_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         # The verifier and its owned Pumas child share this new process group.
         # Stop both on timeout, before reaping the verifier and releasing its PID.
@@ -45,12 +52,23 @@ def bind_result(expected_source, evidence, manifest, fixture, result):
         "synthetic lifecycle binary differs from the verified archive",
     )
     package.require(
-        all(result.get(name) == "passed" for name in ("import", "load", "unload"))
+        all(
+            result.get(name) == "passed" for name in ("runtime_install", "import", "load", "unload")
+        )
         and type(result.get("embedding_dimensions")) is int
         and result["embedding_dimensions"] == 256
         and result.get("finite") is True
-        and result.get("runtime", {}).get("mapping") == "packaged-file-identity-observed",
+        and result.get("bundled_runtimes") == [],
         "synthetic lifecycle result is incomplete",
+    )
+    tag = result.get("runtime_version")
+    runtime = result.get("runtime", {})
+    package.require(
+        isinstance(tag, str)
+        and CPU_TAG.fullmatch(tag) is not None
+        and runtime.get("mapping") == "pumas-installed-runtime-observed"
+        and runtime.get("runtime_version") == tag,
+        "synthetic lifecycle did not run on the ONNX Runtime Pumas installed",
     )
     return {
         "schema_version": 1,
@@ -60,6 +78,7 @@ def bind_result(expected_source, evidence, manifest, fixture, result):
         "archive_sha256": evidence["archive_sha256"],
         "fixture": fixture,
         "lifecycle": result,
+        "runtime_version": tag,
         "graceful_shutdown": "passed",
         "system_dependency_closure": "unqualified",
     }

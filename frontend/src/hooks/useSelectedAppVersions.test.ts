@@ -161,7 +161,7 @@ describe('useSelectedAppVersions', () => {
 
     const { result, rerender } = renderHook(
       ({ appId }: { appId: string | null }) => useSelectedAppVersions(appId),
-      { initialProps: { appId: 'torch' as string | null } }
+      { initialProps: { appId: 'torch' } }
     );
 
     await waitFor(() => {

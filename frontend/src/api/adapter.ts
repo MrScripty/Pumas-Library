@@ -100,11 +100,11 @@ export const api: DesktopBridgeAPI = new Proxy({} as DesktopBridgeAPI, {
       };
     }
 
-    const value = instance[prop as keyof DesktopBridgeAPI];
+    const value: unknown = Reflect.get(instance, prop);
 
     // If it's a function, bind it to the instance
     if (typeof value === 'function') {
-      return value.bind(instance);
+      return (value as (...args: unknown[]) => unknown).bind(instance);
     }
 
     return value;

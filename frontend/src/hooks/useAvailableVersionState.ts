@@ -95,7 +95,7 @@ export function useAvailableVersionState({
           }
           followupRefreshRef.current = setTimeout(() => {
             void fetchAvailableVersionsRef.current(false);
-          }, 1500) as unknown as NodeJS.Timeout;
+          }, 1500);
         }
       } else {
         logger.warn('GitHub API rate limited', { retryAfter: result.retry_after_secs });

@@ -216,7 +216,7 @@ describe('useNetworkStatus', () => {
             torch_running: false,
             last_launch_error: null,
             last_launch_log: null,
-          } as StatusTelemetrySnapshot['status'],
+          },
         },
         stale_cursor: false,
         snapshot_required: false,

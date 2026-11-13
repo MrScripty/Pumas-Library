@@ -4,7 +4,6 @@ import type {
   CacheStatus,
   InstallNetworkStatus,
   InstallationProgress,
-  VersionInfo,
   VersionRelease,
   VersionStatus,
 } from '../types/versions';
@@ -115,7 +114,7 @@ describe('useVersions', () => {
       installVersion: vi.fn().mockResolvedValue(true),
       cancelInstallation: vi.fn().mockResolvedValue(true),
       removeVersion: vi.fn().mockResolvedValue(true),
-      getVersionInfo: vi.fn().mockResolvedValue({ tag: 'v1.2.3', installed: true, size: null } as VersionInfo),
+      getVersionInfo: vi.fn().mockResolvedValue({ tag: 'v1.2.3', installed: true, size: null }),
       openPath: vi.fn().mockResolvedValue(true),
       openActiveInstall: vi.fn().mockResolvedValue(true),
     });

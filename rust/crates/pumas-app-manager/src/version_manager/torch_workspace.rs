@@ -176,10 +176,11 @@ mod tests {
             .collect();
         let temporary = workspace.path().join("tmp");
         assert!(temporary.is_dir());
+        let child_temporary = pumas_library::platform::child_process_path(&temporary);
         for name in ["TMPDIR", "TMP", "TEMP"] {
             assert_eq!(
                 environment.get(std::ffi::OsStr::new(name)),
-                Some(&Some(temporary.as_os_str().to_owned()))
+                Some(&Some(child_temporary.as_os_str().to_owned()))
             );
         }
         assert_eq!(
@@ -201,9 +202,9 @@ mod tests {
         let temporary = workspace.path().join("tmp");
         assert!(temporary.is_dir());
         assert!(temporary.starts_with(fs::canonicalize(&root).unwrap()));
-        assert!(command
-            .as_std()
-            .get_envs()
-            .any(|(name, value)| { name == "TMPDIR" && value == Some(temporary.as_os_str()) }));
+        let child_temporary = pumas_library::platform::child_process_path(&temporary);
+        assert!(command.as_std().get_envs().any(|(name, value)| {
+            name == "TMPDIR" && value == Some(child_temporary.as_os_str())
+        }));
     }
 }

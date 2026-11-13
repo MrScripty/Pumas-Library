@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   named its folder by a raw device number, which a later boot can translate
   to a different volume than its saved record. The receipt now adopts its
   record's folder identity when both name the same folder and target.
+- Torch installs on Windows no longer fail with "Resolved Torch artifact is
+  not the acquired local wheel". The resolver compared the path pip reported
+  for the verified Torch wheel with the acquired file's path, and a Windows
+  file URL and resolved path can spell one file differently. A wheel of the
+  same name now also matches when pip reports the SHA-256 the acquired wheel
+  was verified against.
 
 ## [0.8.0] - 2026-11-13
 

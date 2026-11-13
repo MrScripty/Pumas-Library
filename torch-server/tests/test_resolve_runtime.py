@@ -709,6 +709,23 @@ class ResolverTests(unittest.TestCase):
             self.assertIn("not the acquired local wheel", stderr.getvalue())
             self.assertFalse((fresh / "requirements.txt").exists())
 
+    def test_local_wheel_matches_by_verified_digest_however_the_path_is_spelled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            local = pathlib.Path(directory) / "torch-2.14.0+cpu-cp314-cp314-win_amd64.whl"
+            local.write_bytes(b"wheel")
+            digest = "c" * 64
+            # A URL spelling of the same file that does not resolve to the
+            # same path here (as a Windows URL and resolved path can differ).
+            elsewhere = pathlib.Path(directory) / "spelled" / local.name
+            self.assertTrue(
+                resolver.same_local_file(elsewhere.as_uri(), local, digest, digest.upper())
+            )
+            self.assertFalse(resolver.same_local_file(elsewhere.as_uri(), local, digest, "d" * 64))
+            self.assertFalse(resolver.same_local_file(elsewhere.as_uri(), local, digest, None))
+            renamed = pathlib.Path(directory) / "other.whl"
+            self.assertFalse(resolver.same_local_file(renamed.as_uri(), local, digest, digest))
+            self.assertTrue(resolver.same_local_file(local.as_uri(), local))
+
     def test_local_torch_wheel_must_be_the_named_acquired_file(self):
         with tempfile.TemporaryDirectory() as directory:
             wrong = pathlib.Path(directory) / "renamed.whl"

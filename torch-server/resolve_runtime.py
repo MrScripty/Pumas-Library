@@ -1121,11 +1121,26 @@ def local_file_url_path(url: str) -> Path | None:
     return Path(url2pathname(parsed.path))
 
 
-def same_local_file(url: str, path: Path) -> bool:
-    """Whether a pip report URL names exactly this existing local file."""
+def same_local_file(url: str, path: Path, digest: str | None = None, sha256: str | None = None) -> bool:
+    """Whether a pip report URL names this acquired local file.
+
+    The reported `file:` URL must name a file of the same name. It then
+    matches when both paths resolve to the same file, or, when the acquired
+    file's verified `sha256` is known, when pip reports that digest for it:
+    pip hashed the bytes it resolved, so equal digests are the same wheel
+    however the platform spells the path (Windows drive letters, short names
+    and verbatim prefixes differ between a URL and a resolved path).
+    """
     reported = local_file_url_path(url)
-    if reported is None:
+    if reported is None or reported.name != path.name:
         return False
+    if (
+        isinstance(digest, str)
+        and isinstance(sha256, str)
+        and re.fullmatch(r"[0-9a-fA-F]{64}", sha256)
+        and digest.lower() == sha256.lower()
+    ):
+        return True
     try:
         return reported.resolve(strict=True) == path.resolve(strict=True)
     except OSError:
@@ -1138,16 +1153,17 @@ def requirements_from_report(
     build: str,
     modalities: tuple[str, ...] = MODALITIES,
     extras: tuple[str, ...] = (),
-    local_torch: tuple[Path, str] | None = None,
+    local_torch: tuple[Path, str] | tuple[Path, str, str] | None = None,
     omitted: dict[str, str] | None = None,
 ) -> tuple[list[str], dict]:
     """Build the hash lock from pip's report.
 
     `modalities` are the general modalities this resolution carries; any
     general modality left out must appear in `omitted` with its reason.
-    `local_torch` is `(local wheel, official URL)` when the caller resolved
-    against its own verified copy of the official Torch wheel: pip reports the
-    local file, and the lock records the official URL it was acquired from.
+    `local_torch` is `(local wheel, official URL[, verified SHA-256])` when
+    the caller resolved against its own verified copy of the official Torch
+    wheel: pip reports the local file, and the lock records the official URL
+    it was acquired from.
     """
     omitted = dict(omitted or {})
     if set(modalities) | set(omitted) != set(MODALITIES) or set(modalities) & set(omitted):
@@ -1181,7 +1197,9 @@ def requirements_from_report(
         info = item["download_info"]
         url = info["url"]
         if local_torch is not None and name == "torch":
-            if not same_local_file(url, local_torch[0]):
+            reported_digest = info.get("archive_info", {}).get("hashes", {}).get("sha256")
+            verified = local_torch[2] if len(local_torch) > 2 else None
+            if not same_local_file(url, local_torch[0], reported_digest, verified):
                 raise ValueError("Resolved Torch artifact is not the acquired local wheel")
             url = local_torch[1]
         digest = info.get("archive_info", {}).get("hashes", {}).get("sha256")
@@ -1670,7 +1688,7 @@ def resolve_lock(
     torch_source = args.torch_wheel
     local_torch = None
     if args.torch_local_wheel is not None:
-        local_torch = (args.torch_local_wheel, args.torch_wheel)
+        local_torch = (args.torch_local_wheel, args.torch_wheel, args.torch_sha256)
         torch_source = args.torch_local_wheel.as_uri()
     report_path = args.output / "pip-resolution.json"
     try:

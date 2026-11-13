@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   path, which Windows does not resolve `..` in, and wheels such as numba
   install their scripts through `lib/python/../../bin`. Child processes now
   get the ordinary form of the same path.
+  The installed-wheel check that follows now compares the acquired Torch
+  wheel by file identity instead of path text, since pip reports it as a
+  `file:` URL and Pumas names it by its canonical path.
 
 ## [0.8.0] - 2026-11-13
 

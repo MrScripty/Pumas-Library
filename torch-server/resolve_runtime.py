@@ -1308,13 +1308,25 @@ def read_install_lock(output: Path, version: str, build: str, extras: tuple[str,
     return resolution
 
 
+def _local_file_identity(path: Path) -> str:
+    """Name a local file by its volume and file number, not by its spelling.
+
+    pip reports a `file:` URL (`C:/...`) while Pumas passes the acquired wheel
+    as a canonical path, which on Windows is a verbatim `\\\\?\\` path; resolved
+    paths of one file can therefore differ in text. On Windows `st_dev` and
+    `st_ino` are the volume serial number and file index.
+    """
+    status = path.stat()
+    return f"local:{status.st_dev}:{status.st_ino}"
+
+
 def _installed_source(url: str) -> str:
-    """Compare a local wheel by its resolved file, any other source by URL."""
+    """Compare a local wheel by its file identity, any other source by URL."""
     path = local_file_url_path(url)
     if path is None:
         return url
     try:
-        return f"local:{path.resolve(strict=True)}"
+        return _local_file_identity(path)
     except OSError:
         return url
 
@@ -1344,7 +1356,7 @@ def installed_artifacts_match_lock(
         (
             canonicalize_name(artifact["name"]),
             artifact["version"],
-            f"local:{local_files[artifact['name']].resolve(strict=True)}"
+            _local_file_identity(local_files[artifact["name"]])
             if artifact["name"] in local_files
             else artifact["url"],
             artifact["sha256"].lower(),

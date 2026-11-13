@@ -726,6 +726,40 @@ class ResolverTests(unittest.TestCase):
             self.assertFalse(resolver.same_local_file(renamed.as_uri(), local, digest, digest))
             self.assertTrue(resolver.same_local_file(local.as_uri(), local))
 
+    def test_installed_local_wheel_matches_its_lock_by_file_not_path_spelling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            local = root / "torch-2.14.0+cpu-cp314-cp314-win_amd64.whl"
+            local.write_bytes(b"wheel")
+            digest = hashlib.sha256(b"wheel").hexdigest()
+            # A second spelling of the same file, as a Windows file URL and a
+            # verbatim canonical path are.
+            alias = root / "alias"
+            alias.symlink_to(root, target_is_directory=True)
+            artifact = {"name": "torch", "version": "2.14.0+cpu", "url": "", "sha256": digest}
+
+            def report(path):
+                return {
+                    "install": [
+                        {
+                            "metadata": {"name": "torch", "version": "2.14.0+cpu"},
+                            "download_info": {
+                                "url": path.as_uri(),
+                                "archive_info": {"hashes": {"sha256": digest}},
+                            },
+                        }
+                    ]
+                }
+
+            resolver.installed_artifacts_match_lock(
+                report(alias / local.name), [artifact], {"torch": local}
+            )
+            copy = root / "copy" / local.name
+            copy.parent.mkdir()
+            copy.write_bytes(b"wheel")
+            with self.assertRaisesRegex(ValueError, "differ from the hash lock"):
+                resolver.installed_artifacts_match_lock(report(copy), [artifact], {"torch": local})
+
     def test_local_torch_wheel_must_be_the_named_acquired_file(self):
         with tempfile.TemporaryDirectory() as directory:
             wrong = pathlib.Path(directory) / "renamed.whl"

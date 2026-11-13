@@ -1516,3 +1516,64 @@ async fn a_retained_copied_import_is_finished_only_after_its_payload_is_reverifi
         let _ = fixture.tasks.shutdown_owned().await;
     }
 }
+
+/// The live failure after a reboot renumbered the library's block device: a
+/// receipt written before stable volumes holds the old raw device number in
+/// every binding, while the payload is intact. One shared raw number on this
+/// root's own file number is the same filesystem; mixed numbers are not.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_retained_import_recorded_with_a_raw_device_number_is_finished() {
+    use crate::model_library::RetainedImportOutcome;
+    // No filesystem names this device, so it stays a raw number.
+    const RAW_DEVICE: u64 = 0x0fff_ff00;
+    for mixed_volumes in [false, true] {
+        let fixture = Fixture::new().await;
+        assert!(
+            fixture
+                .importer
+                .import(&fixture.spec)
+                .await
+                .unwrap()
+                .success
+        );
+        let target = fixture.target();
+        let id = fixture.library.get_model_id(&target).unwrap();
+        strand_index_row(&fixture.library, &id);
+        let receipt_path = target.join(".pumas_import_publication.json");
+        let mut receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap();
+        let stable = receipt["payload"]["library_root"]["volume"]
+            .as_u64()
+            .unwrap();
+        if stable & crate::model_library::STABLE_VOLUME == 0 {
+            // A filesystem without a UUID records raw numbers already.
+            let _ = fixture.tasks.shutdown_owned().await;
+            return;
+        }
+        let payload = &mut receipt["payload"];
+        payload["library_root"]["volume"] = serde_json::json!(RAW_DEVICE);
+        payload["stage"]["volume"] = serde_json::json!(if mixed_volumes {
+            RAW_DEVICE + 1
+        } else {
+            RAW_DEVICE
+        });
+        for file in payload["files"].as_object_mut().unwrap().values_mut() {
+            file["identity"]["volume"] = serde_json::json!(RAW_DEVICE);
+        }
+        std::fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt).unwrap()).unwrap();
+
+        let outcome = fixture.library.finish_retained_import(&id).await;
+        let ready = crate::models::copied_import_ready_value(
+            &fixture.library.index().get(&id).unwrap().unwrap().metadata,
+        );
+        if mixed_volumes {
+            assert!(outcome.is_err(), "{outcome:?}");
+            assert!(!ready);
+        } else {
+            assert_eq!(outcome.unwrap(), RetainedImportOutcome::Acknowledged);
+            assert!(ready);
+        }
+        let _ = fixture.tasks.shutdown_owned().await;
+    }
+}

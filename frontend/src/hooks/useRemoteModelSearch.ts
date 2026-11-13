@@ -117,7 +117,7 @@ export function useRemoteModelSearch({
           return;
         }
         if (result.success) {
-          setResults(presentSearchResults(result.models as RemoteModelInfo[], selectedSource));
+          setResults(presentSearchResults(result.models, selectedSource));
           setResultContext(requestContext);
         } else {
           setError(result.error || 'Search failed.');

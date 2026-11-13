@@ -29,6 +29,7 @@ type MissingChoosableCategory = Exclude<
   (typeof CHOOSABLE_MODEL_CATEGORIES)[number]
 >;
 const allCategoriesChoosable: MissingChoosableCategory extends never ? true : never = true;
+// eslint-disable-next-line @typescript-eslint/no-meaningless-void-operator -- marks the compile-time check as read
 void allCategoriesChoosable;
 
 export type ChoosableModelCategory = (typeof CHOOSABLE_MODEL_CATEGORIES)[number];

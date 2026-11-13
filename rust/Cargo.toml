@@ -23,12 +23,14 @@ unsafe_op_in_unsafe_fn = "deny"
 tokio = { version = "1" }
 
 # HTTP server
-axum = { version = "0.7", default-features = false, features = ["http1", "json", "matched-path", "original-uri", "query", "tokio", "tracing"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "matched-path", "original-uri", "query", "tokio", "tracing"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# native-tls without ALPN is the TLS stack reqwest 0.12 used by default (OS
+# trust roots, HTTP/1.1 over TLS); 0.13 defaults to rustls, so name it.
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls-no-alpn", "charset", "http2", "system-proxy", "query"] }
 
 # Database (bundled SQLite includes FTS5 by default)
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
@@ -102,7 +104,7 @@ chrono = { version = "0.4", features = ["serde"] }
 mini-moka = "0.10"
 
 # Rate limiting
-governor = "0.7"
+governor = "0.10"
 
 # UUID generation
 uuid = { version = "1", features = ["v4"] }

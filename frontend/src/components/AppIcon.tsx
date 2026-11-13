@@ -227,9 +227,8 @@ export const AppIcon: React.FC<AppIconProps> = ({
   onOpenLog,
   dragOpacity = 1.0,
   shakeStyle = {},
-  _disableShake: _1 = false,
   isGhost = false,
-}) => { void _1;
+}) => {
   return (
     <div className="relative w-full overflow-visible hover:z-50" title={title}>
       <button

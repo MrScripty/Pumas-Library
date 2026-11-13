@@ -8314,9 +8314,9 @@
     },
     {
       "name": "framer-motion",
-      "version": "12.43.0",
+      "version": "14.10.1",
       "license_declared": "MIT",
-      "source": "https://www.npmjs.com/package/framer-motion/v/12.43.0",
+      "source": "https://www.npmjs.com/package/framer-motion/v/14.10.1",
       "scope": "JavaScript production dependency closure; includes tree-shaken code",
       "texts": [
         {
@@ -8361,9 +8361,9 @@
     },
     {
       "name": "motion-dom",
-      "version": "12.43.0",
+      "version": "14.10.1",
       "license_declared": "MIT",
-      "source": "https://www.npmjs.com/package/motion-dom/v/12.43.0",
+      "source": "https://www.npmjs.com/package/motion-dom/v/14.10.1",
       "scope": "JavaScript production dependency closure; includes tree-shaken code",
       "texts": [
         {
@@ -8374,9 +8374,9 @@
     },
     {
       "name": "motion-utils",
-      "version": "12.39.0",
+      "version": "14.7.0",
       "license_declared": "MIT",
-      "source": "https://www.npmjs.com/package/motion-utils/v/12.39.0",
+      "source": "https://www.npmjs.com/package/motion-utils/v/14.7.0",
       "scope": "JavaScript production dependency closure; includes tree-shaken code",
       "texts": [
         {
@@ -8452,9 +8452,9 @@
     },
     {
       "name": "tslib",
-      "version": "2.8.1",
+      "version": "2.9.1",
       "license_declared": "0BSD",
-      "source": "https://www.npmjs.com/package/tslib/v/2.8.1",
+      "source": "https://www.npmjs.com/package/tslib/v/2.9.1",
       "scope": "JavaScript production dependency closure; includes tree-shaken code",
       "texts": [
         {
@@ -9294,8 +9294,8 @@
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json": "a280a955f040983398474af0c34f92e9172fc3c69ef22f7422ac990ed0554e26",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json": "3e2f6e67e3a4492c01232778191871e9f39543f02996349f055272f2d19fbb89",
     "electron/package.json": "a4d915c9a4cad8ee234fc9c68ac24d7346d555db1bdc94e14b32198cddaeb70d",
-    "frontend/package.json": "c0161446ec6d8bf286ef38180afbf42cb27711d84da4ba8de2354ef24fec0a43",
-    "pnpm-lock.yaml": "b9716670653d1effc7b85ad12fb9aaa6697b0816eaf9991bc6e2169e54e31289",
+    "frontend/package.json": "b5a3ee25b90ef384a7e68136bdfa5e3682b51a1981de9df5f24eddd5b96d7fa2",
+    "pnpm-lock.yaml": "dd1f9e68286544037f446f5b9ba1134425a11d39947cbfb34f11d5240e602383",
     "rust/Cargo.lock": "c5e6a3478359717270992f3bba990680b4b02f6bbfb2263bb572556b815ccf1e",
     "rust/Cargo.toml": "6f0e56034a6c826d1cba43d450e1b533b56c53f3892519f26af752400205a5f5",
     "rust/crates/pumas-app-manager/Cargo.toml": "6e6116d6f5396204cbb6abfed86f804ec4590e0a4935ea8ee9fe842a403a197a",
@@ -9310,5 +9310,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "fedc08d8c9aeafee50e62cb52e3d72b9302446b37423e52b1cb9ce15eafcfa94"
+  "notices_sha256": "93a606ab2f71b033e53af6295564db3a7b135ae52aa6d09d062e292dc2084ecf"
 }

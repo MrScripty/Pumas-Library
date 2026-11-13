@@ -78077,8 +78077,8 @@ SOFTWARE.
 
 ==============================================================================
 
-framer-motion 12.43.0 (JavaScript production dependency closure; includes tree-shaken code)
-Source: https://www.npmjs.com/package/framer-motion/v/12.43.0
+framer-motion 14.10.1 (JavaScript production dependency closure; includes tree-shaken code)
+Source: https://www.npmjs.com/package/framer-motion/v/14.10.1
 Declared license: MIT
 --- LICENSE.md ---
 The MIT License (MIT)
@@ -78200,8 +78200,8 @@ export { default } from './circle-letter-c.mjs';
 
 ==============================================================================
 
-motion-dom 12.43.0 (JavaScript production dependency closure; includes tree-shaken code)
-Source: https://www.npmjs.com/package/motion-dom/v/12.43.0
+motion-dom 14.10.1 (JavaScript production dependency closure; includes tree-shaken code)
+Source: https://www.npmjs.com/package/motion-dom/v/14.10.1
 Declared license: MIT
 --- LICENSE.md ---
 The MIT License (MIT)
@@ -78229,8 +78229,8 @@ SOFTWARE.
 
 ==============================================================================
 
-motion-utils 12.39.0 (JavaScript production dependency closure; includes tree-shaken code)
-Source: https://www.npmjs.com/package/motion-utils/v/12.39.0
+motion-utils 14.7.0 (JavaScript production dependency closure; includes tree-shaken code)
+Source: https://www.npmjs.com/package/motion-utils/v/14.7.0
 Declared license: MIT
 --- LICENSE.md ---
 The MIT License (MIT)
@@ -78763,8 +78763,8 @@ SOFTWARE.
 
 ==============================================================================
 
-tslib 2.8.1 (JavaScript production dependency closure; includes tree-shaken code)
-Source: https://www.npmjs.com/package/tslib/v/2.8.1
+tslib 2.9.1 (JavaScript production dependency closure; includes tree-shaken code)
+Source: https://www.npmjs.com/package/tslib/v/2.9.1
 Declared license: 0BSD
 --- LICENSE.txt ---
 Copyright (c) Microsoft Corporation.

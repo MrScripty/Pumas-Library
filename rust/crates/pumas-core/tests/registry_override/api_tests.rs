@@ -323,7 +323,7 @@ async fn test_runtime_profile_snapshot_preserves_singleton_ollama_status() {
 }
 
 // Linux owns every binary runtime process; macOS and Windows launch only Torch
-// and must reject other providers explicitly. In-process profiles still run.
+// and ONNX Runtime and must reject other providers explicitly. In-process profiles still run.
 fn expect_binary_launch_result(
     result: pumas_library::Result<pumas_library::models::LaunchResponse>,
 ) -> Option<pumas_library::models::LaunchResponse> {
@@ -332,7 +332,7 @@ fn expect_binary_launch_result(
     } else {
         assert!(
             matches!(&result, Err(PumasError::Other(message))
-                if message == "Only Torch binary profiles are supported on this platform"),
+                if message == "Only Torch and ONNX Runtime binary profiles are supported on this platform"),
             "expected unsupported binary launch, got {result:?}"
         );
         None

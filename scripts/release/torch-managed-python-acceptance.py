@@ -425,8 +425,13 @@ class InstallSelectionFixture(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "installed Torch resolution failed"):
                     installed_resolution_evidence(root, "python3.14")
             path.write_text(
-                json.dumps({**resolution, "modalities": ["text", "image"],
-                            "omitted_modalities": {"audio": "no compatible wheel"}}),
+                json.dumps(
+                    {
+                        **resolution,
+                        "modalities": ["text", "image"],
+                        "omitted_modalities": {"audio": "no compatible wheel"},
+                    }
+                ),
                 encoding="utf-8",
             )
             self.assertEqual(

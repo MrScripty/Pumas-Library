@@ -1121,7 +1121,9 @@ def local_file_url_path(url: str) -> Path | None:
     return Path(url2pathname(parsed.path))
 
 
-def same_local_file(url: str, path: Path, digest: str | None = None, sha256: str | None = None) -> bool:
+def same_local_file(
+    url: str, path: Path, digest: str | None = None, sha256: str | None = None
+) -> bool:
     """Whether a pip report URL names this acquired local file.
 
     The reported `file:` URL must name a file of the same name. It then

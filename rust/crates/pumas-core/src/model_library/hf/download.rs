@@ -6933,6 +6933,24 @@ impl HuggingFaceClient {
         download_id: &str,
         interrupted_ref: Option<&crate::models::PumasModelRef>,
     ) -> Result<bool> {
+        // A terminal download is never resumable, and terminal states never
+        // revert. Answer before taking any root grant: completion settlement
+        // can still hold the library root just after Completed is projected,
+        // and a resume request then must not fail as "busy".
+        if self
+            .downloads
+            .read()
+            .await
+            .get(download_id)
+            .is_some_and(|state| {
+                matches!(
+                    state.status,
+                    DownloadStatus::Completed | DownloadStatus::Cancelled
+                )
+            })
+        {
+            return Ok(false);
+        }
         let mut protected_context = self.protect_download_mutation(context).await?;
         self.observe_finished_download_tasks().await;
         if self

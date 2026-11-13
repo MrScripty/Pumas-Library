@@ -7,8 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-13
+
+See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
+downloads and known limitations. This release also includes the fixes from
+the 2026-11-02 audit
+([remediation plan](docs/plans/audit-remediation-2026-11/plan.md)).
+
 ### Added
 
+- Typed generic model operations and capability discovery, including bounded
+  Image-to-Text requests and explicit model/projector roles. Availability still
+  depends on the selected model, serving profile and qualified runtime.
+- Authenticated local owner discovery, explicit existing-library enumeration,
+  owner retention and generation fencing for embedding consumers.
+- Digest-bound local imports and conditional S3 single-object/authored-bundle
+  acquisition, with immutable selection and retained download custody.
+- Pinned inference-enabled headless candidate assembly for Linux x86_64,
+  Windows x86_64 and macOS ARM64. The release inventory now requires sixteen
+  artifacts; assembly and startup do not qualify pretrained inference.
+- `GET /v1/served-models` lists every served model and profile with its
+  provider, context size and capabilities, so consumers discover models
+  instead of configuring profiles by hand.
+- `multimodal_embedding` capability: image and mixed text/image embeddings
+  for llama.cpp embedding models with a projector, such as EmbeddingGemma 2.
+- `decision` capability: typed choice/score/yes-no questions answered with
+  probabilities by llama.cpp native decision models such as Kev, OpenJev and
+  Laya.
+- `rerank` capability and `POST /v1/rerank` gateway route: llama.cpp
+  rerankers score documents against a query, most relevant first, with an
+  optional `top_n`.
+- Modality primitives (ADR 0005): served models and capability descriptors
+  report the input and output modalities their runtime declares
+  (`modalities`, `input_modalities`, `output_modalities`). Audio parts (PCM,
+  sent to llama.cpp as WAV) are accepted in chat messages, `content_batch`
+  items and `decision` input wherever the model declares audio, and refused
+  with `unsupported_modality` where it does not. Router profiles serve image
+  and audio input as well as dedicated ones. Models without a recorded task
+  are described by their runtime's own declaration.
+- Models are grouped by what they are used for, with new **Decision and
+  evaluation** and **Video generation** categories. Each row shows the inputs
+  and outputs the model handles and marks LoRA/PEFT adapters. A "Used as"
+  choice in the model's metadata window overrides detection and survives
+  re-scans (`set_model_category` RPC).
+- `audio_transcription` capability: Cohere ASR transcribes speech through the
+  Torch sidecar (`POST /api/audio/transcriptions`, advertised as the
+  `audio_transcription` sidecar capability). The `cohere-asr` Torch adapter
+  resolves current packages with a Transformers 5.4 floor, and `cohere_asr`
+  configs are classified as audio models.
+- Hugging Face downloads keep the model card, license and notice files
+  (`LICENSE*`, `NOTICE*`, `USE_POLICY*`, `COPYING*`), the repository's code
+  and its other metadata files with the selected weights, scoped to the root
+  and the folders that hold the selected weights; other weight variants are
+  never pulled. Metadata records the stored card and license
+  (`model_card_artifact`, `license_artifact`, with SHA-256 and source URL) and
+  the code (`custom_code_sources`, `requires_custom_code`). Code is stored for
+  inspection only and never executed; Torch refuses an `auto_map` model whose
+  architecture Transformers does not implement and names the code it would
+  need. Model IDs and directories do not change. Download options report
+  `companionSizeBytes`.
+- Companion backfill (`backfill_model_companion_files`,
+  `backfill_library_companion_files`, dry run by default) fetches the card,
+  license, code and metadata files existing models are missing, at their
+  recorded commit, through hash-checked, resumable acquisition. Weights and
+  identity are untouched; local imports and vanished revisions are skipped
+  with a reason. `get_model_documents` returns the stored card, licenses and
+  code, shown in the model window's **Card & License** tab.
 - Sentence-transformers declarations (pooling, normalization, `LogitScore`
   tokens, prompt template, prompts) are recorded in model metadata as
   `sentence_transformers`, resolved from the model's package or lineage (its
@@ -83,6 +147,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `ModelImporter::import` and `import_with_progress` require the lifecycle-owned
+  `ModelLibrary` from `PumasApi` or `PumasLibraryInstance`; a directly
+  constructed library returns `PumasError::Config` before staging.
+- `ModelImporter::discover_shard_recovery[_async]` returns a typed read-only
+  report; `recover_incomplete_shards[_async]` is deprecated and never starts
+  an inferred download.
+- Library merge refuses copied imports whose publication receipt is bound to
+  their current library root.
+- A model's category is metadata: re-detection never moves a model or changes
+  its ID for a category change (only a family change still moves it).
+  Detection prefers file facts and architectures over task tags: a GGUF
+  decision head makes a decision model, `...ForASR` architectures are audio,
+  video tasks are video, and a disagreeing task tag requests review instead of
+  overruling. The library's rule tables are updated in place on open.
+- Older download metadata requires an explicit offline schema-7 upgrade with
+  stopped-reader/writer confirmation and an exact metadata-only backup.
+- Hugging Face detail resolution follows explicit model selection; cached
+  discovery and live download authority remain distinguishable.
+- Typed operation errors always carry a human-readable `message`, echo the
+  caller's `request_id` whenever it is readable, and use an HTTP status that
+  matches the error code. Provider failure reasons reach the caller with
+  credential-shaped text redacted.
+- `/v1/model-operations` has one request grammar: `capability`,
+  `semantic_task` and `options` are optional selectors, and every request
+  accepted before remains valid.
+- Responses may gain fields, capabilities and enum values within contract
+  version 1; consumers must ignore what they do not use.
+- Limits come from the serving runtime: `max_tokens` is bounded by the served
+  context, ONNX batch limits apply only to ONNX, and requested embedding
+  dimensions are applied by Matryoshka truncation when a provider ignores them.
+- `/v1/models` lists each model ID once, with its serving profiles.
+- Desktop Torch install choices, saved probe results, startup trials and
+  alternative wheels are declared once by the backend and validated from that
+  declaration. The saved probe result carries only the checks the desktop shows.
+- Managed Torch runtimes no longer install from a fixed package lock. The
+  fixed v2.9.1 preset and its embedded lock are replaced by verified
+  combinations (`torch-server/runtime/verified-runtimes.json`), which the
+  install dialog offers as shortcuts that resolve current package versions; a
+  runtime is reported as verified only when every package the combination
+  records is installed at exactly the recorded version (an absent recorded
+  package fails the match). Verified is a version comparison, not a hash or
+  provenance claim. The FLUX.2 and Nunchaku image adapters name their packages without
+  version pins, and Nunchaku is a regular adapter choice, offered and accepted
+  only for the selection its wheel supports (Torch v2.9.1, cu130, Python
+  3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
+  from the preset keep working. Torch install options replace
+  `bundledPresetAvailable` and `preset` with `verified`.
+- Torch runtimes run the sidecar shipped with the running Pumas instead of a
+  copy written into the runtime at install time, so upgrading Pumas updates
+  the sidecar for every installed runtime without a reinstall. Pumas writes it
+  once to `launcher-data/torch-sidecar/<version>-<digest>/` and every runtime
+  version launches from there; a runtime holds only its Python environment,
+  packages and records. Before each launch Pumas checks the runtime's
+  interpreter and startup packages against the sidecar's floors (never pins)
+  and refuses an incompatible runtime with every reason. Sidecar copies in
+  runtimes installed earlier are no longer run and are left in place.
+- Desktop update streams (model library, downloads, runtime profiles, serving
+  status and status telemetry) are validated against the backend's declaration.
+  A rejected desktop payload says which field and rule failed.
+- Updated Electron to 43.8.1, Vite to 8.3.5, `lucide-react` to 1.67, undici
+  to 6.29.1 and 7.30.1, `rusqlite` to 0.41, `rustls` to 0.23.46, `nix` to
+  0.31, `windows-sys` to 0.61, `base64` to 0.23 and `rand` to 0.10.
+- Rejections carry reasons: typed RPC refusals name the offending field,
+  pre-handler HTTP refusals return `{"error":{"code","message"}}`,
+  `request_limit` refusals name the bound, gateway and IPC capacity refusals
+  say what failed.
+- Additive wire fields: `stop_ollama`/`stop_torch` report `skipped` processes
+  with reasons; `health_check` echoes `launch_nonce`; Hugging Face search rows
+  carry `observedAt` and `cached`; ONNX embedding descriptors advertise the
+  model's `input_tokens` limit and image capabilities their decode bounds;
+  `preview_torch_runtime` accepts `verified_versions` to install a verified
+  combination's recorded versions.
+- The desktop decodes credential, import, delete, runtime-profile, serving,
+  HF search and status pull traffic with Rust-exported contracts, restarts a
+  backend that fails three health checks, and reports update-stream loss.
+- The renderer shows load failures, cache age and recovery reasons instead of
+  silent defaults, and backs off installation polling on transport failures.
+- The `hf-client` and `gpu-monitor` features gate behavior; ONNX work runs off
+  the async executor and derives its token limit from the model config.
+- Model index records its schema version and refuses unknown ones;
+  versions metadata changes under one write lock; review edits whose
+  `metadata.json` write was interrupted are replayed.
+- `OllamaClient::new` and `VersionManager::version_path` return `Result`.
+- Updated `tokio` to 1.54.1 (with `mio`, `socket2`, `tokio-macros`), `zstd`
+  to 0.13.4, `zstd-safe` to 7.4.0 and `ctutils` to 0.4.8, clearing
+  RUSTSEC-2026-0385, -0386 and -0391 to -0406.
+- The generated desktop contract is one shared workspace package
+  (`packages/desktop-contract`) instead of identical copies in the Electron
+  and frontend trees; the packaged app still bundles it into the preload.
 - Changing a runtime's active or default version no longer requires stopping
   its running profiles; they keep the version they started from, and the
   change applies to new launches. Removing a version is refused only while an
@@ -137,6 +290,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   modalities and extras the backend reports, and "verified combinations" are
   shown as tested-as-working evidence.
 
+- HTTP now uses reqwest 0.13 (still the operating system's TLS stack with its
+  root certificates, now able to negotiate TLS 1.3) and the RPC server uses
+  axum 0.8. A redirect that changes scheme now drops sensitive headers.
+
 ### Deprecated
 
 - The `adapter` parameter of `preview_torch_runtime` is still accepted and
@@ -144,8 +301,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `nunchaku` the Nunchaku extra). Send `extras` instead; a removal will be
   announced separately.
 
+### Removed
+
+- `network::DownloadManager` and `DownloadProgress`, `NetworkManager::execute`
+  and `CacheStrategy`'s `allow_stale_on_offline`/`max_stale_age`.
+- `OllamaVersionManager`, `ProcessManagerFactory` and the app-manager
+  `process` module.
+- Dead renderer modules, the superseded 0.7.0 and 0.8.0-rc.1 attribution
+  sets, and the flake8 configuration.
+
 ### Fixed
 
+- Interrupted Hugging Face downloads resume. Hugging Face's CDN returns the
+  signed URL's parameters in a different order on each redirect, which made
+  every resume fail with "HTTP continuation representation or resource
+  changed".
+- Local imports keep the Hugging Face `repo_id` the caller gives them;
+  copied imports other than Diffusers bundles had stored `repo_id: null`.
+- Vision-language models published as `image-text-to-text` (Gemma, Qwen VL)
+  are available for chat and image-to-text instead of reporting a task mismatch.
+- A model directory's primary file is never its multimodal projector, which
+  had launched EmbeddingGemma 2's projector as the model and broke llama.cpp
+  router catalog generation.
+- llama.cpp embedding and reranking models launch in embedding/reranking mode
+  in dedicated profiles too, with a micro-batch that fits whole inputs: the
+  served context when the profile sets one, otherwise 8,192 tokens, never more
+  than the model's trained context. Ollama embedding models load through
+  `/api/embed`.
+- Non-causal llama.cpp decision models such as Laya get the same whole-input
+  micro-batch; inputs over 512 tokens were refused.
+- Serving a reranker GGUF that has no ranking head (`cls.output.weight`) is
+  refused with a reason instead of returning meaningless scores.
+- Saved download state that this version cannot read (for example, fields
+  written by a newer Pumas) no longer stops the backend. The library, models
+  and inference start, downloads are disabled without rewriting that state,
+  and the reason is shown in a status banner.
+- A backend that cannot start reports why, and the desktop recovery screen
+  shows that reason instead of guessing. The startup diagnostic is read across
+  builds, ignoring fields it does not know.
+- Offer explicit recovery for moved legacy download files in the running desktop,
+  preserving files and failed-attempt history while releasing exact download custody.
+  First confirmation upgrades the HF partition and warns older direct readers.
+- Close read-only desktop update streams without falsely failing instance shutdown.
+- Desktop startup failures keep recovery and metadata upgrade actionable,
+  including small windows and failed replacement startup attempts.
+- Startup preserves retained downloads whose destination folders are missing,
+  without recreating folders or finalizing absent outputs.
+- Receipt-bound GGUF selection survives owned library moves, and explicit
+  headless legacy-schema preflight avoids creating a new failed owner claim.
+- Candidate packaging selects notices matching the current source version.
+- A failed Torch startup trial reports why the managed launch failed.
+- A desktop update that fails validation is no longer dropped silently, which
+  had left views stale; the reason is reported and the view reloads.
+- Version managers list stable releases only, and of each major.minor only
+  its newest patch (`v1.1.3` hides `v1.1.2`; `v1.2.0` stays listed). Installed
+  versions are always listed. A tag with a pre-release part (`v0.21.3-rc0`) is
+  a pre-release even when GitHub does not flag it, so it no longer counted as
+  the newest patch.
+- Opening a version manager after its release cache is an hour old shows the
+  cached list at once and refreshes it in the background, instead of waiting
+  for GitHub. The new-version indicator compares the newest stable release, not
+  whichever release GitHub lists first (for llama.cpp, a pre-release build).
+- Orphaned Hugging Face downloads resume under their recorded commit; repo
+  IDs are validated on every metadata read; a corrupt tree cache is refetched;
+  unbounded retry settings are refused.
+- Model and package-facts removals commit with their update events; search
+  setup is atomic; corrupt rows and search failures surface as errors.
+- The legacy JSON writer syncs its directory and backup.
+- The Torch sidecar stays responsive during generation and refuses unsafe work
+  with reasons; externally referenced models stay loadable by Torch.
+- The local HTTP consumer ships the capability-descriptor schema it pins.
 - Torch embeddings now apply the Dense and LayerNorm modules a model declares
   after pooling (EmbeddingGemma: Transformer, Pooling, Dense, Dense,
   Normalize) from the weights in its package. Before, they were skipped and
@@ -251,235 +476,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   publish, is still refused with both files kept and their sizes and SHA-256
   values in the reason.
 
-## [0.8.0] - 2026-11-08
-
-See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
-downloads and known limitations. This release also includes the fixes from
-the 2026-11-02 audit
-([remediation plan](docs/plans/audit-remediation-2026-11/plan.md)).
-
-### Added
-
-- Typed generic model operations and capability discovery, including bounded
-  Image-to-Text requests and explicit model/projector roles. Availability still
-  depends on the selected model, serving profile and qualified runtime.
-- Authenticated local owner discovery, explicit existing-library enumeration,
-  owner retention and generation fencing for embedding consumers.
-- Digest-bound local imports and conditional S3 single-object/authored-bundle
-  acquisition, with immutable selection and retained download custody.
-- Pinned inference-enabled headless candidate assembly for Linux x86_64,
-  Windows x86_64 and macOS ARM64. The release inventory now requires sixteen
-  artifacts; assembly and startup do not qualify pretrained inference.
-- `GET /v1/served-models` lists every served model and profile with its
-  provider, context size and capabilities, so consumers discover models
-  instead of configuring profiles by hand.
-- `multimodal_embedding` capability: image and mixed text/image embeddings
-  for llama.cpp embedding models with a projector, such as EmbeddingGemma 2.
-- `decision` capability: typed choice/score/yes-no questions answered with
-  probabilities by llama.cpp native decision models such as Kev, OpenJev and
-  Laya.
-- `rerank` capability and `POST /v1/rerank` gateway route: llama.cpp
-  rerankers score documents against a query, most relevant first, with an
-  optional `top_n`.
-- Modality primitives (ADR 0005): served models and capability descriptors
-  report the input and output modalities their runtime declares
-  (`modalities`, `input_modalities`, `output_modalities`). Audio parts (PCM,
-  sent to llama.cpp as WAV) are accepted in chat messages, `content_batch`
-  items and `decision` input wherever the model declares audio, and refused
-  with `unsupported_modality` where it does not. Router profiles serve image
-  and audio input as well as dedicated ones. Models without a recorded task
-  are described by their runtime's own declaration.
-- Models are grouped by what they are used for, with new **Decision and
-  evaluation** and **Video generation** categories. Each row shows the inputs
-  and outputs the model handles and marks LoRA/PEFT adapters. A "Used as"
-  choice in the model's metadata window overrides detection and survives
-  re-scans (`set_model_category` RPC).
-- `audio_transcription` capability: Cohere ASR transcribes speech through the
-  Torch sidecar (`POST /api/audio/transcriptions`, advertised as the
-  `audio_transcription` sidecar capability). The `cohere-asr` Torch adapter
-  resolves current packages with a Transformers 5.4 floor, and `cohere_asr`
-  configs are classified as audio models.
-- Hugging Face downloads keep the model card, license and notice files
-  (`LICENSE*`, `NOTICE*`, `USE_POLICY*`, `COPYING*`), the repository's code
-  and its other metadata files with the selected weights, scoped to the root
-  and the folders that hold the selected weights; other weight variants are
-  never pulled. Metadata records the stored card and license
-  (`model_card_artifact`, `license_artifact`, with SHA-256 and source URL) and
-  the code (`custom_code_sources`, `requires_custom_code`). Code is stored for
-  inspection only and never executed; Torch refuses an `auto_map` model whose
-  architecture Transformers does not implement and names the code it would
-  need. Model IDs and directories do not change. Download options report
-  `companionSizeBytes`.
-- Companion backfill (`backfill_model_companion_files`,
-  `backfill_library_companion_files`, dry run by default) fetches the card,
-  license, code and metadata files existing models are missing, at their
-  recorded commit, through hash-checked, resumable acquisition. Weights and
-  identity are untouched; local imports and vanished revisions are skipped
-  with a reason. `get_model_documents` returns the stored card, licenses and
-  code, shown in the model window's **Card & License** tab.
-
-### Changed
-
-- `ModelImporter::import` and `import_with_progress` require the lifecycle-owned
-  `ModelLibrary` from `PumasApi` or `PumasLibraryInstance`; a directly
-  constructed library returns `PumasError::Config` before staging.
-- `ModelImporter::discover_shard_recovery[_async]` returns a typed read-only
-  report; `recover_incomplete_shards[_async]` is deprecated and never starts
-  an inferred download.
-- Library merge refuses copied imports whose publication receipt is bound to
-  their current library root.
-- A model's category is metadata: re-detection never moves a model or changes
-  its ID for a category change (only a family change still moves it).
-  Detection prefers file facts and architectures over task tags: a GGUF
-  decision head makes a decision model, `...ForASR` architectures are audio,
-  video tasks are video, and a disagreeing task tag requests review instead of
-  overruling. The library's rule tables are updated in place on open.
-- Older download metadata requires an explicit offline schema-7 upgrade with
-  stopped-reader/writer confirmation and an exact metadata-only backup.
-- Hugging Face detail resolution follows explicit model selection; cached
-  discovery and live download authority remain distinguishable.
-- Typed operation errors always carry a human-readable `message`, echo the
-  caller's `request_id` whenever it is readable, and use an HTTP status that
-  matches the error code. Provider failure reasons reach the caller with
-  credential-shaped text redacted.
-- `/v1/model-operations` has one request grammar: `capability`,
-  `semantic_task` and `options` are optional selectors, and every request
-  accepted before remains valid.
-- Responses may gain fields, capabilities and enum values within contract
-  version 1; consumers must ignore what they do not use.
-- Limits come from the serving runtime: `max_tokens` is bounded by the served
-  context, ONNX batch limits apply only to ONNX, and requested embedding
-  dimensions are applied by Matryoshka truncation when a provider ignores them.
-- `/v1/models` lists each model ID once, with its serving profiles.
-- Desktop Torch install choices, saved probe results, startup trials and
-  alternative wheels are declared once by the backend and validated from that
-  declaration. The saved probe result carries only the checks the desktop shows.
-- Managed Torch runtimes no longer install from a fixed package lock. The
-  fixed v2.9.1 preset and its embedded lock are replaced by verified
-  combinations (`torch-server/runtime/verified-runtimes.json`), which the
-  install dialog offers as shortcuts that resolve current package versions; a
-  runtime is reported as verified only when every package the combination
-  records is installed at exactly the recorded version (an absent recorded
-  package fails the match). Verified is a version comparison, not a hash or
-  provenance claim. The FLUX.2 and Nunchaku image adapters name their packages without
-  version pins, and Nunchaku is a regular adapter choice, offered and accepted
-  only for the selection its wheel supports (Torch v2.9.1, cu130, Python
-  3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
-  from the preset keep working. Torch install options replace
-  `bundledPresetAvailable` and `preset` with `verified`.
-- Torch runtimes run the sidecar shipped with the running Pumas instead of a
-  copy written into the runtime at install time, so upgrading Pumas updates
-  the sidecar for every installed runtime without a reinstall. Pumas writes it
-  once to `launcher-data/torch-sidecar/<version>-<digest>/` and every runtime
-  version launches from there; a runtime holds only its Python environment,
-  packages and records. Before each launch Pumas checks the runtime's
-  interpreter and startup packages against the sidecar's floors (never pins)
-  and refuses an incompatible runtime with every reason. Sidecar copies in
-  runtimes installed earlier are no longer run and are left in place.
-- Desktop update streams (model library, downloads, runtime profiles, serving
-  status and status telemetry) are validated against the backend's declaration.
-  A rejected desktop payload says which field and rule failed.
-- Updated Electron to 43.8.1, Vite to 8.3.5, `lucide-react` to 1.67, undici
-  to 6.29.1 and 7.30.1, `rusqlite` to 0.41, `rustls` to 0.23.46, `nix` to
-  0.31, `windows-sys` to 0.61, `base64` to 0.23 and `rand` to 0.10.
-- Rejections carry reasons: typed RPC refusals name the offending field,
-  pre-handler HTTP refusals return `{"error":{"code","message"}}`,
-  `request_limit` refusals name the bound, gateway and IPC capacity refusals
-  say what failed.
-- Additive wire fields: `stop_ollama`/`stop_torch` report `skipped` processes
-  with reasons; `health_check` echoes `launch_nonce`; Hugging Face search rows
-  carry `observedAt` and `cached`; ONNX embedding descriptors advertise the
-  model's `input_tokens` limit and image capabilities their decode bounds;
-  `preview_torch_runtime` accepts `verified_versions` to install a verified
-  combination's recorded versions.
-- The desktop decodes credential, import, delete, runtime-profile, serving,
-  HF search and status pull traffic with Rust-exported contracts, restarts a
-  backend that fails three health checks, and reports update-stream loss.
-- The renderer shows load failures, cache age and recovery reasons instead of
-  silent defaults, and backs off installation polling on transport failures.
-- The `hf-client` and `gpu-monitor` features gate behavior; ONNX work runs off
-  the async executor and derives its token limit from the model config.
-- Model index records its schema version and refuses unknown ones;
-  versions metadata changes under one write lock; review edits whose
-  `metadata.json` write was interrupted are replayed.
-- `OllamaClient::new` and `VersionManager::version_path` return `Result`.
-- Updated `tokio` to 1.54.1 (with `mio`, `socket2`, `tokio-macros`), `zstd`
-  to 0.13.4, `zstd-safe` to 7.4.0 and `ctutils` to 0.4.8, clearing
-  RUSTSEC-2026-0385, -0386 and -0391 to -0406.
-- The generated desktop contract is one shared workspace package
-  (`packages/desktop-contract`) instead of identical copies in the Electron
-  and frontend trees; the packaged app still bundles it into the preload.
-
-### Removed
-
-- `network::DownloadManager` and `DownloadProgress`, `NetworkManager::execute`
-  and `CacheStrategy`'s `allow_stale_on_offline`/`max_stale_age`.
-- `OllamaVersionManager`, `ProcessManagerFactory` and the app-manager
-  `process` module.
-- Dead renderer modules, the superseded 0.7.0 and 0.8.0-rc.1 attribution
-  sets, and the flake8 configuration.
-
-### Fixed
-
-- Interrupted Hugging Face downloads resume. Hugging Face's CDN returns the
-  signed URL's parameters in a different order on each redirect, which made
-  every resume fail with "HTTP continuation representation or resource
-  changed".
-- Local imports keep the Hugging Face `repo_id` the caller gives them;
-  copied imports other than Diffusers bundles had stored `repo_id: null`.
-- Vision-language models published as `image-text-to-text` (Gemma, Qwen VL)
-  are available for chat and image-to-text instead of reporting a task mismatch.
-- A model directory's primary file is never its multimodal projector, which
-  had launched EmbeddingGemma 2's projector as the model and broke llama.cpp
-  router catalog generation.
-- llama.cpp embedding and reranking models launch in embedding/reranking mode
-  in dedicated profiles too, with a micro-batch that fits whole inputs: the
-  served context when the profile sets one, otherwise 8,192 tokens, never more
-  than the model's trained context. Ollama embedding models load through
-  `/api/embed`.
-- Non-causal llama.cpp decision models such as Laya get the same whole-input
-  micro-batch; inputs over 512 tokens were refused.
-- Serving a reranker GGUF that has no ranking head (`cls.output.weight`) is
-  refused with a reason instead of returning meaningless scores.
-- Saved download state that this version cannot read (for example, fields
-  written by a newer Pumas) no longer stops the backend. The library, models
-  and inference start, downloads are disabled without rewriting that state,
-  and the reason is shown in a status banner.
-- A backend that cannot start reports why, and the desktop recovery screen
-  shows that reason instead of guessing. The startup diagnostic is read across
-  builds, ignoring fields it does not know.
-- Offer explicit recovery for moved legacy download files in the running desktop,
-  preserving files and failed-attempt history while releasing exact download custody.
-  First confirmation upgrades the HF partition and warns older direct readers.
-- Close read-only desktop update streams without falsely failing instance shutdown.
-- Desktop startup failures keep recovery and metadata upgrade actionable,
-  including small windows and failed replacement startup attempts.
-- Startup preserves retained downloads whose destination folders are missing,
-  without recreating folders or finalizing absent outputs.
-- Receipt-bound GGUF selection survives owned library moves, and explicit
-  headless legacy-schema preflight avoids creating a new failed owner claim.
-- Candidate packaging selects notices matching the current source version.
-- A failed Torch startup trial reports why the managed launch failed.
-- A desktop update that fails validation is no longer dropped silently, which
-  had left views stale; the reason is reported and the view reloads.
-- Version managers list stable releases only, and of each major.minor only
-  its newest patch (`v1.1.3` hides `v1.1.2`; `v1.2.0` stays listed). Installed
-  versions are always listed. A tag with a pre-release part (`v0.21.3-rc0`) is
-  a pre-release even when GitHub does not flag it, so it no longer counted as
-  the newest patch.
-- Opening a version manager after its release cache is an hour old shows the
-  cached list at once and refreshes it in the background, instead of waiting
-  for GitHub. The new-version indicator compares the newest stable release, not
-  whichever release GitHub lists first (for llama.cpp, a pre-release build).
-- Orphaned Hugging Face downloads resume under their recorded commit; repo
-  IDs are validated on every metadata read; a corrupt tree cache is refetched;
-  unbounded retry settings are refused.
-- Model and package-facts removals commit with their update events; search
-  setup is atomic; corrupt rows and search failures surface as errors.
-- The legacy JSON writer syncs its directory and backup.
-- The Torch sidecar stays responsive during generation and refuses unsafe work
-  with reasons; externally referenced models stay loadable by Torch.
-- The local HTTP consumer ships the capability-descriptor schema it pins.
+- Resuming a download right after it completed no longer fails with "A
+  download or another operation is using this model library". The work that
+  finishes a completed download still holds the library root for a moment,
+  and resume reported that as busy. When the root is busy and the download is
+  completed or cancelled, resume now answers "not resumable" instead.
 
 ### Security
 

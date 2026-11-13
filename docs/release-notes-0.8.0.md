@@ -9,6 +9,12 @@ The largest changes are:
 - a typed model-operations API with model discovery (`GET /v1/served-models`)
 - new `decision`, `rerank` and `multimodal_embedding` capabilities, and
   bounded image-to-text
+- text embedders and rerankers served by llama.cpp, ONNX Runtime and Torch,
+  computed the way each model's sentence-transformers declarations say
+- ONNX Runtime as a downloaded, version-managed runtime with CUDA support, and
+  runtime profiles that can each pin a version and run side by side
+- model cards, license files and bundled code kept with every download
+- third-party telemetry turned off in every runtime Pumas starts
 - models grouped by use, with new **Decision and evaluation** and **Video
   generation** categories, input/output badges and adapter marking
 - a model's category is metadata: changing it never moves a model or changes
@@ -47,15 +53,54 @@ runtime profiles keep working. (A change of model family can still move it.)
 The first time 0.8.0 opens a library it updates the library's classification
 rules in place; the next refresh re-detects categories without moving anything.
 
-### Torch runtimes are add-ons you choose
+### Torch runtimes resolve current versions
 
 Pumas no longer installs Torch from a fixed package lock. The fixed v2.9.1
 preset is replaced by **Verified combinations**: the install dialog offers each
 one as a shortcut (for example *cu130 · Python 3.12 · Nunchaku*), and
-installing it resolves current package versions. A runtime is marked verified
-only when its installed packages still match the versions that were verified.
-Nunchaku Z-Image is now a regular adapter choice. Runtimes installed from the
-old preset keep working.
+installing it resolves current package versions. Verified combinations are
+evidence of what was tested, not pins. Runtimes installed from the old preset
+keep working.
+
+Every Torch install carries all general modalities: text (with Jinja), image
+and audio packages resolve together, so image generation, Cohere ASR,
+embedders and rerankers work in any install. Nunchaku is the only optional
+extra. A modality with no compatible wheel is left out with its reason instead
+of failing the install. Torch wheels download through Pumas, so a dropped
+connection resumes from the bytes already received, and each wheel is checked
+against its published SHA-256.
+
+### Runtimes run side by side
+
+A runtime profile can pin an installed version, so llama.cpp, Torch and ONNX
+Runtime profiles on different versions serve at the same time. Changing a
+runtime's active version no longer stops running profiles; it applies to new
+launches.
+
+ONNX Runtime is now downloaded and version-managed like llama.cpp and Torch,
+and no Pumas package bundles it. Its panel lists official releases as CPU,
+CUDA 12 and CUDA 13 builds. Installing a CUDA build also installs the CUDA and
+cuDNN libraries it needs, into that version. Each ONNX Runtime profile runs in
+its own host process on the device you choose (CPU, CUDA, or CoreML on
+macOS), so switching its version restarts only that host, never Pumas. The
+NVIDIA driver stays the operating system's: when it is missing or too old,
+Pumas says so and points at NVIDIA's download.
+
+### Model cards, licenses and code
+
+Downloads now keep the model card (`README.md`), license files and any code
+the repository ships, next to the weights. The model's metadata window has a
+**Card & License** tab. Code is kept as a record only; Pumas never runs it.
+Models downloaded earlier can fetch what they are missing with
+`backfill_library_companion_files`, which is a dry run unless you turn that
+off.
+
+### Privacy
+
+Every runtime and conversion process Pumas starts runs with third-party
+telemetry off (`HF_HUB_DISABLE_TELEMETRY`, `DO_NOT_TRACK` and ONNX Runtime's
+telemetry), and with `HF_HUB_OFFLINE=1`, so model files arrive only through
+Pumas's own downloads.
 
 ### Clearer startup and recovery
 
@@ -117,10 +162,18 @@ headers (30 s).
 - **`decision`**: typed choice, score and yes/no questions answered with
   probabilities by llama.cpp native decision models such as Kev, OpenJev and
   Laya. Needs llama.cpp **b11429** or newer.
-- **`rerank`**: scores documents against a query with a llama.cpp reranker
-  (for example Qwen3-Reranker), most relevant first, with an optional `top_n`.
-  Served rerankers are also reachable at the Jina/Cohere-style
-  `POST /v1/rerank` route.
+- **`rerank`**: scores documents against a query, most relevant first, with
+  an optional `top_n`, using a llama.cpp reranker (for example
+  Qwen3-Reranker), an ONNX Runtime cross-encoder, or a Torch reranker from a
+  local Safetensors package (for example bge-reranker-v2-m3). Served
+  rerankers are also reachable at the Jina/Cohere-style `POST /v1/rerank`
+  route.
+- **Text embeddings on ONNX Runtime and Torch**: both compute what the model
+  declares (pooling, normalization, prompts, and Dense and LayerNorm modules
+  such as EmbeddingGemma's), from sentence-transformers declarations that
+  Pumas records with the model at a fixed commit. Use
+  `resolve_model_declarations` to record them for models already in the
+  library.
 - **`multimodal_embedding`**: image and mixed text/image embeddings from
   llama.cpp embedding models with a projector, such as EmbeddingGemma 2. Needs
   llama.cpp **b11454** or newer.
@@ -133,9 +186,8 @@ headers (30 s).
   specific support for. See [Modalities](contracts/model-operations-v1.md#modalities).
 - **`audio_transcription`**: speech to text with Cohere ASR
   (`CohereLabs/cohere-transcribe-03-2026`) served by Torch, in 14 languages and
-  up to 30 seconds per request. Install a Torch runtime with the `cohere-asr`
-  adapter; like the other adapters it resolves current package versions
-  (Transformers 5.4 or newer).
+  up to 30 seconds per request. Every Torch install includes it (Transformers
+  5.4 or newer where the installed Torch allows).
 - **Image-to-text**: named image and image-bearing message inputs with bounded
   sizes and typed refusals. Vision-language models published as
   `image-text-to-text` (Gemma, Qwen VL) are available for chat and
@@ -205,6 +257,72 @@ schema versions rather than matching product versions.
   ones; the router loads each model's projector and reports its modalities.
 - Ollama embedding models load through `/api/embed`.
 
+## Supported models
+
+These are the models supported in this release, on llama.cpp b12099 (CUDA 12),
+the Pumas-managed Torch runtime (Torch 2.15.0, Transformers 5.22.2) and ONNX
+Runtime 1.24.2. Rerank results were checked against sentence-transformers, and
+embeddings against the same model on another runtime.
+
+### Decision models
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `ggml-org/Kev-4B-GGUF` | GGUF Q8_0 | llama.cpp | choice, score and yes/no decisions |
+| `ggml-org/Laya-GGUF` | GGUF Q8_0 | llama.cpp | decisions, including inputs over 1,500 tokens |
+| `LiquidAI/d1-2B-GGUF` | GGUF + projector | llama.cpp | text and image decisions |
+| `LiquidAI/d1-Omni-2B-GGUF` | GGUF + projector | llama.cpp | text, image and audio decisions |
+
+### Rerankers
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` | GGUF Q8_0 | llama.cpp | order and `top_n` |
+| `mradermacher/Qwen3-Reranker-0.6B-GGUF` | GGUF Q8_0 | llama.cpp | with a derived ranking head; same order as sentence-transformers |
+| `QuantFactory/Qwen3-Reranker-4B-GGUF` | GGUF Q8_0 | llama.cpp | with a derived ranking head |
+| `Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp` | GGUF Q4_K_M | llama.cpp | ships its ranking head |
+| `mradermacher/zerank-2-GGUF` | GGUF Q4_K_M | llama.cpp | with a derived ranking head; correct order |
+| `gpustack/bge-reranker-v2-m3-GGUF` | GGUF Q8_0 | llama.cpp | order |
+| `Qwen/Qwen3-Reranker-0.6B` | Safetensors | Torch | matches sentence-transformers |
+| `infgrad/Prism-Qwen3.5-Reranker-0.8B` | Safetensors | Torch | matches sentence-transformers |
+| `BAAI/bge-reranker-v2-m3` | Safetensors | Torch | matches sentence-transformers |
+| `onnx-community/bge-reranker-v2-m3-ONNX` | ONNX INT8 | ONNX Runtime | same order as sentence-transformers |
+
+### Embedders
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `unsloth/embeddinggemma-2-GGUF` | GGUF Q8_0 + projector | llama.cpp | text and image embeddings, truncation to 256 dimensions |
+| `microsoft/harrier-oss-v1-270m` | Safetensors | Torch | text embeddings |
+| `mykor/harrier-oss-v1-270m-GGUF` | GGUF Q8_0 | llama.cpp | text embeddings, matching Torch |
+
+### Language models
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `LiquidAI/LFM3-1.7B-GGUF` | GGUF | llama.cpp | chat |
+
+### Audio, vision-language and omni
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `CohereLabs/cohere-transcribe-03-2026` | Safetensors | Torch | speech transcription in 14 languages |
+| `LiquidAI/LFM3-Audio-2B-GGUF` | GGUF Q4_0 + projector | llama.cpp | speech transcription through chat with audio |
+| `LiquidAI/LFM3-VL-2B-GGUF` | GGUF + projector | llama.cpp | image description |
+| `LiquidAI/LFM3-Omni-2B-GGUF` | GGUF + projector | llama.cpp | image questions and speech transcription |
+| Gemma 4 vision models | GGUF + projector | llama.cpp | chat with images, image-to-text |
+| Qwen3.5 vision models (for example `unsloth/Qwen3.5-35B-A3B-GGUF`) | GGUF + projector | llama.cpp | chat with images, image-to-text |
+
+### Image and video generation
+
+| Model | Format | Runtime | Use |
+| --- | --- | --- | --- |
+| `Comfy-Org/flux2-dev`, `black-forest-labs/FLUX.2-klein-9b-kv-fp8` | Safetensors | Torch | text to image |
+| `Tongyi-MAI/Z-Image-Turbo` | Diffusers | Torch | text to image |
+| `nunchaku-ai/nunchaku-z-image-turbo` | Nunchaku | Torch with the Nunchaku extra | text to image |
+| `Qwen/Qwen-Image-2512`, `Qwen/Qwen-Image-Edit-2511`, `Qwen/Qwen-Image-Layered` | Diffusers | Torch | text to image, image editing |
+| `Lightricks/LTX-2.3` (fp8, nvfp4) | Safetensors | Torch | image to video |
+
 ## Upgrading an existing library
 
 Libraries from earlier versions need a one-time metadata upgrade. Read
@@ -220,12 +338,21 @@ The upgrade is one-way: older Pumas versions cannot open the upgraded
 metadata. If anything fails, keep the metadata, backup and logs; do not restore
 the backup automatically.
 
+After upgrading, two optional steps bring older models up to date:
+
+- `resolve_model_declarations` records sentence-transformers declarations.
+  Embedders whose declarations were recorded before 0.8.0 and that use Dense
+  modules (such as EmbeddingGemma) are refused by Torch until you run it.
+- `backfill_library_companion_files` fetches missing model cards, licenses
+  and code. Run it as a dry run first to see what it would download.
+
 ## Downloads
 
 Sixteen files are published, for Linux x86_64, Windows x86_64 and macOS ARM64.
 The standard builds include inference-plugin integration; **no-inference**
-builds leave it out and only manage libraries and downloads. Inference runtimes
-such as llama.cpp have their own setup requirements.
+builds leave it out and only manage libraries and downloads. No build bundles
+an inference runtime: llama.cpp, ONNX Runtime and Torch are downloaded from
+the app or the RPC API, and each has its own setup requirements.
 
 | Use | Linux x86_64 | Windows x86_64 | macOS ARM64 |
 | --- | --- | --- | --- |
@@ -258,6 +385,12 @@ accompany the release.
   shows *image → video*; it also accepts text and produces audio, which its
   published metadata does not state.
 - S3 imports are not certified for specific providers.
+- Rerank scores from llama.cpp use a different scale from ONNX Runtime and
+  Torch for the same model. The order of the documents is the same; compare
+  scores only within one provider.
+- Some ONNX Runtime CUDA builds publish no usable CUDA dependency metadata
+  (CUDA 12 builds from 1.30, CUDA 13 builds before 1.28). Pumas refuses those
+  with the reason and names the builds that install.
 - An import made through the RPC API records its Hugging Face source only
   when the caller names it (`repo_id`). Automatic identification of imported
   files is planned for 0.8.x.

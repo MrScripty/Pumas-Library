@@ -151,6 +151,5 @@ strip = "debuginfo"
 # for every test executable. Shipped binaries still use the release profile.
 [profile.ci-test]
 inherits = "release"
-debug = "line-tables-only"
 lto = false
 codegen-units = 16

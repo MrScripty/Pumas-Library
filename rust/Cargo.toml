@@ -28,7 +28,9 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# native-tls without ALPN is the TLS stack reqwest 0.12 used by default (OS
+# trust roots, HTTP/1.1 over TLS); 0.13 defaults to rustls, so name it.
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls-no-alpn", "charset", "http2", "system-proxy", "query"] }
 
 # Database (bundled SQLite includes FTS5 by default)
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }

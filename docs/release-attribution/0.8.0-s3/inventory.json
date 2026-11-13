@@ -159,10 +159,6 @@
     },
     {
       "name": "base64",
-      "version": "0.22.1"
-    },
-    {
-      "name": "base64",
       "version": "0.23.1"
     },
     {
@@ -1083,7 +1079,7 @@
     },
     {
       "name": "reqwest",
-      "version": "0.12.28"
+      "version": "0.13.5"
     },
     {
       "name": "roxmltree",
@@ -2167,23 +2163,6 @@
       "version": "0.13.1",
       "license_declared": "MIT/Apache-2.0",
       "source": "https://crates.io/api/v1/crates/base64/0.13.1/download",
-      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
-      "texts": [
-        {
-          "path": "LICENSE-APACHE",
-          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
-        },
-        {
-          "path": "LICENSE-MIT",
-          "sha256": "0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7"
-        }
-      ]
-    },
-    {
-      "name": "base64",
-      "version": "0.22.1",
-      "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/base64/0.22.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6028,9 +6007,9 @@
     },
     {
       "name": "reqwest",
-      "version": "0.12.28",
+      "version": "0.13.5",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/reqwest/0.12.28/download",
+      "source": "https://crates.io/api/v1/crates/reqwest/0.13.5/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6039,7 +6018,7 @@
         },
         {
           "path": "LICENSE-MIT",
-          "sha256": "47d4e1803702728e03d30f8a848ae2249ba274bbd9f8443e803f7924d83cd371"
+          "sha256": "dd87e27dfbaa888cb77ea34592648a7743636b8dce07e49543bddda0fcfc73bc"
         }
       ]
     },
@@ -9317,11 +9296,11 @@
     "electron/package.json": "3e902205adafb729cd89d4aaf4d30d47e1230d2a314f3e2419dcb0db5347d155",
     "frontend/package.json": "40efa0eda6eb46b604188b751f0b9c4045ce00d3a101329ea33098c2193f20b7",
     "pnpm-lock.yaml": "32aceb7112faace4a0beb1783fc7ed3c42a86015f86711fbe5f7672f242e8435",
-    "rust/Cargo.lock": "4b068aaa4748d189d85cf320950faa0604ec55bf1eab89ce4ba51e89a0a2972d",
-    "rust/Cargo.toml": "5ea730e72c78aea8db36f732721432e76845d104c588b40679dff481ad9836fa",
+    "rust/Cargo.lock": "c5e6a3478359717270992f3bba990680b4b02f6bbfb2263bb572556b815ccf1e",
+    "rust/Cargo.toml": "6f0e56034a6c826d1cba43d450e1b533b56c53f3892519f26af752400205a5f5",
     "rust/crates/pumas-app-manager/Cargo.toml": "6e6116d6f5396204cbb6abfed86f804ec4590e0a4935ea8ee9fe842a403a197a",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "f39cc48ba0350d63a65521adf5a53bd91e084ac1f6741b68a7a87b1142bfbdc4",
-    "rust/crates/pumas-core/Cargo.toml": "513e373ec0a6c7d6d9ddde0def95c2867483702f7cb51e4634fdf486a8b77eb2",
+    "rust/crates/pumas-core/Cargo.toml": "c125e9e23f29f0b2526d2f6499fef31f7a6ef59b35aeb597eb3a91ff637e339f",
     "rust/crates/pumas-rpc/Cargo.toml": "2a5c01cc72dcd3fc4d58e650430cb8f0d6c63771eaf06f8064c6611fd23e8fd1",
     "scripts/release/artifact-plan.json": "91350564febd7f8a5181eb2befb5f324773b57431b22b8b2cfbb1decf9a564ed",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
@@ -9331,5 +9310,5 @@
     "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
     "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "4a27bb51104c390a18e2ddb830935f2684671867920ab5b9262a0b8ad92a8ee7"
+  "notices_sha256": "fedc08d8c9aeafee50e62cb52e3d72b9302446b37423e52b1cb9ce15eafcfa94"
 }

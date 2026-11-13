@@ -10260,28 +10260,9 @@ mod tests {
         std::fs::write(destination.join("model.onnx"), existing).unwrap();
         // This prefix would combine with a ranged suffix from ABCD to make
         // the stale final appear equal despite belonging to different bytes.
-        // Its bytes are all in the final file, so it is discarded and the
-        // source is asked for a complete representation, never a range.
+        // The download records a receipt for every file it publishes, so an
+        // unreceipted final is not its own and is refused before any request.
         std::fs::write(destination.join("model.onnx.part"), b"xx").unwrap();
-        let source = tokio::spawn(async move {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                let read = socket.read(&mut buffer).await.unwrap();
-                assert!(read > 0);
-                request.extend_from_slice(&buffer[..read]);
-            }
-            socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nABCD")
-                .await
-                .unwrap();
-            (
-                String::from_utf8(request).unwrap().to_ascii_lowercase(),
-                listener,
-            )
-        });
         let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
         request.filenames = None;
         request.filename = Some("model.onnx".into());
@@ -10291,7 +10272,7 @@ mod tests {
             .start_download_at_revision(&request, &destination, None, revision)
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::time::timeout(Duration::from_secs(3), async {
             loop {
                 client.observe_finished_download_tasks().await;
                 let settled =
@@ -10310,9 +10291,7 @@ mod tests {
             }
         })
         .await
-        .expect("a hashless existing file that differs from the source must refuse import");
-        let (source_request, listener) = source.await.unwrap();
-        assert!(!source_request.contains("\r\nrange:"));
+        .expect("a hashless existing file without a receipt must refuse import");
         assert!(matches!(listener.into_std().unwrap().accept(), Err(error)
             if error.kind() == std::io::ErrorKind::WouldBlock));
 
@@ -10320,7 +10299,7 @@ mod tests {
         let state = states.get(&download_id).unwrap();
         let error = state.error.as_deref().unwrap();
         assert!(
-            error.contains("differs from the fresh immutable-source transfer"),
+            error.contains("model.onnx (4 bytes) was not published by this download"),
             "{error}"
         );
         assert_eq!(
@@ -10329,7 +10308,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read(destination.join("model.onnx.part")).unwrap(),
-            b"ABCD"
+            b"xx"
         );
         assert!(library.load_metadata(&destination).unwrap().is_none());
         drop(states);
@@ -10358,7 +10337,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read(destination.join("model.onnx.part")).unwrap(),
-            b"ABCD"
+            b"xx"
         );
         assert!(destination.join(".pumas_download").exists());
         assert!(library.load_metadata(&destination).unwrap().is_none());

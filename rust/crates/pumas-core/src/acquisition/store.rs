@@ -30,6 +30,16 @@ pub(crate) struct AcquisitionDocument {
     /// consumer that issued each exact completion proof.
     #[serde(with = "uuid_value_map")]
     pub(crate) consumer_receipts: BTreeMap<Uuid, Value>,
+    /// Receipts for files an unfinished (`Transferring`) acquisition has
+    /// already published, so a resumed operation recognizes its own files.
+    /// Present only while such an acquisition exists.
+    #[serde(
+        rename = "acquisition_published_files",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "uuid_published_map"
+    )]
+    pub(crate) published_files: BTreeMap<Uuid, PublishedFiles>,
     /// Existing model partitions retain their exact serialized custody shape.
     /// Only the trusted model facade may decode or replace these values.
     #[serde(flatten)]
@@ -42,14 +52,59 @@ impl AcquisitionDocument {
             schema_version: SCHEMA_VERSION,
             acquisitions: BTreeMap::new(),
             consumer_receipts: BTreeMap::new(),
+            published_files: BTreeMap::new(),
             legacy: BTreeMap::new(),
         }
     }
+
+    /// Published-file receipts belong to unfinished transfers only. Once a
+    /// record leaves `Transferring`, its complete receipts live in the record.
+    fn prune_published_files(&mut self) {
+        let acquisitions = &self.acquisitions;
+        self.published_files.retain(|id, _| {
+            acquisitions.get(id).is_some_and(|record| {
+                record.phase == super::service::AcquisitionPhase::Transferring
+            })
+        });
+    }
+
     fn validate(&self) -> Result<()> {
         if self.schema_version != SCHEMA_VERSION {
             return Err(invalid_schema());
         }
         validate_acquisition_records(&self.acquisitions)?;
+        for (id, published) in &self.published_files {
+            // A ledger whose transfer has finished or vanished is inert: it is
+            // never consulted, and the next mutating write prunes it.
+            let Some(record) = self
+                .acquisitions
+                .get(id)
+                .filter(|record| record.phase == super::service::AcquisitionPhase::Transferring)
+            else {
+                continue;
+            };
+            for (index, receipt) in &published.files {
+                let Some(selected) = record.manifest.files().get(*index) else {
+                    return Err(invalid_published(
+                        "Published-file receipt names a file outside the selection",
+                    ));
+                };
+                if receipt.path != selected.logical_path()
+                    || receipt.sha256.len() != 64
+                    || !receipt.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    || selected
+                        .expected_size()
+                        .is_some_and(|size| size != receipt.bytes)
+                    || selected
+                        .expected_sha256()
+                        .is_some_and(|sha| sha.value() != receipt.sha256)
+                {
+                    return Err(invalid_published(
+                        "Published-file receipt does not match its selected file",
+                    ));
+                }
+            }
+        }
         for id in self.consumer_receipts.keys() {
             let Some(record) = self.acquisitions.get(id) else {
                 return Err(invalid_receipt("Receipt has no acquisition record"));
@@ -235,6 +290,89 @@ pub(crate) fn migration_required() -> PumasError {
 
 fn invalid_schema() -> PumasError {
     PumasError::Validation { field: "downloads.schema_version".into(), message: "Only complete supported schema 4/5 model projections and schema 7 acquisition documents are accepted".into() }
+}
+
+fn invalid_published(message: &str) -> PumasError {
+    PumasError::Validation {
+        field: "acquisition.published_files".into(),
+        message: message.into(),
+    }
+}
+
+/// Files one unfinished acquisition has published, by manifest index.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PublishedFiles {
+    /// Created with the acquisition, so every final file it published has a
+    /// receipt here. False for a transfer that began before receipts were
+    /// recorded: a final file without a receipt may still be its own.
+    pub(crate) complete: bool,
+    #[serde(with = "index_map")]
+    pub(crate) files: BTreeMap<usize, super::workspace::VerifiedFile>,
+}
+
+mod index_map {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    pub(crate) fn serialize<S: Serializer, T: Serialize>(
+        values: &BTreeMap<usize, T>,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        values
+            .iter()
+            .map(|(index, value)| (index.to_string(), value))
+            .collect::<BTreeMap<_, _>>()
+            .serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<BTreeMap<usize, T>, D::Error> {
+        let mut decoded = BTreeMap::new();
+        for (key, value) in BTreeMap::<String, T>::deserialize(deserializer)? {
+            let index: usize = key.parse().map_err(serde::de::Error::custom)?;
+            if key != index.to_string() || decoded.insert(index, value).is_some() {
+                return Err(serde::de::Error::custom(
+                    "published-file indexes must be canonical and unique",
+                ));
+            }
+        }
+        Ok(decoded)
+    }
+}
+
+mod uuid_published_map {
+    use super::PublishedFiles;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+    use uuid::Uuid;
+
+    pub(crate) fn serialize<S: Serializer>(
+        values: &BTreeMap<Uuid, PublishedFiles>,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        values
+            .iter()
+            .map(|(id, value)| (id.to_string(), value))
+            .collect::<BTreeMap<_, _>>()
+            .serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<BTreeMap<Uuid, PublishedFiles>, D::Error> {
+        let mut decoded = BTreeMap::new();
+        for (key, value) in BTreeMap::<String, PublishedFiles>::deserialize(deserializer)? {
+            let id = Uuid::parse_str(&key).map_err(serde::de::Error::custom)?;
+            if key != id.to_string() || decoded.insert(id, value).is_some() {
+                return Err(serde::de::Error::custom(
+                    "published-file acquisition keys must be canonical and unique",
+                ));
+            }
+        }
+        Ok(decoded)
+    }
 }
 
 fn invalid_receipt(message: &str) -> PumasError {
@@ -493,9 +631,112 @@ impl AcquisitionStore {
         if !publish_unchanged && document.acquisitions == before {
             return Ok(result);
         }
+        document.prune_published_files();
         document.validate()?;
         require_durable(transaction.publish_document(&document))?;
         Ok(result)
+    }
+
+    /// Admit or reopen acquisition records; a newly created record also gets
+    /// a complete published-file ledger (see [`PublishedFiles::complete`]).
+    pub(crate) fn update_acquisitions_tracking_new<T>(
+        &self,
+        update: impl FnOnce(&mut BTreeMap<Uuid, AcquisitionRecord>) -> Result<T>,
+    ) -> Result<T> {
+        let transaction = self.transaction(false)?;
+        let mut document = transaction.document()?;
+        let before: BTreeSet<Uuid> = document.acquisitions.keys().copied().collect();
+        let result = update(&mut document.acquisitions)?;
+        let created: Vec<Uuid> = document
+            .acquisitions
+            .keys()
+            .filter(|id| !before.contains(id))
+            .copied()
+            .collect();
+        for id in created {
+            document.published_files.insert(
+                id,
+                PublishedFiles {
+                    complete: true,
+                    files: BTreeMap::new(),
+                },
+            );
+        }
+        document.prune_published_files();
+        document.validate()?;
+        require_durable(transaction.publish_document(&document))?;
+        Ok(result)
+    }
+
+    /// Published-file receipts of an unfinished acquisition. `None` when the
+    /// acquisition has no ledger at all.
+    pub(crate) fn published_files(&self, id: Uuid) -> Result<Option<PublishedFiles>> {
+        let transaction = self.transaction(true)?;
+        if transaction.legacy_read_only {
+            return Ok(None);
+        }
+        Ok(transaction.document()?.published_files.get(&id).cloned())
+    }
+
+    /// Durably record that the exact unfinished acquisition published (or is
+    /// about to publish) `receipt` for manifest file `index`.
+    pub(crate) fn record_published_file(
+        &self,
+        expected: &AcquisitionRecord,
+        index: usize,
+        receipt: super::workspace::VerifiedFile,
+    ) -> Result<()> {
+        let transaction = self.transaction(false)?;
+        let mut document = transaction.document()?;
+        if expected.phase != super::service::AcquisitionPhase::Transferring
+            || document.acquisitions.get(&expected.id) != Some(expected)
+        {
+            return Err(invalid_published(
+                "Published-file receipt requires the exact unfinished transfer",
+            ));
+        }
+        let entry = document.published_files.entry(expected.id).or_default();
+        if entry
+            .files
+            .get(&index)
+            .is_some_and(|known| known == &receipt)
+        {
+            return Ok(());
+        }
+        entry.files.insert(index, receipt);
+        document.prune_published_files();
+        document.validate()?;
+        require_durable(transaction.publish_document(&document))
+    }
+
+    /// Forget one recorded receipt, so the file is treated as unreceipted.
+    pub(crate) fn forget_published_file(
+        &self,
+        expected: &AcquisitionRecord,
+        index: usize,
+    ) -> Result<()> {
+        let transaction = self.transaction(false)?;
+        let mut document = transaction.document()?;
+        let Some(entry) = document.published_files.get_mut(&expected.id) else {
+            return Ok(());
+        };
+        if entry.files.remove(&index).is_none() {
+            return Ok(());
+        }
+        document.prune_published_files();
+        document.validate()?;
+        require_durable(transaction.publish_document(&document))
+    }
+
+    /// Test seam: remove an acquisition's ledger, as a transfer that began
+    /// before published-file receipts were recorded has none.
+    #[cfg(test)]
+    pub(crate) fn drop_published_ledger_for_test(&self, id: Uuid) -> Result<()> {
+        let transaction = self.transaction(false)?;
+        let mut document = transaction.document()?;
+        document.published_files.remove(&id);
+        document.validate()?;
+        require_durable(transaction.publish_document(&document))
     }
 
     pub(crate) fn require_unreceipted_use(&self, expected: &AcquisitionRecord) -> Result<()> {
@@ -550,6 +791,7 @@ impl AcquisitionStore {
         let record = document.acquisitions.get_mut(&expected.id).unwrap();
         record.phase = super::service::AcquisitionPhase::Withdrawn;
         record.files.clear();
+        document.prune_published_files();
         document.validate()?;
         require_durable(transaction.publish_document(&document))
     }
@@ -571,6 +813,7 @@ impl AcquisitionStore {
         let record = document.acquisitions.get_mut(&expected.id).unwrap();
         record.phase = super::service::AcquisitionPhase::Withdrawn;
         record.files.clear();
+        document.prune_published_files();
         document.validate()?;
         require_durable(transaction.publish_document(&document))
     }
@@ -656,6 +899,7 @@ impl AcquisitionStore {
         document
             .consumer_receipts
             .insert(expected.id, receipt_value);
+        document.prune_published_files();
         document.validate()?;
         require_durable(transaction.publish_document(&document))
     }
@@ -752,7 +996,10 @@ fn document_with_partition(
     value: Value,
 ) -> Result<AcquisitionDocument> {
     let mut legacy = value.as_object().cloned().ok_or_else(invalid_schema)?;
-    if !matches!(schema(&value), Some(5 | 6)) || legacy.contains_key("acquisitions") {
+    if !matches!(schema(&value), Some(5 | 6))
+        || legacy.contains_key("acquisitions")
+        || legacy.contains_key("acquisition_published_files")
+    {
         return Err(invalid_schema());
     }
     legacy.remove("schema_version");
@@ -1047,6 +1294,7 @@ mod tests {
                 .map(|record| (record.id, record))
                 .collect(),
             consumer_receipts: BTreeMap::new(),
+            published_files: BTreeMap::new(),
             legacy: BTreeMap::new(),
         }
     }

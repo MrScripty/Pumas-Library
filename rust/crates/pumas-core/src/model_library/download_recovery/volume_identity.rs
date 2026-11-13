@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 /// Set on every UUID-derived volume; Linux device numbers stay far below it.
-pub(super) const STABLE_VOLUME: u64 = 1 << 63;
+pub(crate) const STABLE_VOLUME: u64 = 1 << 63;
 
 /// The stable volume for a device number, or the device number itself when
 /// its filesystem has no UUID to name it by.

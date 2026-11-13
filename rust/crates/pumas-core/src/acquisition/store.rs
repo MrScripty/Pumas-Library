@@ -5,6 +5,7 @@
 use super::service::AcquisitionConsumerReceipt;
 use super::service::AcquisitionRecord;
 pub(crate) use super::service::{AcquisitionProof, AcquisitionTransferProof, AcquisitionUseProof};
+use super::workspace::WorkspaceIdentity;
 use crate::metadata::{
     AtomicJsonTarget, AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind,
     AtomicPublishResult, AtomicPublishStage, StagingCleanup,
@@ -428,7 +429,7 @@ impl AcquisitionStore {
         let Some((bytes, value)) = target.read_downloads_observation(1024 * 1024)? else {
             return Ok((Vec::new(), AcquisitionDocument::empty()));
         };
-        let document: AcquisitionDocument = serde_json::from_value(value)?;
+        let document = decode_document(value)?;
         document.validate()?;
         if document.acquisitions.len() > 128 {
             return Err(PumasError::Validation {
@@ -467,7 +468,7 @@ impl AcquisitionStore {
             if matches!(schema(&value), Some(4..=6)) {
                 return Err(migration_required());
             }
-            let document: AcquisitionDocument = serde_json::from_value(value)?;
+            let document = decode_document(value)?;
             document.validate()?;
         }
         Ok(())
@@ -991,6 +992,37 @@ impl AcquisitionStore {
     }
 }
 
+/// Decode a persisted document. A consumer completion receipt written before
+/// workspace locators used the stable volume names its root by a raw device
+/// number, and so does its record until a later save stores the record's
+/// translation. Translating the receipt again in another boot can name a
+/// different volume, because a reboot can renumber devices. Such a receipt
+/// adopts its record's locator when both name the same file number and
+/// target; every other field of the receipt is still checked against the
+/// record.
+fn decode_document(value: Value) -> Result<AcquisitionDocument> {
+    let mut document: AcquisitionDocument = serde_json::from_value(value)?;
+    for (id, receipt) in &mut document.consumer_receipts {
+        if receipt.get("receipt_kind").and_then(Value::as_str) != Some("pumas.consumer-completion")
+        {
+            continue;
+        }
+        let Some(record) = document.acquisitions.get(id) else {
+            continue;
+        };
+        let recorded = receipt.get("workspace").and_then(|workspace| {
+            Some(WorkspaceIdentity {
+                root_identity: workspace.get("root_identity")?.as_str()?.to_owned(),
+                relative_target: workspace.get("relative_target")?.as_str()?.to_owned(),
+            })
+        });
+        if recorded.is_some_and(|recorded| recorded.is_recorded_raw_form_of(&record.workspace)) {
+            receipt["workspace"] = serde_json::to_value(&record.workspace)?;
+        }
+    }
+    Ok(document)
+}
+
 fn document_with_partition(
     mut document: AcquisitionDocument,
     value: Value,
@@ -1016,7 +1048,7 @@ impl AcquisitionTransaction<'_> {
         if schema(&value) != Some(7) {
             return Err(invalid_schema());
         }
-        let document: AcquisitionDocument = serde_json::from_value(value)?;
+        let document = decode_document(value)?;
         document.validate()?;
         Ok(document)
     }
@@ -1032,7 +1064,7 @@ impl AcquisitionTransaction<'_> {
         if matches!(schema(&value), Some(4 | 5)) && self.legacy_read_only {
             return Ok((Some(value), BTreeMap::new()));
         }
-        let document: AcquisitionDocument = serde_json::from_value(value)?;
+        let document = decode_document(value)?;
         document.validate()?;
         let partition = if document.legacy.is_empty() {
             None
@@ -1438,6 +1470,41 @@ mod tests {
             Err(PumasError::Validation { ref field, .. }) if field == "acquisition.custody"
         ));
         assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn completion_receipt_with_a_recorded_raw_device_adopts_its_records_stable_root() {
+        let lease = Uuid::new_v4();
+        let mut adopted = record(
+            Uuid::new_v4(),
+            "complete",
+            "runtime/install",
+            AcquisitionPhase::Adopted { lease },
+        );
+        adopted.workspace.root_identity = "e9cacb89343ed036:7754".into();
+        let decode = |receipt_root: &str| {
+            let mut receipt = generic_receipt(&adopted, lease);
+            receipt["workspace"]["root_identity"] = receipt_root.into();
+            let mut stored = document(vec![adopted.clone()]);
+            stored.consumer_receipts.insert(adopted.id, receipt);
+            decode_document(serde_json::to_value(&stored).unwrap())
+        };
+
+        // Written before stable volumes: a raw device number for the same
+        // file number and target. Its translation in a later boot can name
+        // another volume, so it adopts the record's locator.
+        let decoded = decode("10306:7754").unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(
+            decoded.consumer_receipts[&adopted.id]["workspace"],
+            serde_json::to_value(&adopted.workspace).unwrap()
+        );
+
+        // A different file number, or another stable volume, is a different
+        // root and still fails validation.
+        for other in ["10306:7755", "8000000000000001:7754"] {
+            assert!(decode(other).unwrap().validate().is_err(), "{other}");
+        }
     }
 
     #[test]

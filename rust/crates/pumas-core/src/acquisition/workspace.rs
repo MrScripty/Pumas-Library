@@ -48,6 +48,34 @@ impl<'de> Deserialize<'de> for WorkspaceIdentity {
     }
 }
 
+impl WorkspaceIdentity {
+    /// Whether this locator, as recorded (before translation), names its root
+    /// by a raw device number while `stable` names the same file number and
+    /// target on a stable volume. A raw device number is translated with the
+    /// device numbering of the boot that reads it, which a reboot can change,
+    /// so two copies of one locator translated in different boots can name
+    /// different volumes.
+    pub(crate) fn is_recorded_raw_form_of(&self, stable: &WorkspaceIdentity) -> bool {
+        fn parse(locator: &str) -> Option<(u64, u64)> {
+            let (volume, file) = locator.split_once(':')?;
+            Some((
+                u64::from_str_radix(volume, 16).ok()?,
+                u64::from_str_radix(file, 16).ok()?,
+            ))
+        }
+        let stable_flag = crate::model_library::STABLE_VOLUME;
+        match (parse(&self.root_identity), parse(&stable.root_identity)) {
+            (Some((raw_volume, raw_file)), Some((volume, file))) => {
+                self.relative_target == stable.relative_target
+                    && raw_file == file
+                    && raw_volume & stable_flag == 0
+                    && volume & stable_flag != 0
+            }
+            _ => false,
+        }
+    }
+}
+
 fn root_locator(binding: Identity) -> String {
     format!("{:x}:{:x}", binding.0, binding.1)
 }

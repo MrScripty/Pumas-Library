@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A library whose llama.cpp (or other runtime) install was recorded before
+  0.8.0 no longer fails to open with "Consumer receipt does not match its
+  acquisition" after a reboot renumbers its drive. Such an install's receipt
+  named its folder by a raw device number, which a later boot can translate
+  to a different volume than its saved record. The receipt now adopts its
+  record's folder identity when both name the same folder and target.
+
 ## [0.8.0] - 2026-11-13
 
 See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,

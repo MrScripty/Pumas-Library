@@ -274,6 +274,10 @@ async fn real_process_loss_does_not_authorize_registry_generation_replacement() 
     assert!(stale.lease_checked);
     registry.release_stale_instance(&root, &stale).unwrap();
     assert!(registry.get_instance(&root).unwrap().is_none());
+    // The refused construction above may still hold a lifetime share, and a
+    // concurrently spawned test child can briefly inherit the lock descriptor
+    // before exec. Wait for the store lock itself before the successor claims it.
+    released(&root).await;
     let successor = owner(&root, registry.clone()).await.unwrap();
     assert_eq!(
         registry.get_instance(&root).unwrap().unwrap().pid,

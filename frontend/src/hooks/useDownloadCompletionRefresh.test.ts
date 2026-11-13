@@ -74,11 +74,13 @@ describe('useDownloadCompletionRefresh', () => {
       }),
       {
         initialProps: {
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the inferred type that later updates rely on
           statuses: { 'org/model': downloadStatus('queued') } as Record<string, DownloadStatus>,
         },
       }
     );
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the inferred type that later updates rely on
     rerender({ statuses: {} as Record<string, DownloadStatus> });
     vi.advanceTimersByTime(100);
 

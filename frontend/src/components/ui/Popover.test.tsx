@@ -14,7 +14,7 @@ vi.mock('framer-motion', async (importOriginal) => {
     HTMLDivElement,
     React.ComponentProps<typeof actual.motion.div>
   >((props, ref) => {
-    motionDivPropsMock(props as Record<string, unknown>);
+    motionDivPropsMock(props);
     return React.createElement(actual.motion.div, { ...props, ref });
   });
   CapturingMotionDiv.displayName = 'CapturingMotionDiv';

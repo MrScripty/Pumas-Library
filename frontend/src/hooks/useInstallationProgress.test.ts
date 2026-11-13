@@ -29,6 +29,7 @@ describe('useInstallationProgress', () => {
   it('projects external progress and clears it when the manager clears', async () => {
     const { result, rerender } = renderHook(
       ({ externalProgress }) => useInstallationProgress({ externalProgress }),
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the inferred type that later updates rely on
       { initialProps: { externalProgress: baseProgress as InstallationProgress | null } }
     );
 

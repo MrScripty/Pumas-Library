@@ -6933,25 +6933,30 @@ impl HuggingFaceClient {
         download_id: &str,
         interrupted_ref: Option<&crate::models::PumasModelRef>,
     ) -> Result<bool> {
-        // A terminal download is never resumable, and terminal states never
-        // revert. Answer before taking any root grant: completion settlement
-        // can still hold the library root just after Completed is projected,
-        // and a resume request then must not fail as "busy".
-        if self
-            .downloads
-            .read()
-            .await
-            .get(download_id)
-            .is_some_and(|state| {
-                matches!(
-                    state.status,
-                    DownloadStatus::Completed | DownloadStatus::Cancelled
-                )
-            })
-        {
-            return Ok(false);
-        }
-        let mut protected_context = self.protect_download_mutation(context).await?;
+        // Completion settlement can still hold the library root just after
+        // Completed is projected. A terminal download is never resumable and
+        // terminal states never revert, so a busy root answers "not resumable"
+        // for it instead of failing the request as busy. The state is read
+        // only on that refusal, so the ordinary path keeps its lock order.
+        let mut protected_context = match self.protect_download_mutation(context).await {
+            Ok(protected) => protected,
+            Err(PumasError::DownloadRootBusy)
+                if self
+                    .downloads
+                    .read()
+                    .await
+                    .get(download_id)
+                    .is_some_and(|state| {
+                        matches!(
+                            state.status,
+                            DownloadStatus::Completed | DownloadStatus::Cancelled
+                        )
+                    }) =>
+            {
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
+        };
         self.observe_finished_download_tasks().await;
         if self
             .download_tasks

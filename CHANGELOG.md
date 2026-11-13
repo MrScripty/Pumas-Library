@@ -479,9 +479,8 @@ the 2026-11-02 audit
 - Resuming a download right after it completed no longer fails with "A
   download or another operation is using this model library". The work that
   finishes a completed download still holds the library root for a moment,
-  and resume asked for that root before checking whether the download could
-  resume at all. A completed or cancelled download now answers "not resumable"
-  at once.
+  and resume reported that as busy. When the root is busy and the download is
+  completed or cancelled, resume now answers "not resumable" instead.
 
 ### Security
 

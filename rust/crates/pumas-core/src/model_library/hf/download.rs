@@ -10260,6 +10260,8 @@ mod tests {
         std::fs::write(destination.join("model.onnx"), existing).unwrap();
         // This prefix would combine with a ranged suffix from ABCD to make
         // the stale final appear equal despite belonging to different bytes.
+        // The download records a receipt for every file it publishes, so an
+        // unreceipted final is not its own and is refused before any request.
         std::fs::write(destination.join("model.onnx.part"), b"xx").unwrap();
         let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
         request.filenames = None;
@@ -10295,9 +10297,10 @@ mod tests {
 
         let states = client.downloads.read().await;
         let state = states.get(&download_id).unwrap();
-        assert_eq!(
-            state.error.as_deref(),
-            Some(crate::models::ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE)
+        let error = state.error.as_deref().unwrap();
+        assert!(
+            error.contains("model.onnx (4 bytes) was not published by this download"),
+            "{error}"
         );
         assert_eq!(
             std::fs::read(destination.join("model.onnx")).unwrap(),

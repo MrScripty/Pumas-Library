@@ -911,10 +911,7 @@ impl AcquisitionWorkspace {
         let staged = self.verify_file(file, true)?;
         let (parent, name) = self.parent(file.logical_path(), false)?;
         if existing_without_receipt {
-            return Err(PumasError::Validation {
-                field: "download.integrity".into(),
-                message: format!("Existing selected file {} has no verified receipt or supplied checksum; preserving both files for reconciliation", file.logical_path()),
-            });
+            return self.adopt_existing_matching_part(file, staged);
         }
         if self.file_len(file.logical_path(), false)?.is_some() {
             return Err(changed());
@@ -946,6 +943,106 @@ impl AcquisitionWorkspace {
         Ok(staged)
     }
 
+    /// An immutable source was just transferred again into the staged
+    /// partial. A final file published by a transfer that began before
+    /// published-file receipts were recorded has no receipt, so it is proven
+    /// only by being byte-identical to that fresh representation; the
+    /// duplicate staged copy is then discarded. Any difference preserves both
+    /// files and names what differs.
+    fn adopt_existing_matching_part(
+        &self,
+        file: &ArtifactFile,
+        staged: VerifiedFile,
+    ) -> Result<VerifiedFile> {
+        let mismatch = |existing_bytes: u64, existing_sha256: &str| {
+            PumasError::Validation {
+            field: "download.integrity".into(),
+            message: format!(
+                "Existing selected file {} ({existing_bytes} bytes, SHA-256 {existing_sha256}) differs from the fresh immutable-source transfer ({} bytes, SHA-256 {}); preserving both files for reconciliation",
+                file.logical_path(),
+                staged.bytes,
+                staged.sha256
+            ),
+        }
+        };
+        if self.file_len(file.logical_path(), false)? != Some(staged.bytes) {
+            // Not even the selected length: observe it only to name it.
+            let (parent, name) = self.parent(file.logical_path(), false)?;
+            let observed = observe_regular_prefix(&parent, &name, None)?;
+            return Err(mismatch(observed.bytes, &observed.sha256));
+        }
+        // First verification of the final: hash, bind and flush it exactly as
+        // any other acquired file (FlushFileBuffers on Windows).
+        let existing = self.verify_file(file, false)?;
+        if existing != staged {
+            self.held
+                .verified
+                .lock()
+                .map_err(|_| changed())?
+                .remove(&(file.logical_path().into(), false));
+            return Err(mismatch(existing.bytes, &existing.sha256));
+        }
+        self.remove_part(file.logical_path())?;
+        self.validate()?;
+        Ok(existing)
+    }
+
+    /// Compare a retained partial with the unreceipted final file beside it.
+    /// The partial is discarded only when every byte it holds is also at the
+    /// start of the final file, so no transferred bytes are lost, and only if
+    /// it is still the exact file that was compared.
+    pub(crate) fn discard_part_duplicating_final(&self, path: &str) -> Result<RetainedPart> {
+        self.require_writable()?;
+        let (parent, name) = self.parent(path, false)?;
+        let staged = staging_path(&name);
+        let part = match parent.symlink_metadata(&staged) {
+            Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => {
+                if metadata.len() == 0 {
+                    return Ok(RetainedPart::Absent);
+                }
+                observe_regular_prefix(&parent, &staged, None)?
+            }
+            Ok(_) => return Err(changed()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(RetainedPart::Absent)
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let complete = observe_regular_prefix(&parent, &name, Some(part.bytes))?;
+        if complete.prefix_bytes != part.bytes || complete.prefix_sha256 != part.sha256 {
+            return Ok(RetainedPart::Differs {
+                part_bytes: part.bytes,
+                part_sha256: part.sha256,
+                final_bytes: complete.bytes,
+                final_sha256: complete.sha256,
+            });
+        }
+        // Removal is by name: recheck that the name still binds the exact
+        // file that was hashed.
+        let mut read_options = options();
+        read_options.read(true);
+        let current = Metadata::from_file(&parent.open_with(&staged, &read_options)?.into_std())?;
+        if identity(&current)? != part.binding
+            || current.len() != part.bytes
+            || current.modified()? != part.modified
+        {
+            return Err(changed());
+        }
+        self.remove_part(path)?;
+        Ok(RetainedPart::Discarded)
+    }
+
+    /// Admit a final file this unfinished acquisition published earlier, by
+    /// the receipt it recorded: the same binding and length checks a reopened
+    /// `FilesReady` acquisition applies, without rehashing.
+    pub(crate) fn admit_published_receipt(
+        &self,
+        file: &ArtifactFile,
+        receipt: &VerifiedFile,
+    ) -> Result<()> {
+        self.verify_receipts_for(std::iter::once((file, receipt)))
+    }
+
     pub(crate) fn seal(&self, manifest: &ArtifactManifest) -> Result<Vec<VerifiedFile>> {
         self.validate()?;
         *self.held.sealed.lock().map_err(|_| changed())? = true;
@@ -964,7 +1061,14 @@ impl AcquisitionWorkspace {
         if manifest.files().len() != receipts.len() {
             return Err(changed());
         }
-        for (selected, receipt) in manifest.files().iter().zip(receipts) {
+        self.verify_receipts_for(manifest.files().iter().zip(receipts))
+    }
+
+    fn verify_receipts_for<'a>(
+        &self,
+        receipts: impl IntoIterator<Item = (&'a ArtifactFile, &'a VerifiedFile)>,
+    ) -> Result<()> {
+        for (selected, receipt) in receipts {
             if receipt.path != selected.logical_path()
                 || receipt.sha256.len() != 64
                 || !receipt.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -989,6 +1093,90 @@ impl AcquisitionWorkspace {
         }
         Ok(())
     }
+}
+
+/// What a retained partial beside an unreceipted final file turned out to be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RetainedPart {
+    /// No partial, or an empty one.
+    Absent,
+    /// Every byte was already in the final file; the partial was removed.
+    Discarded,
+    /// The partial holds bytes the final file does not; both are kept.
+    Differs {
+        part_bytes: u64,
+        part_sha256: String,
+        final_bytes: u64,
+        final_sha256: String,
+    },
+}
+
+/// One read of a held regular file: its whole length and SHA-256, and the
+/// SHA-256 of its first `prefix_bytes` bytes.
+struct RegularFileObservation {
+    binding: Identity,
+    modified: cap_std::time::SystemTime,
+    bytes: u64,
+    sha256: String,
+    prefix_bytes: u64,
+    prefix_sha256: String,
+}
+
+/// Hash a held regular file in one pass, also hashing its first `prefix`
+/// bytes (the whole file when `None`), and check that its binding, length and
+/// modification time did not change while reading.
+fn observe_regular_prefix(
+    parent: &Dir,
+    name: &str,
+    prefix: Option<u64>,
+) -> Result<RegularFileObservation> {
+    let mut read_options = options();
+    read_options.read(true);
+    let mut handle = parent.open_with(name, &read_options)?.into_std();
+    let before = Metadata::from_file(&handle)?;
+    if !before.is_file() {
+        return Err(changed());
+    }
+    let binding = identity(&before)?;
+    let prefix_limit = prefix.unwrap_or(u64::MAX);
+    let mut whole = Sha256::new();
+    let mut leading = Sha256::new();
+    let mut bytes = 0_u64;
+    let mut prefix_bytes = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = handle.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
+        whole.update(chunk);
+        let wanted = prefix_limit.saturating_sub(prefix_bytes);
+        let take = usize::try_from(wanted.min(read as u64)).map_err(|_| changed())?;
+        leading.update(&chunk[..take]);
+        prefix_bytes += take as u64;
+        bytes = bytes.checked_add(read as u64).ok_or_else(changed)?;
+    }
+    let after = Metadata::from_file(&handle)?;
+    let current = Metadata::from_file(&parent.open_with(name, &read_options)?.into_std())?;
+    if identity(&after)? != binding
+        || identity(&current)? != binding
+        || before.len() != bytes
+        || after.len() != bytes
+        || current.len() != bytes
+        || before.modified()? != after.modified()?
+        || before.modified()? != current.modified()?
+    {
+        return Err(changed());
+    }
+    Ok(RegularFileObservation {
+        binding,
+        modified: before.modified()?,
+        bytes,
+        sha256: hex::encode(whole.finalize()),
+        prefix_bytes,
+        prefix_sha256: hex::encode(leading.finalize()),
+    })
 }
 
 fn normalized_relative_path(path: &Path) -> Result<String> {
@@ -1113,6 +1301,36 @@ mod tests {
         .unwrap()
     }
 
+    /// A regular Git file: a selected length and an immutable revision, but
+    /// no publisher digest.
+    fn digestless_manifest(payload: &[u8]) -> ArtifactManifest {
+        use crate::acquisition::{
+            ArtifactRevisionEvidence, ArtifactSourceIdentity, RevisionStrength,
+        };
+        ArtifactManifest::new(
+            ArtifactSourceIdentity::new(
+                "fixture",
+                "payload",
+                ArtifactRevisionEvidence::new(
+                    "fixture.revision",
+                    "v1",
+                    RevisionStrength::Immutable,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+            vec![ArtifactFile::new(
+                "payload.bin",
+                "payload",
+                Some(payload.len() as u64),
+                None,
+                FileVerificationRequirement::SizeAndImmutableRevision,
+            )
+            .unwrap()],
+        )
+        .unwrap()
+    }
+
     #[test]
     fn acquisition_integration_verified_payload_keeps_bytes_and_refusals() {
         let temp = tempfile::tempdir().unwrap();
@@ -1204,12 +1422,34 @@ mod tests {
     }
 
     #[test]
+    fn existing_file_identical_to_fresh_transfer_is_adopted() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "integrity-fixture".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let manifest = digestless_manifest(b"DATA");
+        std::fs::write(temp.path().join("payload.bin"), b"DATA").unwrap();
+        let mut part = workspace.open_part("payload.bin", false).unwrap();
+        part.write_all(b"DATA").unwrap();
+        part.sync_all().unwrap();
+        drop(part);
+        let adopted = workspace.publish_part(&manifest.files()[0], true).unwrap();
+        assert_eq!(adopted.bytes, 4);
+        assert_eq!(adopted.sha256, hex::encode(Sha256::digest(b"DATA")));
+        assert!(!temp.path().join("payload.bin.part").exists());
+        assert_eq!(workspace.seal(&manifest).unwrap(), vec![adopted]);
+    }
+
+    #[test]
     fn unverified_existing_files_preserve_both_files_for_reconciliation() {
-        for existing in [
-            b"DATA".as_slice(),
-            b"EVIL".as_slice(),
-            b"WRONG-SIZE".as_slice(),
-        ] {
+        for existing in [b"EVIL".as_slice(), b"WRONG-SIZE".as_slice()] {
             let temp = tempfile::tempdir().unwrap();
             let workspace = AcquisitionWorkspace::from_capability(
                 crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
@@ -1221,14 +1461,15 @@ mod tests {
                 || Ok(()),
             )
             .unwrap();
-            let manifest = verification_manifest(b"DATA");
+            let manifest = digestless_manifest(b"DATA");
             std::fs::write(temp.path().join("payload.bin"), existing).unwrap();
             let mut part = workspace.open_part("payload.bin", false).unwrap();
             part.write_all(b"DATA").unwrap();
             part.sync_all().unwrap();
             drop(part);
             assert!(matches!(workspace.publish_part(&manifest.files()[0], true),
-                Err(PumasError::Validation { ref field, .. }) if field == "download.integrity"));
+                Err(PumasError::Validation { ref field, ref message })
+                    if field == "download.integrity" && message.contains("differs from the fresh")));
             assert_eq!(
                 std::fs::read(temp.path().join("payload.bin")).unwrap(),
                 existing

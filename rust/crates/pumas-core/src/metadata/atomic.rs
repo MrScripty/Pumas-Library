@@ -258,6 +258,18 @@ pub(crate) fn is_durable_staging_name(target: &str, name: &str) -> bool {
 impl DurablePublicationAdapter for OsDurablePublicationAdapter {
     fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
         let mut name = target.to_os_string();
+        #[cfg(windows)]
+        if target == "metadata.json" {
+            let trace = std::backtrace::Backtrace::force_capture().to_string();
+            let frames: Vec<&str> = trace
+                .lines()
+                .map(str::trim)
+                .filter(|line| {
+                    line.contains("pumas_library::") && !line.contains("metadata::atomic")
+                })
+                .collect();
+            eprintln!("DIAGW metadata write {}", frames.join(" <- "));
+        }
         name.push(format!(".{}.{}.tmp", Uuid::new_v4(), attempt));
         name
     }

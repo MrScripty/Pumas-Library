@@ -1695,11 +1695,13 @@ async fn reconcile_model_scope(
     }
 
     if path_exists(&model_dir.join("metadata.json")).await? {
-        if primary
+        let current = primary
             .model_library
             .model_scope_is_current(&model_dir)
-            .await?
-        {
+            .await?;
+        #[cfg(windows)]
+        eprintln!("DIAGW reconcile {model_id} current={current}");
+        if current {
             return Ok(Vec::new());
         }
         primary.model_library.index_model_dir(&model_dir).await?;

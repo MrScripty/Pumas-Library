@@ -250,7 +250,7 @@ def main():
             print(f"DIAG stress attempt {attempt}", flush=True)
             subprocess.run(
                 ["cargo", "test", "--locked", "--manifest-path", "rust/Cargo.toml",
-                 "-p", "pumas-library", "--test", "integration", "acquired_"],
+                 "-p", "pumas-library", "--test", "integration", "acquired_", "--", "--nocapture"],
                 cwd=ROOT,
             )
         raise SystemExit("DIAG stress finished")

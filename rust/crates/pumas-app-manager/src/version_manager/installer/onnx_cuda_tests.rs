@@ -6,6 +6,10 @@
 //! is downloaded.
 
 use super::onnx_cuda::{self, CudaWheelSources};
+#[cfg(all(
+    any(target_os = "linux", target_os = "windows"),
+    target_arch = "x86_64"
+))]
 use super::onnx_cuda_availability::CudaAvailability;
 use super::python_index::WheelPlatform;
 use super::*;
@@ -94,6 +98,10 @@ impl FixtureServer {
             .insert(path.to_owned(), Route { body, content_type });
     }
 
+    #[cfg(all(
+        any(target_os = "linux", target_os = "windows"),
+        target_arch = "x86_64"
+    ))]
     fn stall(&self, path: &str) {
         self.state.lock().unwrap().stalled.insert(path.to_owned());
     }
@@ -102,6 +110,10 @@ impl FixtureServer {
         self.state.lock().unwrap().failing.insert(path.to_owned());
     }
 
+    #[cfg(all(
+        any(target_os = "linux", target_os = "windows"),
+        target_arch = "x86_64"
+    ))]
     fn release(&self, path: &str) {
         self.state.lock().unwrap().stalled.remove(path);
     }
@@ -110,6 +122,7 @@ impl FixtureServer {
         self.state.lock().unwrap().routes.remove(path);
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     fn truncate_once(&self, path: &str) {
         self.state
             .lock()
@@ -118,6 +131,10 @@ impl FixtureServer {
             .insert(path.to_owned());
     }
 
+    #[cfg(all(
+        any(target_os = "linux", target_os = "windows"),
+        target_arch = "x86_64"
+    ))]
     fn requests(&self, path: &str) -> Vec<Option<String>> {
         self.state
             .lock()
@@ -1040,6 +1057,10 @@ async fn a_kept_selection_is_replaced_only_when_a_wheel_is_not_found() {
     );
 }
 
+#[cfg(all(
+    any(target_os = "linux", target_os = "windows"),
+    target_arch = "x86_64"
+))]
 fn listed(tag: &str) -> pumas_library::models::GitHubRelease {
     pumas_library::models::GitHubRelease {
         tag_name: tag.into(),

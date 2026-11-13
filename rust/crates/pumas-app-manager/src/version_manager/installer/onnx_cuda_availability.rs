@@ -89,7 +89,11 @@ impl CudaAvailability {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(target_os = "linux", target_os = "windows"),
+        target_arch = "x86_64"
+    ))]
     pub(crate) fn with_listing_deadline(mut self, deadline: Duration) -> Self {
         self.listing_deadline = deadline;
         self

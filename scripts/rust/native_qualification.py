@@ -244,6 +244,16 @@ def main():
     host = host_name()
     if host not in HOSTS:
         raise SystemExit(f"Unsupported native host {platform.system()!r}")
+    # TEMPORARY DIAGNOSTIC: stress the Windows acquired-import observations.
+    if args.shard == "default-features" and host == "Windows":
+        for attempt in range(8):
+            print(f"DIAG stress attempt {attempt}", flush=True)
+            subprocess.run(
+                ["cargo", "test", "--locked", "--manifest-path", "rust/Cargo.toml",
+                 "-p", "pumas-library", "--test", "integration", "acquired_"],
+                cwd=ROOT,
+            )
+        raise SystemExit("DIAG stress finished")
     # A CI run is long: run every group and report every failure together.
     failures = []
     for group in GROUPS:

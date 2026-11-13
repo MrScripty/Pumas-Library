@@ -91,6 +91,24 @@ impl ImportPayloadIdentity {
     }
 }
 
+/// Every volume a recorded payload names, in the receipt's own JSON, before
+/// deserialization translated any of them.
+#[cfg(unix)]
+fn recorded_payload_volumes(recorded: &serde_json::Value) -> Option<Vec<u64>> {
+    let volume = |identity: &serde_json::Value| identity.get("volume")?.as_u64();
+    let mut volumes = vec![
+        volume(recorded.get("library_root")?)?,
+        volume(recorded.get("stage")?)?,
+    ];
+    for identity in recorded.get("directories")?.as_object()?.values() {
+        volumes.push(volume(identity)?);
+    }
+    for file in recorded.get("files")?.as_object()?.values() {
+        volumes.push(volume(file.get("identity")?)?);
+    }
+    Some(volumes)
+}
+
 type HeldChildren = BTreeMap<PathBuf, Arc<HeldDestination>>;
 
 impl DownloadDestinationRoot {
@@ -125,6 +143,51 @@ impl DownloadRecoveryDestination {
         sync_directory(&directory)?;
         Ok(())
     }
+    /// A receipt written before stable volumes recorded the raw device
+    /// number, which deserialization translates through whatever device has
+    /// that number today. After the kernel renumbers devices that is another
+    /// filesystem, and every binding of an intact payload stops matching.
+    ///
+    /// The payload adopts this root's stable volume only when its library
+    /// root names this root's own file number and every recorded identity
+    /// shares one raw device number. The rest of the bindings and the content
+    /// hashes are still checked against the receipt as usual.
+    #[cfg(unix)]
+    pub(crate) fn adopt_recorded_raw_volume(
+        &self,
+        recorded: &serde_json::Value,
+        payload: &mut ImportPayloadIdentity,
+    ) {
+        let current = self.authority.root_identity;
+        if current.volume & STABLE_VOLUME == 0 || payload.library_root.file != current.file {
+            return;
+        }
+        let Some(volumes) = recorded_payload_volumes(recorded) else {
+            return;
+        };
+        let raw = volumes[0];
+        if raw & STABLE_VOLUME != 0 || volumes.iter().any(|volume| *volume != raw) {
+            return;
+        }
+        payload.library_root.volume = current.volume;
+        payload.stage.volume = current.volume;
+        for identity in payload.directories.values_mut() {
+            identity.volume = current.volume;
+        }
+        for file in payload.files.values_mut() {
+            file.identity.volume = current.volume;
+        }
+    }
+
+    /// Windows records stable volume serial numbers.
+    #[cfg(not(unix))]
+    pub(crate) fn adopt_recorded_raw_volume(
+        &self,
+        _recorded: &serde_json::Value,
+        _payload: &mut ImportPayloadIdentity,
+    ) {
+    }
+
     pub(crate) fn import_payload_root_matches(
         &self,
         expected: &ImportPayloadIdentity,

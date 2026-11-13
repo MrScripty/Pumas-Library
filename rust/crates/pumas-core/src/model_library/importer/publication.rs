@@ -521,7 +521,11 @@ fn read_receipt(destination: &DownloadRecoveryDestination) -> Result<Publication
             message: "Copied import publication receipt exceeds the supported size limit".into(),
         });
     }
-    let receipt: PublicationReceipt = serde_json::from_slice(&bytes)?;
+    let recorded: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let mut receipt: PublicationReceipt = serde_json::from_value(recorded.clone())?;
+    if let Some(payload) = recorded.get("payload") {
+        destination.adopt_recorded_raw_volume(payload, &mut receipt.payload);
+    }
     if !matches!(
         (receipt.version, &receipt.acquisition),
         (1, None) | (2, Some(_))

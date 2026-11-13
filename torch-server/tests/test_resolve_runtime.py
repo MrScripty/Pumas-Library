@@ -477,6 +477,68 @@ class ResolverTests(unittest.TestCase):
                             target, [{"name": "sympy", "version": "1.14.0"}]
                         )
             record.write_text(good_record, encoding="utf-8")
+            native = good_record.replace(
+                "sympy-1.14.0.dist-info/METADATA", "sympy-1.14.0.dist-info\\METADATA"
+            )
+            record.write_text(native, encoding="utf-8")
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                native_manifest = resolver.installed_file_manifest(
+                    target, [{"name": "sympy", "version": "1.14.0"}]
+                )
+            self.assertEqual(
+                [item["path"] for item in native_manifest["files"]],
+                [item["path"] for item in manifest["files"]],
+            )
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", False):
+                with self.assertRaisesRegex(ValueError, "escapes its target"):
+                    resolver.installed_file_manifest(
+                        target, [{"name": "sympy", "version": "1.14.0"}]
+                    )
+            # pip keeps the wheel's own '\\' row and appends a '/' row for the
+            # same installed file.
+            metadata_row = next(
+                line
+                for line in good_record.splitlines()
+                if line.startswith("sympy-1.14.0.dist-info/METADATA,")
+            )
+            aliased = (
+                metadata_row.replace("dist-info/METADATA", "dist-info\\METADATA")
+                + "\n"
+                + good_record
+            )
+            record.write_text(aliased, encoding="utf-8")
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                aliased_manifest = resolver.installed_file_manifest(
+                    target, [{"name": "sympy", "version": "1.14.0"}]
+                )
+            self.assertEqual(
+                [item["path"] for item in aliased_manifest["files"]],
+                [item["path"] for item in manifest["files"]],
+            )
+            for duplicate in (
+                good_record + metadata_row + "\n",
+                metadata_row.replace("dist-info/METADATA", "dist-info\\METADATA").replace(
+                    "sha256=", "sha256=x"
+                )
+                + "\n"
+                + good_record,
+            ):
+                record.write_text(duplicate, encoding="utf-8")
+                with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                    with self.assertRaisesRegex(ValueError, "Duplicate staged wheel file"):
+                        resolver.installed_file_manifest(
+                            target, [{"name": "sympy", "version": "1.14.0"}]
+                        )
+            escaping = good_record.replace(
+                "../../share/man/man1/isympy.1", "..\\..\\share\\..\\..\\outside"
+            )
+            record.write_text(escaping, encoding="utf-8")
+            with patch.object(resolver, "RECORD_BACKSLASH_IS_SEPARATOR", True):
+                with self.assertRaisesRegex(ValueError, "escapes its target"):
+                    resolver.installed_file_manifest(
+                        target, [{"name": "sympy", "version": "1.14.0"}]
+                    )
+            record.write_text(good_record, encoding="utf-8")
 
     def test_pip_worker_fallback_keeps_isolation_and_bytecode_suppression(self):
         with (
@@ -725,6 +787,40 @@ class ResolverTests(unittest.TestCase):
             renamed = pathlib.Path(directory) / "other.whl"
             self.assertFalse(resolver.same_local_file(renamed.as_uri(), local, digest, digest))
             self.assertTrue(resolver.same_local_file(local.as_uri(), local))
+
+    def test_installed_local_wheel_matches_its_lock_by_file_not_path_spelling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            local = root / "torch-2.14.0+cpu-cp314-cp314-win_amd64.whl"
+            local.write_bytes(b"wheel")
+            digest = hashlib.sha256(b"wheel").hexdigest()
+            # A second spelling of the same file, as a Windows file URL and a
+            # verbatim canonical path are.
+            alias = root / "alias"
+            alias.symlink_to(root, target_is_directory=True)
+            artifact = {"name": "torch", "version": "2.14.0+cpu", "url": "", "sha256": digest}
+
+            def report(path):
+                return {
+                    "install": [
+                        {
+                            "metadata": {"name": "torch", "version": "2.14.0+cpu"},
+                            "download_info": {
+                                "url": path.as_uri(),
+                                "archive_info": {"hashes": {"sha256": digest}},
+                            },
+                        }
+                    ]
+                }
+
+            resolver.installed_artifacts_match_lock(
+                report(alias / local.name), [artifact], {"torch": local}
+            )
+            copy = root / "copy" / local.name
+            copy.parent.mkdir()
+            copy.write_bytes(b"wheel")
+            with self.assertRaisesRegex(ValueError, "differ from the hash lock"):
+                resolver.installed_artifacts_match_lock(report(copy), [artifact], {"torch": local})
 
     def test_local_torch_wheel_must_be_the_named_acquired_file(self):
         with tempfile.TemporaryDirectory() as directory:

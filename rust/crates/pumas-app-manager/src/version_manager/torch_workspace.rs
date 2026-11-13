@@ -52,7 +52,9 @@ pub(super) fn managed_torch_wheel_dir(launcher_root: &Path) -> Result<PathBuf> {
 pub(super) fn configure_resolver_command(command: &mut Command, workspace: &Path) -> Result<()> {
     let workspace =
         fs::canonicalize(workspace).map_err(|err| PumasError::io_with_path(err, workspace))?;
-    let temporary = checked_child_directory(&workspace, "tmp", &workspace)?;
+    let temporary = pumas_library::platform::child_process_path(&checked_child_directory(
+        &workspace, "tmp", &workspace,
+    )?);
     for name in ["TMPDIR", "TMP", "TEMP"] {
         command.env(name, &temporary);
     }

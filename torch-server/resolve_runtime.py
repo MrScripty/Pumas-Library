@@ -217,6 +217,12 @@ def staged_file_digest(path: Path) -> tuple[bytes, int]:
     return digest.digest(), size
 
 
+# On Windows a backslash in a wheel RECORD is the native separator, which some
+# wheel tools write (torchvision's Windows wheel does). Elsewhere it is part of
+# a file name and stays rejected.
+RECORD_BACKSLASH_IS_SEPARATOR = os.sep == "\\"
+
+
 def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -> dict:
     """Validate pip's staged wheel files against every installed RECORD."""
     if target.is_symlink() or not target.is_dir():
@@ -258,6 +264,8 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 raise ValueError("Staged distribution identity differs from the pip report")
     claimed = set()
     recorded = {}
+    # The RECORD spelling that first claimed each file.
+    spellings = {}
     for record in records:
         if record.is_symlink() or record.parent.is_symlink():
             raise ValueError("Staged wheel RECORD is linked")
@@ -266,6 +274,9 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 if len(row) != 3:
                     raise ValueError("Malformed staged wheel RECORD")
                 name, recorded_hash, recorded_size = row
+                spelling = name
+                if RECORD_BACKSLASH_IS_SEPARATOR:
+                    name = name.replace("\\", "/")
                 if name.startswith("../../"):
                     relocated = name.removeprefix("../../")
                     root, separator, nested = relocated.partition("/")
@@ -289,7 +300,21 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                         f"{record.parent.name} {name[:256]!r}"
                     )
                 if relative in claimed:
-                    raise ValueError("Duplicate staged wheel file")
+                    # pip rewrites RECORD with '/' rows for the files it
+                    # installed and keeps the wheel's own '\\' row for the same
+                    # file. Only that second spelling of one file is accepted,
+                    # and a digest it carries must agree with the first.
+                    algorithm, _, value = recorded_hash.partition("=")
+                    if (
+                        RECORD_BACKSLASH_IS_SEPARATOR
+                        and spellings[relative] != spelling
+                        and (not recorded_hash or (algorithm == "sha256" and value))
+                        and recorded.get(relative, value) == value
+                    ):
+                        if value:
+                            recorded[relative] = value
+                        continue
+                    raise ValueError(f"Duplicate staged wheel file: {relative[:256]!r}")
                 file = target / path
                 if relative.endswith(".pyc") and not recorded_hash and not recorded_size:
                     # pip compiles these during installation; the wheel provides no
@@ -304,6 +329,7 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 if file.is_symlink() or not file.is_file():
                     raise ValueError("Staged wheel RECORD names a missing or linked file")
                 claimed.add(relative)
+                spellings[relative] = spelling
                 if len(claimed) > 200_000:
                     raise ValueError("Staged package manifest is too large")
                 if file == record and (recorded_hash or recorded_size):
@@ -1308,13 +1334,25 @@ def read_install_lock(output: Path, version: str, build: str, extras: tuple[str,
     return resolution
 
 
+def _local_file_identity(path: Path) -> str:
+    """Name a local file by its volume and file number, not by its spelling.
+
+    pip reports a `file:` URL (`C:/...`) while Pumas passes the acquired wheel
+    as a canonical path, which on Windows is a verbatim `\\\\?\\` path; resolved
+    paths of one file can therefore differ in text. On Windows `st_dev` and
+    `st_ino` are the volume serial number and file index.
+    """
+    status = path.stat()
+    return f"local:{status.st_dev}:{status.st_ino}"
+
+
 def _installed_source(url: str) -> str:
-    """Compare a local wheel by its resolved file, any other source by URL."""
+    """Compare a local wheel by its file identity, any other source by URL."""
     path = local_file_url_path(url)
     if path is None:
         return url
     try:
-        return f"local:{path.resolve(strict=True)}"
+        return _local_file_identity(path)
     except OSError:
         return url
 
@@ -1344,7 +1382,7 @@ def installed_artifacts_match_lock(
         (
             canonicalize_name(artifact["name"]),
             artifact["version"],
-            f"local:{local_files[artifact['name']].resolve(strict=True)}"
+            _local_file_identity(local_files[artifact["name"]])
             if artifact["name"] in local_files
             else artifact["url"],
             artifact["sha256"].lower(),

@@ -9,18 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- A library whose llama.cpp (or other runtime) install was recorded before
-  0.8.0 no longer fails to open with "Consumer receipt does not match its
-  acquisition" after a reboot renumbers its drive. Such an install's receipt
-  named its folder by a raw device number, which a later boot can translate
-  to a different volume than its saved record. The receipt now adopts its
-  record's folder identity when both name the same folder and target.
-- Torch installs on Windows no longer fail with "Resolved Torch artifact is
-  not the acquired local wheel". The resolver compared the path pip reported
-  for the verified Torch wheel with the acquired file's path, and a Windows
-  file URL and resolved path can spell one file differently. A wheel of the
-  same name now also matches when pip reports the SHA-256 the acquired wheel
-  was verified against.
+- A copied import finished before stable volume identities, such as a GGUF
+  reranker or audio model, can again be finished with "Verify and finish
+  import" after a reboot renumbers its drive. Its receipt recorded a raw
+  device number, which now names a different volume, so every file binding
+  failed although the files were intact. When every binding in the receipt
+  shares one raw device number and its library root is this library's own
+  folder, the receipt adopts the library's stable volume; the file bindings
+  and the SHA-256 rehash are still checked.
+- Torch installs on Windows no longer fail with "Could not install packages
+  due to an OSError: [Errno 22] Invalid argument" while pip installs numba.
+  Pumas gave pip and uv their temporary directory as a canonical `\\?\`
+  path, which Windows does not resolve `..` in, and wheels such as numba
+  install their scripts through `lib/python/../../bin`. Child processes now
+  get the ordinary form of the same path.
+  The installed-wheel check that follows now compares the acquired Torch
+  wheel by file identity instead of path text, since pip reports it as a
+  `file:` URL and Pumas names it by its canonical path.
+  On Windows the staged-package check also accepts a wheel RECORD that
+  writes paths with the native `\` separator, as torchvision's Windows wheel
+  does, and the second row pip appends for such a file with `/`. Parent and
+  absolute paths, and any other duplicate, are still refused.
 
 ## [0.8.0] - 2026-11-13
 
@@ -327,6 +336,18 @@ the 2026-11-02 audit
 
 ### Fixed
 
+- A library whose llama.cpp (or other runtime) install was recorded before
+  0.8.0 no longer fails to open with "Consumer receipt does not match its
+  acquisition" after a reboot renumbers its drive. Such an install's receipt
+  named its folder by a raw device number, which a later boot can translate
+  to a different volume than its saved record. The receipt now adopts its
+  record's folder identity when both name the same folder and target.
+- Torch installs on Windows no longer fail with "Resolved Torch artifact is
+  not the acquired local wheel". The resolver compared the path pip reported
+  for the verified Torch wheel with the acquired file's path, and a Windows
+  file URL and resolved path can spell one file differently. A wheel of the
+  same name now also matches when pip reports the SHA-256 the acquired wheel
+  was verified against.
 - Interrupted Hugging Face downloads resume. Hugging Face's CDN returns the
   signed URL's parameters in a different order on each redirect, which made
   every resume fail with "HTTP continuation representation or resource

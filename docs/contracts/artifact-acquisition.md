@@ -1,6 +1,6 @@
 # Artifact acquisition contract
 
-**Status:** Q1 (shared HTTP) and Q3 (S3) are implemented and ship in 0.8.0. Their acceptance gates (AQ-HTTP, AQ-S3) are not yet accepted; Q2 (runtime packages) has not started.
+**Status:** Q1 (shared HTTP) and Q3 (S3) are implemented and ship in 0.8.0. Their acceptance gates (AQ-HTTP, AQ-S3) are not yet accepted. Q2 (runtime packages) is implemented after 0.8.0 for the existing Torch installer (see §11); its gate (AQ-PACKAGES) is not accepted.
 **Canonical owner:** Pumas acquisition integration.
 **Implementation authority:** [Acquisition plan](../plans/artifact-acquisition/plan.md).
 **Consumer:** [Runtime installation and model-adapter plan](../plans/runtime-installations-and-model-adapters/plan.md), plus the existing model-library and native/package integrations.
@@ -431,9 +431,26 @@ for an explicit integrity-verification request. An installed file may legitimate
 differ from the acquired artifact. Ownership checks still require regular files,
 current physical/path bindings, required-member closure, recorded lengths and
 valid receipt state; a checksum does not grant ownership. Pending or missing
-receipts cannot be promoted by observing matching files. Unknown pre-existing
-files without a supplied checksum or verified receipt remain unresolved and are
-preserved for reconciliation. An owned rewrite invalidates prior acquisition
+receipts cannot be promoted by observing matching files.
+
+An unfinished (`Transferring`) acquisition records a published-file receipt
+(path, length, SHA-256 of the verified staged bytes) durably before it renames
+each staged file into place, in a separate `acquisition_published_files` store
+partition that is pruned when the record leaves `Transferring`. A resumed
+operation admits a final file named by its own receipt through the same binding
+and length checks as a reopened `FilesReady` acquisition, without transferring
+or rehashing it; a staged file left by an interruption between recording and
+renaming is published only if it still hashes to the recorded receipt. An
+acquisition created with this ledger refuses an unreceipted final file without
+a supplied checksum as not its own, before any request. Only a transfer that
+began before receipts were recorded (no ledger, or one marked incomplete) may
+admit such a file, from an immutable revision, when it is byte-identical to a
+complete fresh transfer of that file; the duplicate staged copy is then
+discarded. Before each attempt of that transfer, a retained partial without a
+live checkpoint is discarded only when every one of its bytes is already at the
+start of the final file and the name still binds the file that was compared.
+Any difference keeps both files unresolved, preserved for reconciliation, with
+a refusal naming both lengths and SHA-256 values. An owned rewrite invalidates prior acquisition
 verification before a new download can succeed. Partial-transfer checkpoint
 checks belong to unfinished acquisition, not post-download use.
 
@@ -548,6 +565,8 @@ Shutdown closes new admission, signals appropriate work, drains tracked async an
 The package owner supplies a version-checked accepted resolution and trusted immutable artifact set. Acquisition obtains files; package tooling installs them into an owned empty stage from exact local inputs. Preserve original URLs/digests as provenance and validate the installed set afterward. Use only supported public tooling. A report is evidence about a resolution, not by itself a consumable lock format.
 
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
+
+**Torch implementation (consumer `runtime.torch`).** The resolver first selects the official Torch wheel (URL and index SHA-256) without resolving anything else. Acquisition downloads it into a workspace named by the exact wheel set, under `launcher-data/cache/torch-wheels/`, and the pip dry run resolves against that verified local file, so pip never downloads the Torch wheel. The lock records the official URL; the Rust validator requires the report to name exactly the acquired file. Every other locked wheel is then acquired as one set, and the locked install runs `--no-index --require-hashes --no-deps` from `name @ file:… --hash=sha256:…` lines. Both use leases stay held until the attempt's outcome is known: pip has exited, its installed set is validated against the acquired files, and the runtime probe has run. The receipt payload records only that the set was consumed, because the Torch stage is disposable and is never published after a failed attempt. Each wheel set is held in one canonical order, so the same closure listed differently resumes the same demand. A connection silent for 60 seconds counts as lost and is retried from its retained bytes. A source that refuses to continue a partial (a full body or 416 for a range request) restarts that wheel from byte zero, still verified by its SHA-256; this is a consumer opt-in (`AcquisitionHost::restart_refused_continuation`), and other consumers keep the partial and fail as before. Each demand names the install selection it serves; when a new resolution of that selection names a different set, its older unfinished sets can no longer be resumed and are withdrawn (`AcquisitionConsumer::withdraw_unfinished_transfer`) and removed, while other selections' unfinished sets stay. Retention: a failed transfer keeps its partial bytes (next install resumes them under the same demand), and so does shutdown, which pauses rather than cancels; a failed install withdraws its use and keeps its verified wheels for reuse; success and cancellation remove the workspace; once an attempt knows its whole closure, it removes settled workspaces it does not use, while unfinished transfers stay. A use left by a crash is released at the next acquisition of that set: receipted uses are reconciled, unreceipted ones withdrawn through `AcquisitionConsumer::withdraw_unreceipted_use`. A Torch manager without the shared owner, or a wheel with no SHA-256 or no plain wheel file name, keeps pip's download and logs the reason. Not yet established: a network-denied real install (AC11) and subprocess egress accounting (AC12); dependency metadata still comes from the indexes during resolution.
 
 ## 12. Compatibility and extension
 

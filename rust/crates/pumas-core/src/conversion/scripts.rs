@@ -16,7 +16,11 @@ gguf>=0.10.0
 safetensors>=0.4.0
 numpy>=1.24.0
 sentencepiece>=0.2.0
+jinja2>=3.1.0
 ";
+
+/// Deployed name of the ranking-head derivation script.
+pub const RANKING_HEAD_SCRIPT_NAME: &str = "derive_ranking_head.py";
 
 /// Python script for GGUF to Safetensors conversion.
 pub const GGUF_TO_SAFETENSORS_SCRIPT: &str = r#"#!/usr/bin/env python3
@@ -319,6 +323,10 @@ pub async fn ensure_scripts_deployed(launcher_root: &Path) -> Result<()> {
 const EMBEDDED_SCRIPTS: &[(&str, &str)] = &[
     ("convert_gguf_to_safetensors.py", GGUF_TO_SAFETENSORS_SCRIPT),
     ("convert_safetensors_to_gguf.py", SAFETENSORS_TO_GGUF_SCRIPT),
+    (
+        RANKING_HEAD_SCRIPT_NAME,
+        include_str!("ranking_head_script.py"),
+    ),
     ("requirements.txt", REQUIREMENTS),
 ];
 

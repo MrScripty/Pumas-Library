@@ -2,11 +2,13 @@
 
 mod import_custody;
 mod import_permissions;
+mod volume_identity;
 pub(crate) use import_custody::{
     require_import_document_size, ImportFileIdentity, ImportPayloadIdentity,
     IMPORT_DOCUMENT_MAX_BYTES, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS, IMPORT_RECEIPT,
 };
 pub(crate) use import_permissions::ImportDirectoryPermissions;
+pub(crate) use volume_identity::stable_volume;
 
 use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};
@@ -88,17 +90,43 @@ fn invalid_library_id() -> io::Error {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+/// A file's identity: its volume and its file number on that volume. On Unix
+/// the volume is reboot-stable (see [`volume_identity`]), so persisted
+/// custody keeps matching after the kernel renumbers a block device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub(super) struct FilesystemIdentity {
     volume: u64,
     file: u64,
+}
+
+impl<'de> Deserialize<'de> for FilesystemIdentity {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Recorded {
+            volume: u64,
+            file: u64,
+        }
+        let recorded = Recorded::deserialize(deserializer)?;
+        // A record written before stable volumes holds a raw device number;
+        // translate it the way a fresh observation of that device would be.
+        #[cfg(unix)]
+        let volume = volume_identity::stable_volume(recorded.volume);
+        #[cfg(not(unix))]
+        let volume = recorded.volume;
+        Ok(Self {
+            volume,
+            file: recorded.file,
+        })
+    }
 }
 
 #[cfg(unix)]
 fn filesystem_identity(metadata: &Metadata) -> Option<FilesystemIdentity> {
     use cap_std::fs::MetadataExt;
     Some(FilesystemIdentity {
-        volume: metadata.dev(),
+        volume: volume_identity::stable_volume(metadata.dev()),
         file: metadata.ino(),
     })
 }
@@ -280,6 +308,38 @@ impl Drop for RootExecutionGrant {
         // fork until the child execs. Custody ends with this grant, so release
         // the lock explicitly on its shared open file description.
         let _ = fs2::FileExt::unlock(&self.file);
+        signal_root_release(self.authority.0.root_identity);
+    }
+}
+
+/// Per physical root, a counter bumped whenever an execution grant on it is
+/// released in this process. Every opened [`DownloadDestinationRoot`] for the
+/// same root shares it, so work deferred by a busy root can wait for release
+/// whichever handle held the grant.
+static ROOT_RELEASES: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<FilesystemIdentity, Arc<tokio::sync::watch::Sender<u64>>>,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+fn root_release_sender(identity: FilesystemIdentity) -> Arc<tokio::sync::watch::Sender<u64>> {
+    let mut releases = ROOT_RELEASES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    releases
+        .entry(identity)
+        .or_insert_with(|| Arc::new(tokio::sync::watch::Sender::new(0)))
+        .clone()
+}
+
+fn signal_root_release(identity: FilesystemIdentity) {
+    let sender = ROOT_RELEASES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&identity)
+        .cloned();
+    if let Some(sender) = sender {
+        sender.send_modify(|released| *released = released.wrapping_add(1));
     }
 }
 
@@ -315,6 +375,13 @@ impl DownloadDestinationRoot {
 
     pub(crate) fn same_physical_root(&self, other: &Self) -> bool {
         self.0.root_identity == other.0.root_identity
+    }
+
+    /// Changes each time an execution grant on this physical root is
+    /// released in this process. Subscribe before checking whether the root
+    /// is free, so a release in between is not missed.
+    pub(crate) fn release_signal(&self) -> tokio::sync::watch::Receiver<u64> {
+        root_release_sender(self.0.root_identity).subscribe()
     }
 
     pub(crate) fn try_acquire_execution_grant(&self) -> Result<RootExecutionGrant> {
@@ -377,6 +444,47 @@ impl DownloadDestinationRoot {
             root.initialize_library_id()?;
             Ok(Self(Arc::new(root)))
         }
+    }
+
+    /// Open the private stage `TEMP_IMPORT_PREFIX + name`, creating it with
+    /// the same owner-only permissions as [`Self::create_import_stage`] when
+    /// `create` is set. A named stage is found again by a later attempt of
+    /// the same work, so an interrupted transfer can resume in it. `None`
+    /// when it does not exist and `create` is not set.
+    pub(crate) fn open_named_import_stage(
+        &self,
+        name: &str,
+        create: bool,
+    ) -> Result<Option<DownloadRecoveryDestination>> {
+        self.0.require_current()?;
+        if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+            return Err(invalid_capability_path().into());
+        }
+        let name = format!("{}{name}", super::importer::TEMP_IMPORT_PREFIX);
+        let builder = cap_std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        let builder = {
+            use cap_std::fs::DirBuilderExt;
+            let mut builder = builder;
+            builder.mode(0o700);
+            builder
+        };
+        if !create {
+            match self.0.root.symlink_metadata(&name) {
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            match self.0.root.create_dir_with(&name, &builder) {
+                Ok(()) => sync_directory(&self.0.root)?,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let destination = self.resolve(Path::new(&name))?;
+        destination.directory(false)?;
+        Ok(Some(destination))
     }
 
     /// Exclusively create a private copied-import workspace under this held root.
@@ -2131,6 +2239,30 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn a_legacy_device_number_record_matches_a_fresh_observation() {
+        use std::os::unix::fs::MetadataExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("payload.bin");
+        std::fs::write(&path, b"payload").unwrap();
+        let raw = std::fs::metadata(&path).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let fresh =
+            super::filesystem_identity(&super::Metadata::from_file(&file).unwrap()).unwrap();
+        // Written before stable volumes: the raw device number.
+        let legacy: super::FilesystemIdentity = serde_json::from_value(serde_json::json!({
+            "volume": raw.dev(),
+            "file": raw.ino(),
+        }))
+        .unwrap();
+        assert_eq!(legacy, fresh);
+        // Current records round-trip unchanged.
+        let current: super::FilesystemIdentity =
+            serde_json::from_value(serde_json::to_value(fresh).unwrap()).unwrap();
+        assert_eq!(current, fresh);
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn copied_import_publication_retains_output_after_parent_sync_failure() {

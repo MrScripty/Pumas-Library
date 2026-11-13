@@ -22,6 +22,7 @@ mod options;
 mod outputs;
 pub(crate) mod pipeline;
 pub(crate) mod progress;
+mod ranking_head;
 mod readiness;
 mod script_process;
 mod scripts;

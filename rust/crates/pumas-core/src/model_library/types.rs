@@ -724,9 +724,29 @@ pub struct LfsFileInfo {
     pub sha256: String,
 }
 
+/// Hub-published facts for one regular (non-LFS) repository file.
+///
+/// `git_oid` is the Git blob object id the Hub reports for the file: the
+/// SHA-1 of `"blob {size}\0"` followed by the file bytes. It is the Hub's
+/// published content hash for files stored outside LFS.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct RegularFileInfo {
+    /// Repository-relative filename
+    pub filename: String,
+    /// File size in bytes
+    pub size: u64,
+    /// Git blob object id (40 lowercase hex characters)
+    pub git_oid: String,
+}
+
 /// Current cache format version for [`RepoFileTree`].
 /// Bump when the tree fetch logic changes (e.g. switching to recursive listing)
 /// so that stale entries are treated as cache misses.
+///
+/// Regular-file details were added without a bump: an older entry stays
+/// valid for downloads and recovery, which need only names and LFS hashes.
+/// Consumers that need those details refetch when they are missing.
 pub const REPO_FILE_TREE_VERSION: u32 = 2;
 
 /// Repository file tree from HuggingFace.
@@ -739,6 +759,11 @@ pub struct RepoFileTree {
     pub lfs_files: Vec<LfsFileInfo>,
     /// Non-LFS files
     pub regular_files: Vec<String>,
+    /// Size and Git blob id for each non-LFS file the Hub described. `None`
+    /// for a tree cached before these were recorded; callers that need them
+    /// refetch the tree.
+    #[serde(default)]
+    pub regular_file_details: Option<Vec<RegularFileInfo>>,
     /// When this was cached
     pub cached_at: String,
     /// Last modified timestamp from HuggingFace (for cache invalidation)
@@ -747,6 +772,16 @@ pub struct RepoFileTree {
     /// Cache format version — old/missing entries are treated as stale.
     #[serde(default)]
     pub cache_version: u32,
+}
+
+impl RepoFileTree {
+    /// The Hub's size and Git blob id for one regular file, when recorded.
+    pub(crate) fn regular_file_detail(&self, filename: &str) -> Option<&RegularFileInfo> {
+        self.regular_file_details
+            .as_deref()?
+            .iter()
+            .find(|detail| detail.filename == filename)
+    }
 }
 
 /// Optional filter for listing models that still need metadata review.

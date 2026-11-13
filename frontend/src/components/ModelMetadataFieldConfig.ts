@@ -34,7 +34,14 @@ const HIDDEN_GGUF_FIELDS = new Set([
   'tokenizer.ggml.scores',
 ]);
 
-export type MetadataSource = 'stored' | 'embedded' | 'inference' | 'execution' | 'runtime' | 'notes';
+export type MetadataSource =
+  | 'stored'
+  | 'embedded'
+  | 'documents'
+  | 'inference'
+  | 'execution'
+  | 'runtime'
+  | 'notes';
 
 export const PARAM_TYPE_OPTIONS: {
   value: InferenceParamSchema['param_type'];

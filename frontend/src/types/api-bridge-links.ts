@@ -1,3 +1,4 @@
+import type { FinishRetainedImportOutcome } from '@pumas/desktop-contract';
 import type { BaseResponse } from './api-common';
 import type {
   CancelConversionResponse,
@@ -58,6 +59,13 @@ export interface DesktopBridgeLinkMappingAPI {
    * Delete a model and all its symlinks
    */
   delete_model_with_cascade(modelId: string): Promise<DeleteModelCascadeResponse>;
+
+  /**
+   * Finish a copied import that is Ready on disk but whose final index commit
+   * was never acknowledged, after the backend re-verifies its receipt and
+   * rehashes its payload.
+   */
+  finish_retained_import(modelId: string): Promise<FinishRetainedImportOutcome>;
 
   /**
    * Get sandbox environment information

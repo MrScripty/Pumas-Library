@@ -56,9 +56,10 @@ export class BackendInitializationRecoveryRequiredError extends Error {
     this.name = 'BackendInitializationRecoveryRequiredError';
     const explicit = resolution.source === 'environment' || resolution.source === 'argument';
     const reason = cause instanceof BackendStartupError ? cause.reason : 'backend-unavailable';
-    const detail = cause instanceof BackendStartupError && cause.reason === 'backend-unavailable'
+    const detail = cause instanceof BackendStartupError && cause.reason !== 'migration-required'
       ? cause.detail
       : undefined;
+    const staleInstance = cause instanceof BackendStartupError ? cause.staleInstance : undefined;
     this.recoveryState = explicit
       ? {
           status: 'recovery-required',
@@ -66,6 +67,7 @@ export class BackendInitializationRecoveryRequiredError extends Error {
           authoritySource: resolution.source === 'environment' ? 'environment' : 'argument',
           action: 'correct-launch-input',
           ...(detail ? { detail } : {}),
+          ...(staleInstance ? { staleInstance } : {}),
         }
       : {
           status: 'recovery-required',
@@ -73,6 +75,7 @@ export class BackendInitializationRecoveryRequiredError extends Error {
           authoritySource: resolution.source === 'persisted' ? 'persisted' : 'default',
           action: 'select-library',
           ...(detail ? { detail } : {}),
+          ...(staleInstance ? { staleInstance } : {}),
         };
   }
 }

@@ -320,6 +320,20 @@ pub(crate) fn held_confirmed_receipt_matches(
     Ok(matches)
 }
 
+/// [`held_confirmed_receipt_matches`] with the payload bindings checked and
+/// every payload file rehashed against the confirmed receipt.
+pub(crate) fn held_confirmed_receipt_and_content_match(
+    destination: &DownloadRecoveryDestination,
+    metadata: &ModelMetadata,
+) -> Result<bool> {
+    if metadata.import_publication.is_none()
+        || !held_confirmed_receipt_matches(destination, metadata, true)?
+    {
+        return Ok(false);
+    }
+    destination.import_payload_hashes_match(&read_receipt(destination)?.payload)
+}
+
 impl ImportPublication {
     pub(super) fn prepare(
         stage: &DownloadRecoveryDestination,

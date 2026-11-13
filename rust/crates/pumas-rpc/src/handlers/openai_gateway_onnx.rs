@@ -9,8 +9,8 @@ use axum::{
 };
 use pumas_library::models::{ModelServeErrorCode, ServedModelStatus};
 use pumas_library::{
-    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxRuntimeError, OnnxRuntimeErrorCode,
-    OpenAiGatewayEndpoint,
+    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxRerankRequest, OnnxRerankResponse,
+    OnnxRuntimeError, OnnxRuntimeErrorCode, OpenAiGatewayEndpoint,
 };
 use serde_json::{json, Value};
 use std::sync::atomic::AtomicBool;
@@ -25,7 +25,167 @@ tokio::task_local! {
     >;
 }
 
-pub(crate) async fn handle_onnx_embedding(
+/// Route a gateway request to the in-process ONNX session for its endpoint.
+pub(crate) async fn handle_onnx_request(
+    state: &AppState,
+    served: &ServedModelStatus,
+    requested_model: &str,
+    endpoint: OpenAiGatewayEndpoint,
+    body: Value,
+    admission: Option<&AtomicBool>,
+) -> Response {
+    match endpoint {
+        OpenAiGatewayEndpoint::Rerank => {
+            handle_onnx_rerank(state, served, requested_model, body, admission).await
+        }
+        _ => handle_onnx_embedding(state, served, requested_model, endpoint, body, admission).await,
+    }
+}
+
+/// Score a Jina/Cohere-style rerank request on a cross-encoder session. The
+/// response matches llama.cpp's `/v1/rerank`: results most relevant first
+/// (ties keep document order), cut to `top_n`.
+async fn handle_onnx_rerank(
+    state: &AppState,
+    served: &ServedModelStatus,
+    requested_model: &str,
+    body: Value,
+    admission: Option<&AtomicBool>,
+) -> Response {
+    let (request, top_n) = match parse_rerank_request(served, &body) {
+        Ok(parsed) => parsed,
+        Err(error) => return error.into_response(),
+    };
+    debug!(
+        provider = "onnx_runtime",
+        model_id = %served.model_id,
+        gateway_model = %requested_model,
+        documents = request.documents.len(),
+        "routing ONNX rerank request through in-process session manager"
+    );
+    match state
+        .onnx_session_manager
+        .rerank_with_admission(request, admission)
+        .await
+    {
+        Ok(response) => Json(rerank_response(response, requested_model, top_n)).into_response(),
+        Err(error) => {
+            warn!(
+                provider = "onnx_runtime",
+                model_id = %served.model_id,
+                gateway_model = %requested_model,
+                error_code = ?error.code,
+                "ONNX rerank gateway request failed"
+            );
+            onnx_runtime_error_response(error)
+        }
+    }
+}
+
+const RERANK_FIELDS: &[&str] = &["model", "query", "documents", "top_n"];
+
+/// The `query`, `documents` and optional `top_n` of a Jina/Cohere-style rerank
+/// body, for in-process and authenticated adapters. Unknown fields and
+/// non-string documents are refused, naming `adapter`.
+pub(super) fn parse_rerank_fields(
+    body: &Value,
+    adapter: &str,
+) -> Result<(String, Vec<String>, Option<usize>), GatewayRequestError> {
+    let object = body
+        .as_object()
+        .ok_or_else(|| GatewayRequestError::invalid_request("rerank request must be an object"))?;
+    if let Some(unknown) = object
+        .keys()
+        .find(|key| !RERANK_FIELDS.contains(&key.as_str()))
+    {
+        return Err(GatewayRequestError::invalid_request(format!(
+            "rerank request field `{unknown}` is not supported by the {adapter} adapter"
+        )));
+    }
+    let query = object
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or_else(|| GatewayRequestError::invalid_request("`query` must be a string"))?
+        .to_string();
+    let documents = object
+        .get("documents")
+        .and_then(Value::as_array)
+        .ok_or_else(|| GatewayRequestError::invalid_request("`documents` must be an array"))?
+        .iter()
+        .map(|document| {
+            document.as_str().map(str::to_string).ok_or_else(|| {
+                GatewayRequestError::invalid_request(format!(
+                    "the {adapter} adapter reranks text documents; each document must be a string"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let top_n = match object.get("top_n") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            value
+                .as_u64()
+                .filter(|top_n| *top_n > 0)
+                .and_then(|top_n| usize::try_from(top_n).ok())
+                .ok_or_else(|| {
+                    GatewayRequestError::invalid_request("`top_n` must be a positive integer")
+                })?,
+        ),
+    };
+    Ok((query, documents, top_n))
+}
+
+fn parse_rerank_request(
+    served: &ServedModelStatus,
+    body: &Value,
+) -> Result<(OnnxRerankRequest, Option<usize>), GatewayRequestError> {
+    let (query, documents, top_n) = parse_rerank_fields(body, "ONNX")?;
+    let request = OnnxRerankRequest::parse(served.model_id.as_str(), query, documents)
+        .map_err(|error| GatewayRequestError::invalid_request(error.message))?;
+    Ok((request, top_n))
+}
+
+/// llama.cpp's `/v1/rerank` shape: most relevant first (ties keep document
+/// order), cut to `top_n`.
+pub(super) fn sorted_rerank_response(
+    requested_model: &str,
+    mut results: Vec<(usize, f64)>,
+    prompt_tokens: Value,
+    top_n: Option<usize>,
+) -> Value {
+    results.sort_by(|left, right| right.1.total_cmp(&left.1));
+    if let Some(top_n) = top_n {
+        results.truncate(top_n);
+    }
+    json!({
+        "model": requested_model,
+        "object": "list",
+        "results": results
+            .into_iter()
+            .map(|(index, score)| json!({"index": index, "relevance_score": score}))
+            .collect::<Vec<_>>(),
+        "usage": {"prompt_tokens": prompt_tokens.clone(), "total_tokens": prompt_tokens},
+    })
+}
+
+fn rerank_response(
+    response: OnnxRerankResponse,
+    requested_model: &str,
+    top_n: Option<usize>,
+) -> Value {
+    sorted_rerank_response(
+        requested_model,
+        response
+            .results
+            .into_iter()
+            .map(|result| (result.index, f64::from(result.relevance_score)))
+            .collect(),
+        json!(response.usage.prompt_tokens),
+        top_n,
+    )
+}
+
+async fn handle_onnx_embedding(
     state: &AppState,
     served: &ServedModelStatus,
     requested_model: &str,
@@ -37,7 +197,7 @@ pub(crate) async fn handle_onnx_embedding(
         return openai_error_response_with_code(
             StatusCode::BAD_REQUEST,
             ModelServeErrorCode::EndpointUnavailable,
-            "ONNX Runtime only supports /v1/embeddings through the gateway",
+            "ONNX Runtime supports /v1/embeddings and /v1/rerank through the gateway",
         );
     }
 
@@ -80,14 +240,14 @@ pub(crate) async fn handle_onnx_embedding(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct GatewayRequestError {
+pub(super) struct GatewayRequestError {
     status: StatusCode,
     code: ModelServeErrorCode,
     message: String,
 }
 
 impl GatewayRequestError {
-    fn invalid_request(message: impl Into<String>) -> Self {
+    pub(super) fn invalid_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             code: ModelServeErrorCode::InvalidRequest,
@@ -95,7 +255,7 @@ impl GatewayRequestError {
         }
     }
 
-    fn into_response(self) -> Response {
+    pub(super) fn into_response(self) -> Response {
         openai_error_response_with_code(self.status, self.code, self.message)
     }
 }
@@ -111,7 +271,9 @@ fn parse_openai_embedding_request(
         .map_err(|error| GatewayRequestError::invalid_request(error.to_string()))
 }
 
-fn parse_openai_embedding_input(input: Option<&Value>) -> Result<Vec<String>, GatewayRequestError> {
+pub(super) fn parse_openai_embedding_input(
+    input: Option<&Value>,
+) -> Result<Vec<String>, GatewayRequestError> {
     match input {
         Some(Value::String(value)) => Ok(vec![value.clone()]),
         Some(Value::Array(values)) => values
@@ -133,7 +295,7 @@ fn parse_openai_embedding_input(input: Option<&Value>) -> Result<Vec<String>, Ga
     }
 }
 
-fn parse_openai_embedding_dimensions(
+pub(super) fn parse_openai_embedding_dimensions(
     dimensions: Option<&Value>,
 ) -> Result<Option<usize>, GatewayRequestError> {
     match dimensions {
@@ -153,14 +315,14 @@ fn parse_openai_embedding_dimensions(
     }
 }
 
-fn validate_openai_embedding_encoding(
+pub(super) fn validate_openai_embedding_encoding(
     encoding_format: Option<&Value>,
 ) -> Result<(), GatewayRequestError> {
     match encoding_format {
         Some(Value::String(value)) if value == "float" => Ok(()),
         Some(Value::Null) | None => Ok(()),
         Some(_) => Err(GatewayRequestError::invalid_request(
-            "ONNX Runtime embeddings currently support only float encoding",
+            "embeddings support only float encoding",
         )),
     }
 }
@@ -189,20 +351,22 @@ fn openai_embedding_response(response: OnnxEmbeddingResponse, requested_model: &
 
 fn onnx_runtime_error_response(error: OnnxRuntimeError) -> Response {
     let (status, code, message) = match error.code {
+        // Validation messages are Pumas-authored and bounded; they carry the
+        // reason (for example a token limit or the session's task).
         OnnxRuntimeErrorCode::Validation => (
             StatusCode::BAD_REQUEST,
             ModelServeErrorCode::InvalidRequest,
-            "The embedding request is invalid.",
+            error.message,
         ),
         OnnxRuntimeErrorCode::NotLoaded => (
             StatusCode::NOT_FOUND,
             ModelServeErrorCode::ModelNotFound,
-            "The requested embedding model is not loaded.",
+            "The requested model is not loaded.".to_string(),
         ),
         OnnxRuntimeErrorCode::Backend => (
             StatusCode::BAD_GATEWAY,
             ModelServeErrorCode::ProviderLoadFailed,
-            "The embedding provider could not complete the request.",
+            "The ONNX provider could not complete the request.".to_string(),
         ),
     };
     openai_error_response_with_code(status, code, message)

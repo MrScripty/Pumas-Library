@@ -6,6 +6,7 @@
 
 mod api_response;
 mod artifact_load_target;
+mod companion_files;
 mod custom_node;
 mod github;
 mod inference_defaults;
@@ -20,6 +21,7 @@ mod version;
 
 pub use api_response::*;
 pub use artifact_load_target::*;
+pub use companion_files::*;
 pub use custom_node::*;
 pub use github::*;
 pub use inference_defaults::*;

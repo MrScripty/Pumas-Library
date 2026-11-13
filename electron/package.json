@@ -70,13 +70,7 @@
         "to": ".",
         "filter": [
           "pumas-rpc",
-          "pumas-rpc.exe",
-          "*.dll",
-          "*.so",
-          "*.so.*",
-          "*.dylib",
-          "ONNX-LICENSE.txt",
-          "ONNX-NOTICES.txt"
+          "pumas-rpc.exe"
         ]
       },
       {

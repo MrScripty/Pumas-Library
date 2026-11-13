@@ -18,15 +18,17 @@ function reasonLabel(reason: TorchRuntimePreviewRejectReason): string {
   }
 }
 
-const ADAPTER_LABELS: Record<string, string> = {
-  none: 'Core Torch',
-  flux2: 'FLUX.2 image generation',
-  nunchaku: 'Nunchaku Z-Image generation',
-};
-const IMAGE_ADAPTER_CHOICES = ['none', 'flux2', 'nunchaku'];
+/** Display text for an identifier the backend sends, such as `nunchaku`. */
+function displayName(id: string): string {
+  return id.replaceAll('_', ' ').replace(/^\w/, (first) => first.toUpperCase());
+}
 
-function adapterLabel(adapter: string): string {
-  return ADAPTER_LABELS[adapter] ?? adapter;
+function extrasLabel(extras: readonly string[]): string {
+  return extras.length === 0 ? 'general' : extras.map(displayName).join(' + ');
+}
+
+function sameExtras(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((extra) => right.includes(extra));
 }
 
 function errorText(error: unknown): string {
@@ -37,7 +39,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   const [runtimeOptions, setRuntimeOptions] = useState<TorchRuntimeOptions | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [buildChoice, setBuildChoice] = useState('auto');
-  const [adapterChoice, setAdapterChoice] = useState('none');
+  const [extraChoices, setExtraChoices] = useState<string[]>([]);
   const [pythonChoice, setPythonChoice] = useState('auto');
   const [useVerifiedVersions, setUseVerifiedVersions] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -53,7 +55,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setStarting(false);
     setPythonChoice('auto');
     setBuildChoice('auto');
-    setAdapterChoice('none');
+    setExtraChoices([]);
     setUseVerifiedVersions(false);
     setError(null);
 
@@ -61,7 +63,6 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       if (active) {
         setRuntimeOptions(options);
         setBuildChoice(options.defaultBuild);
-        setAdapterChoice(options.adapters.includes(options.defaultAdapter) ? options.defaultAdapter : 'none');
       }
     }).catch((cause: unknown) => {
       if (active) setError(`Torch runtime choices unavailable: ${errorText(cause)}`);
@@ -75,32 +76,32 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     };
   }, [tag, attempt]);
 
-  const requirementOf = (adapter: string) => runtimeOptions?.adapterRequirements.find((requirement) => requirement.adapter === adapter);
-  // An adapter whose own wheel allows one selection is offered only for its release.
-  const offered = (adapter: string) => runtimeOptions?.adapters.includes(adapter) === true
-    && (requirementOf(adapter)?.tag ?? tag) === tag;
-  const imageAdapters = IMAGE_ADAPTER_CHOICES.filter(offered);
-  const chooseAdapter = (adapter: string) => {
-    const requirement = requirementOf(adapter);
-    if (requirement) {
+  // Requirements name the extra whose own wheel allows one selection.
+  const requirementOf = (extra: string) => runtimeOptions?.adapterRequirements.find((requirement) => requirement.adapter === extra);
+  // An extra whose own wheel allows one selection is offered only for its release.
+  const offered = (extra: string) => runtimeOptions?.extras.includes(extra) === true
+    && (requirementOf(extra)?.tag ?? tag) === tag;
+  const offeredExtras = (runtimeOptions?.extras ?? []).filter(offered);
+  const toggleExtra = (extra: string, selected: boolean) => {
+    const requirement = requirementOf(extra);
+    if (selected && requirement) {
       setBuildChoice(requirement.build);
       setPythonChoice(requirement.python);
     }
-    setAdapterChoice(adapter);
+    setExtraChoices((current) => selected ? [...current.filter((item) => item !== extra), extra] : current.filter((item) => item !== extra));
     setError(null);
   };
-  const adapterRequirement = requirementOf(adapterChoice);
-  const verifiedChoices: { record: TorchVerifiedRuntime; adapter: string }[] = (runtimeOptions?.verified ?? [])
-    .filter((record) => record.tag === tag && runtimeOptions?.builds.includes(record.build))
-    .flatMap((record) => record.adapters.filter(offered).map((adapter) => ({ record, adapter })));
-  const selectedVerified = verifiedChoices.find(({ record, adapter }) => record.build === buildChoice && record.python === pythonChoice && adapter === adapterChoice);
+  const extraRequirements = extraChoices.flatMap((extra) => requirementOf(extra) ?? []);
+  const verifiedChoices: TorchVerifiedRuntime[] = (runtimeOptions?.verified ?? [])
+    .filter((record) => record.tag === tag && runtimeOptions?.builds.includes(record.build) && record.extras.every(offered));
+  const selectedVerified = verifiedChoices.find((record) => record.build === buildChoice && record.python === pythonChoice && sameExtras(record.extras, extraChoices));
 
   const startInstallation = async () => {
-    if (!runtimeOptions || starting || !offered(adapterChoice)) return;
+    if (!runtimeOptions || starting || !extraChoices.every(offered)) return;
     const currentRequest = ++requestNumber.current;
     const build = buildChoice;
     const python = pythonChoice;
-    const adapter = adapterChoice;
+    const extras = [...extraChoices];
     // Pinning applies only to an exact verified selection; Rust refuses others.
     const pinVerified = useVerifiedVersions && selectedVerified !== undefined;
     setStarting(true);
@@ -111,7 +112,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
         tag,
         build,
         python,
-        adapter,
+        extras,
         ...(pinVerified ? { verified_versions: true } : {}),
       });
       if (requestNumber.current !== currentRequest) return;
@@ -122,7 +123,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       }
       const selection = outcome.preview;
       if (!selection.previewId || selection.expiresInSeconds <= 0 || selection.tag !== tag
-        || selection.build !== build || selection.python !== python || selection.adapter !== adapter) {
+        || selection.build !== build || selection.python !== python || !sameExtras(selection.extras, extras)) {
         setError('Torch selection could not be confirmed. Try again.');
         setStarting(false);
         return;
@@ -145,7 +146,8 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
         <div className="space-y-2">
           <h3 className="text-lg font-semibold">Install Torch {tag}</h3>
           <p className="text-sm text-[hsl(var(--text-secondary))]">
-            Pumas can choose the build and a private Python version for this computer. Core Torch dependencies are included by default.
+            Pumas can choose the build and a private Python version for this computer.{' '}
+            {runtimeOptions && runtimeOptions.modalities.length > 0 && <>Every install includes {runtimeOptions.modalities.join(', ')} support at their current releases.</>}
           </p>
           <p className="text-sm text-[hsl(var(--text-secondary))]">
             Package and Python resolution, wheel downloads, and installation happen within the install task after you confirm below. Installation does not select or start this version.
@@ -154,31 +156,31 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
             This flow uses official binary wheels only. Device use, image generation, and socket startup need later runtime checks.
           </p>
         </div>
-        {runtimeOptions && imageAdapters.length > 1 && (
+        {runtimeOptions && offeredExtras.length > 0 && (
           <fieldset className="space-y-2" disabled={starting}>
-            <legend className="text-sm font-medium">Image adapter</legend>
-            {imageAdapters.map((adapter) => (
-              <label key={adapter} className="flex items-center gap-2 text-sm">
-                <input type="radio" name="torch-image-adapter" value={adapter} checked={adapterChoice === adapter} onChange={() => chooseAdapter(adapter)} />
-                {adapterLabel(adapter)}
+            <legend className="text-sm font-medium">Optional extras</legend>
+            {offeredExtras.map((extra) => (
+              <label key={extra} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="torch-extra" value={extra} checked={extraChoices.includes(extra)} onChange={(event) => toggleExtra(extra, event.target.checked)} />
+                {displayName(extra)}
               </label>
             ))}
-            {adapterRequirement && <p className="text-xs text-[hsl(var(--text-secondary))]">
-              {adapterLabel(adapterRequirement.adapter)} installs only with the {adapterRequirement.build} build and Python {adapterRequirement.python.replace(/^python/, '')}, which its wheel was built for.
-            </p>}
+            {extraRequirements.map((requirement) => <p key={requirement.adapter} className="text-xs text-[hsl(var(--text-secondary))]">
+              {displayName(requirement.adapter)} installs only with the {requirement.build} build and Python {requirement.python.replace(/^python/, '')}, which its wheel was built for.
+            </p>)}
           </fieldset>
         )}
         {loadingOptions && <p role="status" className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]"><Loader2 aria-hidden="true" size={16} className="animate-spin" />Loading Torch choices…</p>}
         {runtimeOptions && <>
           {verifiedChoices.length > 0 && <div role="group" aria-label="Verified combinations" className="space-y-2 rounded border p-3 text-sm">
             <p className="font-medium">Verified combinations</p>
-            {verifiedChoices.map(({ record, adapter }) => (
-              <button key={`${record.build}-${record.python}-${adapter}`} type="button" disabled={starting} aria-pressed={selectedVerified?.record === record && adapterChoice === adapter} onClick={() => { setBuildChoice(record.build); setPythonChoice(record.python); setAdapterChoice(adapter); setError(null); }} className="mr-2 rounded border px-3 py-2">
-                {record.build} · {record.python} · {adapterLabel(adapter)}
+            {verifiedChoices.map((record) => (
+              <button key={`${record.build}-${record.python}-${extrasLabel(record.extras)}`} type="button" disabled={starting} aria-pressed={selectedVerified === record} onClick={() => { setBuildChoice(record.build); setPythonChoice(record.python); setExtraChoices([...record.extras]); setError(null); }} className="mr-2 rounded border px-3 py-2">
+                {record.build} · {record.python} · {extrasLabel(record.extras)}
               </button>
             ))}
             {selectedVerified && <p className="text-xs text-[hsl(var(--text-secondary))]">
-              Verified on {selectedVerified.record.verifiedOn} with {selectedVerified.record.packages.map((item) => `${item.name} ${item.version}`).join(', ')}. {selectedVerified.record.scope} {useVerifiedVersions
+              Tested as working on {selectedVerified.verifiedOn} with {selectedVerified.packages.map((item) => `${item.name} ${item.version}`).join(', ')}. {selectedVerified.scope} {useVerifiedVersions
                 ? 'Installing uses exactly these package versions, so the installed runtime matches the record.'
                 : 'Installing resolves current package versions, which may be newer; the installed runtime is marked verified only if they match.'}
             </p>}
@@ -200,7 +202,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
                 <button type="button" disabled={starting} onClick={() => { setPythonChoice('auto'); setError(null); }} className="rounded border px-2 py-1 text-xs">Select automatically</button>
               </p>}
             </div>
-            <p className="mt-2 text-xs">These are platform-supported choices. Release and package compatibility are checked during installation. Pumas image dependencies are separate from upstream Torch.</p>
+            <p className="mt-2 text-xs">These are platform-supported choices. Release and package compatibility are checked during installation; a modality whose packages cannot install here is left out and reported with its reason.</p>
           </details>
         </>}
         {starting && <p role="status" className="flex items-center gap-2 text-sm text-[hsl(var(--text-primary))]"><Loader2 aria-hidden="true" size={16} className="animate-spin" />Starting installation…</p>}

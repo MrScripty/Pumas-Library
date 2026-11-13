@@ -1,6 +1,7 @@
+import { runtimeProviderManagementModes } from '../../../hooks/useRuntimeProviders';
 import type {
   RuntimeProfileConfig,
-  RuntimeProviderId,
+  RuntimeProviderInfo,
 } from '../../../types/api-runtime-profiles';
 import { getRuntimeProviderDescriptor } from '../../../utils/runtimeProviderDescriptors';
 import {
@@ -21,24 +22,27 @@ export function profileToDraft(profile: RuntimeProfileConfig): RuntimeProfileDra
     device_mode: profile.device.mode,
     device_id: profile.device.device_id ?? '',
     gpu_layers: profile.device.gpu_layers?.toString() ?? '',
+    runtime_version: profile.runtime_version ?? '',
   };
 }
 
-export function newProfileDraft(provider: RuntimeProviderId): RuntimeProfileDraft {
-  const descriptor = getRuntimeProviderDescriptor(provider);
+/** A new profile's defaults: the first mode of each kind the backend offers. */
+export function newProfileDraft(providerInfo: RuntimeProviderInfo): RuntimeProfileDraft {
+  const { provider } = providerInfo;
 
   return {
     profile_id: `runtime-${Date.now()}`,
     provider,
-    provider_mode: descriptor.profileModes[0] ?? 'ollama_serve',
-    management_mode: 'managed',
+    provider_mode: providerInfo.provider_modes[0] ?? 'ollama_serve',
+    management_mode: runtimeProviderManagementModes(providerInfo)[0] ?? 'managed',
     name: `New ${providerLabel(provider)} Profile`,
     enabled: true,
     endpoint_url: '',
     port: '',
-    device_mode: descriptor.deviceModes[0] ?? 'auto',
+    device_mode: providerInfo.device_modes[0] ?? 'auto',
     device_id: '',
     gpu_layers: '',
+    runtime_version: '',
   };
 }
 
@@ -71,7 +75,17 @@ export function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig
       max_concurrent_models: null,
       keep_alive_seconds: null,
     },
+    runtime_version: draftRuntimeVersion(draft),
   };
+}
+
+// A pin applies only to profiles Pumas launches; external profiles and an
+// empty selection follow the runtime's active version.
+function draftRuntimeVersion(draft: RuntimeProfileDraft): string | null {
+  if (draft.management_mode !== 'managed') {
+    return null;
+  }
+  return draft.runtime_version.trim() || null;
 }
 
 function parseLlamaCppGpuLayers(draft: RuntimeProfileDraft): number | null {

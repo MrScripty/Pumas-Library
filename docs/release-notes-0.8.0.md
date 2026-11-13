@@ -257,6 +257,54 @@ schema versions rather than matching product versions.
   ones; the router loads each model's projector and reports its modalities.
 - Ollama embedding models load through `/api/embed`.
 
+## Models tested with this release
+
+These models were run end to end through Pumas, on the following runtimes:
+llama.cpp b12099 (CUDA 12), the Pumas-managed Torch runtime (Torch 2.15.0,
+Transformers 5.22.2), and ONNX Runtime 1.24.2 on CPU. Rerank results were
+checked against sentence-transformers, and embeddings against the same model
+on another runtime.
+
+### Decision models
+
+| Model | Format | Runtime | Tested |
+| --- | --- | --- | --- |
+| `ggml-org/Kev-4B-GGUF` | GGUF Q8_0 | llama.cpp | choice, score and yes/no decisions |
+| `ggml-org/Laya-GGUF` | GGUF Q8_0 | llama.cpp | decisions, including inputs over 1,500 tokens |
+| `LiquidAI/d1-2B-GGUF` | GGUF + projector | llama.cpp | text and image decisions |
+| `LiquidAI/d1-Omni-2B-GGUF` | GGUF + projector | llama.cpp | text, image and audio decisions |
+
+### Rerankers
+
+| Model | Format | Runtime | Tested |
+| --- | --- | --- | --- |
+| `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` | GGUF Q8_0 | llama.cpp | order and `top_n` |
+| `mradermacher/Qwen3-Reranker-0.6B-GGUF` | GGUF Q8_0 | llama.cpp | with a derived ranking head; same order as sentence-transformers |
+| `QuantFactory/Qwen3-Reranker-4B-GGUF` | GGUF Q8_0 | llama.cpp | with a derived ranking head |
+| `Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp` | GGUF Q4_K_M | llama.cpp | ships its ranking head |
+| `mradermacher/zerank-2-GGUF` | GGUF Q4_K_M | llama.cpp | with a derived ranking head; correct order |
+| `gpustack/bge-reranker-v2-m3-GGUF` | GGUF Q8_0 | llama.cpp | order |
+| `Qwen/Qwen3-Reranker-0.6B` | Safetensors | Torch | matches sentence-transformers |
+| `infgrad/Prism-Qwen3.5-Reranker-0.8B` | Safetensors | Torch | matches sentence-transformers |
+| `BAAI/bge-reranker-v2-m3` | Safetensors | Torch | matches sentence-transformers |
+| `onnx-community/bge-reranker-v2-m3-ONNX` | ONNX INT8 | ONNX Runtime | same order as sentence-transformers |
+
+### Embedders
+
+| Model | Format | Runtime | Tested |
+| --- | --- | --- | --- |
+| `unsloth/embeddinggemma-2-GGUF` | GGUF Q8_0 + projector | llama.cpp | text and image embeddings, truncation to 256 dimensions |
+| `microsoft/harrier-oss-v1-270m` | Safetensors | Torch | text embeddings |
+| `mykor/harrier-oss-v1-270m-GGUF` | GGUF Q8_0 | llama.cpp | text embeddings, matching Torch |
+
+### Audio, vision-language and omni
+
+| Model | Format | Runtime | Tested |
+| --- | --- | --- | --- |
+| `LiquidAI/LFM3-Audio-2B-GGUF` | GGUF Q4_0 + projector | llama.cpp | speech transcription through chat with audio |
+| `LiquidAI/LFM3-VL-2B-GGUF` | GGUF + projector | llama.cpp | image description |
+| `LiquidAI/LFM3-Omni-2B-GGUF` | GGUF + projector | llama.cpp | image questions and speech transcription |
+
 ## Upgrading an existing library
 
 Libraries from earlier versions need a one-time metadata upgrade. Read

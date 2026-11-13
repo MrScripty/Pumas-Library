@@ -1,8 +1,16 @@
 import { Loader2 } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
+import { formatBytes } from '../utils/formatters';
 import { formatDownloadSize } from '../utils/modelFormatters';
 
 type DownloadOption = NonNullable<RemoteModelInfo['downloadOptions']>[number];
+
+/** The backend sizes the card, license, code and metadata that download with an option. */
+function companionSizeLabel(bytes: number | null | undefined): string {
+  return typeof bytes === 'number' && bytes > 0
+    ? ` + ${formatBytes(bytes)} card, license & code`
+    : '';
+}
 
 interface RemoteModelDownloadMenuProps {
   downloadOptions: DownloadOption[];
@@ -83,6 +91,7 @@ export function RemoteModelDownloadMenu({
                   {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
                     ? formatDownloadSize(option.sizeBytes)
                     : ''}
+                  {companionSizeLabel(option.companionSizeBytes)}
                 </span>
               </label>
             );
@@ -132,7 +141,7 @@ export function RemoteModelDownloadMenu({
             >
               {option.quant}
               {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
-                ? ` (${formatDownloadSize(option.sizeBytes)})`
+                ? ` (${formatDownloadSize(option.sizeBytes)}${companionSizeLabel(option.companionSizeBytes)})`
                 : ' (Unknown)'}
             </button>
           ))}

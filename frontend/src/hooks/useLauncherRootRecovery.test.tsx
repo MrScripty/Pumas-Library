@@ -28,6 +28,7 @@ function installElectronBridge(
     get_launcher_root_state: vi.fn(getRootState),
     select_launcher_root: vi.fn(selectRoot),
     upgrade_launcher_library: vi.fn(async () => ({ status: 'unavailable' })),
+    release_stale_launcher_instance: vi.fn(async () => ({ status: 'unavailable' })),
     notify_launcher_root_presentation_committed: vi.fn().mockResolvedValue(undefined),
     onLauncherRootPresentationTimeout: vi.fn((callback: () => void) => {
       presentationTimeoutHandler = callback;
@@ -135,6 +136,61 @@ describe('LauncherRootRecoveryProvider', () => {
     render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
     const text = await screen.findByText(guidance);
     expect(text).toHaveTextContent('Reason: launcher root /missing/library does not exist');
+  });
+
+  const staleState = (leaseChecked: boolean, survivingProcesses: Array<{ pid: number; record: string }> = []) => ({
+    status: 'recovery-required', reason: 'stale-instance', authoritySource: 'persisted', action: 'select-library',
+    detail: 'The library is registered as open by Pumas process 4242, which is no longer running.',
+    staleInstance: { pid: 4242, startedAt: '2026-11-10T19:40:23Z', version: '0.8.0', leaseChecked, survivingProcesses },
+  });
+
+  it('releases a stale entry only after confirming that exact entry, then opens the library', async () => {
+    const pending = deferred<Awaited<ReturnType<NonNullable<typeof window.electronAPI>['release_stale_launcher_instance']>>>();
+    const bridge = installElectronBridge(async () => staleState(true));
+    vi.mocked(bridge.release_stale_launcher_instance).mockReturnValue(pending.promise);
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    expect(await screen.findByRole('heading', { name: 'Library is still marked as open' })).toBeVisible();
+    expect(screen.getByText(/process 4242, which is no longer running/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Release Entry' }));
+    expect(screen.getByText('4242')).toBeVisible();
+    expect(screen.getByText(/No process holds this library/)).toBeVisible();
+    const submit = screen.getByRole('button', { name: 'Release Entry and Open Library' });
+    expect(submit).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /No Pumas window, backend, or other tool/ }));
+    fireEvent.click(submit);
+    expect(bridge.release_stale_launcher_instance).toHaveBeenCalledExactlyOnceWith({
+      pid: 4242, startedAt: '2026-11-10T19:40:23Z', confirmed: true,
+    });
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
+    await act(async () => pending.resolve({ status: 'ready', state: { status: 'ready', selectionAction: 'select-library', libraryScopeId: null } }));
+    expect(await screen.findByText('Library content')).toBeVisible();
+  });
+
+  it('names what to check and lists recorded processes that still run', async () => {
+    installElectronBridge(async () => staleState(true, [
+      { pid: 777, record: 'launcher-data/runtime-profiles/llama-cpp/default/runtime.pid' },
+    ]));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Release Entry' }));
+    expect(screen.getByText(/llama.cpp servers/)).toBeVisible();
+    expect(screen.getByText(/Process 777 \(launcher-data\/runtime-profiles\/llama-cpp\/default\/runtime.pid\)/)).toBeVisible();
+    expect(screen.getByText(/will not release the entry until they stop/)).toBeVisible();
+  });
+
+  it('shows why a release was refused and changes nothing else', async () => {
+    const bridge = installElectronBridge(async () => staleState(false));
+    vi.mocked(bridge.release_stale_launcher_instance).mockResolvedValue({
+      status: 'failed', stage: 'release', message: 'process 4242 exists; close it',
+    });
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Release Entry' }));
+    expect(screen.getByText(/cannot check the library’s lock on this system/)).toBeVisible();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Release Entry and Open Library' }));
+    expect(await screen.findByRole('heading', { name: 'The library entry was not released' })).toBeVisible();
+    expect(screen.getByText(/process 4242 exists; close it/)).toBeVisible();
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
+    expect(bridge.release_stale_launcher_instance).toHaveBeenCalledTimes(1);
   });
 
   it('offers an in-app metadata upgrade for a legacy library', async () => {

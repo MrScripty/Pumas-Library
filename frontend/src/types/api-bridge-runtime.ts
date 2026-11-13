@@ -30,6 +30,7 @@ import type {
   RuntimeProfileUpdateFeedResponse,
   RuntimeProviderId,
   RuntimeProfilesSnapshotResponse,
+  RuntimeProvidersResponse,
 } from './api-runtime-profiles';
 import type {
   ModelServeValidationResponse,
@@ -118,6 +119,7 @@ export interface DesktopBridgeRuntimeAPI {
   stop_ollama(): Promise<RuntimeStopResponse>;
 
   // Local Runtime Profiles
+  get_runtime_providers(): Promise<RuntimeProvidersResponse>;
   get_runtime_profiles_snapshot(): Promise<RuntimeProfilesSnapshotResponse>;
   list_runtime_profile_updates_since(
     cursor?: string | null,

@@ -60,10 +60,17 @@ impl BinaryLaunchConfig {
 
     /// Create a new binary launch config for the Torch inference server.
     ///
-    /// The Torch server is a Python-based FastAPI app launched via its venv Python.
-    pub fn torch(tag: impl Into<String>, version_dir: impl AsRef<Path>) -> Self {
+    /// The Torch server is a Python-based FastAPI app launched via its venv
+    /// Python. The runtime in `version_dir` supplies the interpreter and
+    /// packages; `entry` is the sidecar shipped with this Pumas (see
+    /// [`crate::runtime_profiles::torch_sidecar_entry`]), shared by every
+    /// installed runtime.
+    pub fn torch(
+        tag: impl Into<String>,
+        version_dir: impl AsRef<Path>,
+        entry: impl AsRef<Path>,
+    ) -> Self {
         let version_dir = version_dir.as_ref().to_path_buf();
-        // The torch server uses a Python venv with serve.py as the entry point.
         // The "binary" here is the venv's Python interpreter.
         let binary_path = version_dir.join("venv").join("bin").join("python");
         let pid_file = version_dir.join("torch.pid");
@@ -73,8 +80,12 @@ impl BinaryLaunchConfig {
             version_dir: version_dir.clone(),
             binary_path,
             command: None,
-            // Imports must preserve the installed package byte manifest.
-            extra_args: vec!["-B".to_string(), "serve.py".to_string()],
+            // Imports must preserve the installed package byte manifest and
+            // write nothing next to the shared sidecar.
+            extra_args: vec![
+                "-B".to_string(),
+                entry.as_ref().to_string_lossy().into_owned(),
+            ],
             env_vars: HashMap::new(),
             pid_file,
             log_file: None,
@@ -157,6 +168,53 @@ impl BinaryLaunchConfig {
         }
     }
 
+    /// Create a launch config for the ONNX host of an ONNX Runtime profile:
+    /// `host_executable --onnx-host`, loading the installed version at
+    /// `version_dir`. The listener and device-mode arguments come from the
+    /// profile's launch spec.
+    #[cfg(feature = "onnx-runtime")]
+    pub fn onnx_host(
+        tag: impl Into<String>,
+        version_dir: impl AsRef<Path>,
+        host_executable: impl AsRef<Path>,
+    ) -> Self {
+        use crate::onnx_runtime::host_protocol;
+        let tag = tag.into();
+        let version_dir = version_dir.as_ref().to_path_buf();
+        let mut env_vars = HashMap::from([
+            (
+                host_protocol::RUNTIME_DIR_ENV.to_string(),
+                version_dir.to_string_lossy().into_owned(),
+            ),
+            (host_protocol::RUNTIME_VERSION_ENV.to_string(), tag.clone()),
+            (
+                host_protocol::ORT_DISABLE_TELEMETRY_ENV.to_string(),
+                "1".to_string(),
+            ),
+        ]);
+        // The owned child environment drops inherited variables, so a
+        // developer's explicit library override is forwarded on purpose.
+        if let Some(library) = std::env::var_os(host_protocol::ORT_DYLIB_PATH_ENV) {
+            env_vars.insert(
+                host_protocol::ORT_DYLIB_PATH_ENV.to_string(),
+                library.to_string_lossy().into_owned(),
+            );
+        }
+        env_vars.extend(onnx_host_library_search_path(&version_dir));
+        Self {
+            tag,
+            pid_file: version_dir.join("onnx-host.pid"),
+            version_dir,
+            binary_path: host_executable.as_ref().to_path_buf(),
+            command: Some(host_protocol::HOST_FLAG.to_string()),
+            extra_args: vec![],
+            env_vars,
+            log_file: None,
+            ready_timeout: Duration::from_secs(60),
+            health_check_url: None,
+        }
+    }
+
     /// Set extra arguments.
     pub fn with_extra_args(mut self, args: Vec<String>) -> Self {
         self.extra_args = args;
@@ -199,6 +257,26 @@ impl BinaryLaunchConfig {
         }
         self
     }
+}
+
+/// The library search path an ONNX host needs so ONNX Runtime's CUDA
+/// execution provider finds the CUDA runtime and cuDNN libraries Pumas
+/// installed with the version. The loader reads it when the host starts, and
+/// the provider loads those libraries by name. On Windows the inherited `PATH`
+/// follows the library directory; on Linux the inherited `LD_LIBRARY_PATH` is
+/// never passed to owned children, so the path is that directory alone.
+#[cfg(feature = "onnx-runtime")]
+fn onnx_host_library_search_path(version_dir: &Path) -> Option<(String, String)> {
+    let directory = crate::onnx_runtime_distribution::installed_cuda_library_dir(version_dir)?;
+    let (variable, separator) = crate::onnx_runtime_distribution::library_search_path_variable()?;
+    let mut value = directory.to_string_lossy().into_owned();
+    if variable == "PATH" {
+        if let Some(inherited) = std::env::var_os("PATH").filter(|value| !value.is_empty()) {
+            value.push(separator);
+            value.push_str(&inherited.to_string_lossy());
+        }
+    }
+    Some((variable.to_string(), value))
 }
 
 fn executable_name(name: &str) -> String {

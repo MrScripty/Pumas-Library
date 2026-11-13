@@ -25,6 +25,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from audio_api import router as audio_router
+from text_api import router as text_router
 from control_api import router as control_router
 from device_manager import DeviceManager
 from model_manager import ModelManager
@@ -44,6 +45,27 @@ from validation import (
 logger = logging.getLogger(__name__)
 TORCH_PROTOCOL = 3
 TORCH_CAPABILITIES = ("image_generation", "audio_transcription")
+# Text encoders need only Transformers and Jinja; installs that carry them
+# advertise embeddings and rerank (probed once at startup).
+TEXT_ENCODER_CAPABILITIES = ("text_embedding", "rerank")
+
+
+def _installed(name: str) -> bool:
+    import importlib.util
+
+    if name in sys.modules:
+        return True
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def torch_capabilities() -> tuple[str, ...]:
+    text = all(_installed(name) for name in ("transformers", "jinja2"))
+    return TORCH_CAPABILITIES + (TEXT_ENCODER_CAPABILITIES if text else ())
+
+
 PARENT_POLL_SECONDS = 1.0
 # After asking uvicorn to stop, wait this long for in-flight workers to observe
 # their disconnect before forcing exit.
@@ -85,13 +107,15 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
     app.include_router(control_router, prefix="/api")
     app.include_router(image_router, prefix="/api")
     app.include_router(audio_router, prefix="/api")
+    app.include_router(text_router, prefix="/api")
+    capabilities = list(torch_capabilities())
 
     @app.get("/health")
     async def health_check():
         return {
             "status": "ok",
             "protocol": TORCH_PROTOCOL,
-            "capabilities": list(TORCH_CAPABILITIES),
+            "capabilities": capabilities,
         }
 
     return app

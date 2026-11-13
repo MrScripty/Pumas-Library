@@ -9,14 +9,18 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-MODEL_NAME_MAX_LENGTH = 128
+# Pumas library model IDs are artifact-qualified paths (category, family,
+# repository, file selection and revision), routinely over 128 characters.
+# The bound matches Pumas's own identifier bound (MAX_IDENTIFIER_BYTES); the
+# allowed characters are ASCII, so characters and bytes agree.
+MODEL_NAME_MAX_LENGTH = 4096
 MAX_LOADED_MODELS_LIMIT = 16
 LAN_ALLOW_ENV = "PUMAS_TORCH_ALLOW_LAN"
 API_TOKEN_ENV = "PUMAS_TORCH_API_TOKEN"
 MODEL_ROOTS_ENV = "PUMAS_TORCH_MODEL_ROOTS"
 PARENT_PID_ENV = "PUMAS_TORCH_PARENT_PID"
 
-_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,127}$")
+_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]*$")
 _CUDA_DEVICE_RE = re.compile(r"^cuda(?::[0-9]+)?$")
 
 

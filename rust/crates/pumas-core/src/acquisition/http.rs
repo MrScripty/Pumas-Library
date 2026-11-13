@@ -412,9 +412,7 @@ pub(crate) async fn open_http_artifact(
                 deadline: None,
             })
         }
-        (offset, StatusCode::OK) if offset > 0 => Err(invalid_response(
-            "HTTP source ignored the continuation range; the partial file has been retained",
-        )),
+        (offset, StatusCode::OK) if offset > 0 => Err(invalid_response(IGNORED_CONTINUATION)),
         (_, StatusCode::OK) => {
             let content_length = response.content_length();
             if file
@@ -694,7 +692,7 @@ fn validate_identity_encoding(response: &Response) -> Result<()> {
     Ok(())
 }
 
-fn parse_content_range(response: &Response) -> Result<(u64, u64, u64)> {
+pub(crate) fn parse_content_range(response: &Response) -> Result<(u64, u64, u64)> {
     if response.headers().get_all(CONTENT_RANGE).iter().count() != 1 {
         return Err(invalid_response(
             "HTTP range response requires exactly one Content-Range field",
@@ -734,6 +732,24 @@ fn parse_range_integer(value: &str) -> Result<u64> {
     value
         .parse()
         .map_err(|_| invalid_response("HTTP Content-Range integer is out of range"))
+}
+
+const IGNORED_CONTINUATION: &str =
+    "HTTP source ignored the continuation range; the partial file has been retained";
+
+/// Whether the source refused to continue a partial representation: it
+/// answered a range request with a full body, or with 416 Range Not
+/// Satisfiable. The partial is intact; only its continuation is unavailable.
+pub(crate) fn is_refused_continuation(error: &PumasError) -> bool {
+    match error {
+        PumasError::Validation { field, message } => {
+            field == "artifact.http.response" && message == IGNORED_CONTINUATION
+        }
+        PumasError::DownloadFailed { message, .. } => {
+            *message == format!("HTTP {}", StatusCode::RANGE_NOT_SATISFIABLE)
+        }
+        _ => false,
+    }
 }
 
 fn invalid_response(message: &'static str) -> PumasError {

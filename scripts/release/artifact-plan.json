@@ -170,7 +170,8 @@
       "required_real_evidence": [
         "headless-rpc-start",
         "authenticated-owner-handshake",
-        "packaged-native-runtime-identity",
+        "no-bundled-runtime",
+        "pumas-installed-runtime-identity",
         "real-model-inference",
         "graceful-shutdown"
       ]
@@ -188,7 +189,8 @@
       "required_real_evidence": [
         "headless-rpc-start",
         "authenticated-owner-handshake",
-        "packaged-native-runtime-identity",
+        "no-bundled-runtime",
+        "pumas-installed-runtime-identity",
         "real-model-inference",
         "graceful-shutdown"
       ]
@@ -206,7 +208,8 @@
       "required_real_evidence": [
         "headless-rpc-start",
         "authenticated-owner-handshake",
-        "packaged-native-runtime-identity",
+        "no-bundled-runtime",
+        "pumas-installed-runtime-identity",
         "real-model-inference",
         "graceful-shutdown"
       ]
@@ -422,10 +425,9 @@
       "target": "headless-inference-linux-x86_64",
       "format": "targz",
       "filename": "pumas-rpc-inference-{version}-linux-x86_64.tar.gz",
-      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root",
+      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root; no runtime is bundled, so install ONNX Runtime, llama.cpp or Torch through the Pumas version manager before serving",
       "required_contents": [
         "pumas-rpc",
-        "libonnxruntime.so",
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt",
         "protocol-schema.json",
@@ -441,10 +443,9 @@
       "target": "headless-inference-windows-x86_64",
       "format": "zip",
       "filename": "pumas-rpc-inference-{version}-windows-x86_64.zip",
-      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root",
+      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root; no runtime is bundled, so install ONNX Runtime, llama.cpp or Torch through the Pumas version manager before serving",
       "required_contents": [
         "pumas-rpc.exe",
-        "onnxruntime.dll",
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt",
         "protocol-schema.json",
@@ -460,10 +461,9 @@
       "target": "headless-inference-macos-arm64",
       "format": "targz",
       "filename": "pumas-rpc-inference-{version}-macos-arm64.tar.gz",
-      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root",
+      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root; no runtime is bundled, so install ONNX Runtime, llama.cpp or Torch through the Pumas version manager before serving",
       "required_contents": [
         "pumas-rpc",
-        "libonnxruntime.dylib",
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt",
         "protocol-schema.json",
@@ -510,8 +510,7 @@
     "dependency_authorities": [
       "pnpm-lock.yaml",
       "rust/Cargo.lock",
-      "final-artifact inspection",
-      "scripts/release/onnx-runtime-pins.json"
+      "final-artifact inspection"
     ],
     "required_reviews": [
       "current-vulnerability-results",

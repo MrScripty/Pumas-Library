@@ -197,6 +197,52 @@ enum InPlaceImportMode {
     FinalizeDownload,
 }
 
+/// Record the model card, license and code stored in `model_dir`. A pinned
+/// download records each file's source URL at its commit. Identity fields are
+/// not touched.
+async fn record_stored_companions(
+    library: &ModelLibrary,
+    model_dir: &Path,
+    metadata: ModelMetadata,
+    repo_id: Option<&str>,
+    revision: &DownloadRevision,
+) -> Result<ModelMetadata> {
+    let source = repo_id
+        .zip(revision.as_persisted())
+        .map(
+            |(repo_id, commit)| super::companion_files::CompanionSource {
+                repo_id: repo_id.to_string(),
+                revision: commit.to_string(),
+            },
+        );
+    let model_dir = model_dir.to_path_buf();
+    library
+        .run_import_blocking("record stored companion files", move || {
+            // Best effort: an unreadable card or license must not fail the
+            // import of the weights it travels with. The record is retried by
+            // the companion backfill, which reports its own reasons.
+            let mut recorded = metadata.clone();
+            match super::companion_files::scan_companions(&model_dir).and_then(|inventory| {
+                super::companion_files::record_companions(
+                    &model_dir,
+                    &mut recorded,
+                    &inventory,
+                    source.as_ref(),
+                )
+            }) {
+                Ok(_) => recorded,
+                Err(error) => {
+                    tracing::warn!(
+                        "Could not record the model card, license or code stored in {}: {error}",
+                        model_dir.display()
+                    );
+                    metadata
+                }
+            }
+        })
+        .await
+}
+
 impl ModelImporter {
     /// Create a new model importer.
     ///
@@ -382,6 +428,14 @@ impl ModelImporter {
                 );
             }
         }
+        let metadata = record_stored_companions(
+            &self.library,
+            model_dir,
+            metadata,
+            spec.repo_id.as_deref(),
+            revision,
+        )
+        .await?;
         validate_metadata_v2_with_index(&metadata, self.library.index())?;
 
         let metadata_path = model_dir.join("metadata.json");
@@ -1520,6 +1574,14 @@ impl ModelImporter {
             metadata.metadata_needs_review = Some(true);
             metadata.review_status = Some("pending".to_string());
         }
+        let metadata = record_stored_companions(
+            &self.library,
+            model_dir,
+            metadata,
+            spec.repo_id.as_deref(),
+            revision,
+        )
+        .await?;
 
         validate_metadata_v2_with_index(&metadata, self.library.index())?;
 
@@ -1866,6 +1928,39 @@ mod tests {
         (temp_dir, library)
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unreadable_license_does_not_fail_recording_the_import() {
+        use std::os::unix::fs::PermissionsExt;
+        let (temp, library) = setup().await;
+        let model_dir = temp.path().join("llm/acme/model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("README.md"), "# card").unwrap();
+        let license = model_dir.join("LICENSE");
+        std::fs::write(&license, "Apache").unwrap();
+        std::fs::set_permissions(&license, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&license).is_ok() {
+            // Running with privileges that ignore file modes; nothing to prove.
+            return;
+        }
+        let metadata = ModelMetadata {
+            model_id: Some("llm/acme/model".into()),
+            ..Default::default()
+        };
+        let recorded = record_stored_companions(
+            &library,
+            &model_dir,
+            metadata,
+            Some("acme/model"),
+            &DownloadRevision::legacy_main(),
+        )
+        .await
+        .unwrap();
+        std::fs::set_permissions(&license, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(recorded.model_id.as_deref(), Some("llm/acme/model"));
+        assert!(recorded.license_artifact.is_none());
+    }
+
     pub(super) async fn custody_fixture() -> (
         TempDir,
         Arc<ModelLibrary>,
@@ -1934,6 +2029,7 @@ mod tests {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
                 huggingface_evidence: None,
+                error: None,
             },
             domain: DownloadAdmissionDomain::Ambient,
             destination: root

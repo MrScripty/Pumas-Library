@@ -39,11 +39,15 @@ def main():
 
     report("loading", message="Loading model...")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_dir, local_files_only=True, trust_remote_code=False
+    )
     model = AutoModelForCausalLM.from_pretrained(
         args.model_dir,
         torch_dtype=torch.float16,
         device_map="auto",
+        local_files_only=True,
+        trust_remote_code=False,
     )
 
     # Prepare calibration/training data

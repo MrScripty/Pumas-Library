@@ -205,10 +205,17 @@ impl RuntimeProfileProcessOwner {
         {
             #[cfg(target_os = "linux")]
             crate::platform::linux_group::ensure_supported().map_err(|e| failure(e.to_string()))?;
+            // Torch sidecars and ONNX hosts are Pumas-owned processes whose
+            // lifecycle (listener custody, parent watch) is qualified on every
+            // platform; the other binary runtimes are qualified on Linux only.
             #[cfg(not(target_os = "linux"))]
-            if spec.provider != crate::models::RuntimeProviderId::Torch {
+            if !matches!(
+                spec.provider,
+                crate::models::RuntimeProviderId::Torch
+                    | crate::models::RuntimeProviderId::OnnxRuntime
+            ) {
                 return Err(failure(
-                    "Only Torch binary profiles are supported on this platform",
+                    "Only Torch and ONNX Runtime binary profiles are supported on this platform",
                 ));
             }
             #[cfg(target_os = "linux")]
@@ -265,6 +272,7 @@ impl RuntimeProfileProcessOwner {
                                 .as_ref()
                                 .map(|p| p.to_string_lossy().into_owned()),
                             last_error: None,
+                            runtime_version: Some(config.tag.clone()),
                         },
                         launch: None,
                         terminal: None,
@@ -992,6 +1000,10 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             Err(e) => tracing::warn!("Cannot record identity of runtime process {pid}: {e}"),
         }
         write!(file, "{pid}").map_err(|e| PumasError::io_with_path(e, &config.pid_file))?;
+        // The version manager refuses to remove a version a live process
+        // still runs from; this names the version the instance started with.
+        crate::platform::process_identity::write_runtime_version(&config.pid_file, &config.tag)
+            .map_err(|e| PumasError::io_with_path(e, &config.pid_file))?;
         {
             let mut state = session
                 .state
@@ -1984,6 +1996,16 @@ mod tests {
             .observation
             .unwrap();
         wait_for_listener(&original).await;
+        // The instance records the version it runs, for status and for the
+        // version manager's removal check.
+        assert_eq!(
+            crate::platform::process_identity::read_runtime_version(
+                &fixture.root.path().join("runtime.pid")
+            )
+            .unwrap()
+            .as_deref(),
+            Some("fixture")
+        );
         let old_stop = fixture.owner.bind_transport_stop(&id, &original).unwrap();
         assert!(!*old_stop.borrow());
         let mut forged = original.clone();

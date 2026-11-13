@@ -248,4 +248,37 @@ describe('useVersionFetching', () => {
     await expect(result.current.setDefaultVersion('v2.0.0')).rejects.toBeInstanceOf(APIError);
     expect(setDefaultVersionApiMock).not.toHaveBeenCalled();
   });
+
+  it('drops replies for a previously selected app', async () => {
+    let finishLlamaInstalled: (value: { success: boolean; versions: string[] }) => void = () => {};
+    getInstalledVersionsMock.mockImplementation((appId: string) =>
+      appId === 'llama-cpp'
+        ? new Promise((resolve) => {
+            finishLlamaInstalled = resolve;
+          })
+        : Promise.resolve({ success: true, versions: ['v2.9.0'] })
+    );
+
+    const { result, rerender } = renderHook(
+      ({ appId }: { appId: string }) => useVersionFetching({ appId }),
+      { initialProps: { appId: 'llama-cpp' } }
+    );
+    let staleRefresh: Promise<void> = Promise.resolve();
+    act(() => {
+      staleRefresh = result.current.refreshAll();
+    });
+
+    rerender({ appId: 'torch' });
+    await act(async () => {
+      await result.current.refreshAll();
+    });
+    expect(result.current.installedVersions).toEqual(['v2.9.0']);
+
+    await act(async () => {
+      finishLlamaInstalled({ success: true, versions: ['b9000'] });
+      await staleRefresh;
+    });
+    expect(result.current.installedVersions).toEqual(['v2.9.0']);
+    expect(result.current.isLoading).toBe(false);
+  });
 });

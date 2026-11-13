@@ -1,6 +1,7 @@
 export * from './api-common';
 export * from './api-system';
 export * from './api-models';
+export * from './api-companion-files';
 export * from './api-package-facts';
 export * from './api-import';
 export * from './api-links';

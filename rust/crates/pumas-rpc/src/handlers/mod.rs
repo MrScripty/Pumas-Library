@@ -17,6 +17,8 @@ mod openai_gateway_images;
 #[cfg(feature = "inference-plugins")]
 mod openai_gateway_onnx;
 #[cfg(feature = "inference-plugins")]
+mod openai_gateway_torch_text;
+#[cfg(feature = "inference-plugins")]
 mod plugins;
 mod process;
 #[cfg(feature = "inference-plugins")]
@@ -97,7 +99,10 @@ pub(crate) use shared::{
     validate_non_empty,
 };
 #[cfg(feature = "inference-plugins")]
-pub(crate) use shared::{get_version_manager, read_utf8_file, require_version_manager};
+pub(crate) use shared::{
+    get_version_manager, read_utf8_file, require_version_manager, resolve_profile_runtime_version,
+    running_profile_runtime_version, ProfileRuntimeVersionRefusal,
+};
 
 // ============================================================================
 // JSON-RPC types
@@ -895,6 +900,18 @@ async fn dispatch_admitted_command(
             .await
             .map(Box::new)
             .map(RpcOutcome::LinksForModel),
+        RpcCommand::ResolveModelDeclarations { model_id, repo_id } => state
+            .api
+            .resolve_model_declarations(&model_id, repo_id.as_deref())
+            .await
+            .map(crate::contract::ModelDeclarationsOutcome::new)
+            .map(RpcOutcome::ModelDeclarations),
+        RpcCommand::FinishRetainedImport { model_id } => state
+            .api
+            .finish_retained_import(&model_id)
+            .await
+            .map(crate::contract::FinishRetainedImportOutcome::new)
+            .map(RpcOutcome::FinishRetainedImport),
         RpcCommand::DeleteModelWithCascade { model_id } => {
             links::delete_model_with_cascade(state, &model_id)
                 .await
@@ -1122,6 +1139,10 @@ async fn dispatch_admitted_command(
         } => versions::install_version(state, &app_id, &tag, preview_id.as_deref())
             .await
             .map(RpcOutcome::InstallVersion),
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetRuntimeProviders => Ok(RpcOutcome::RuntimeProviders(
+            runtime_profiles::get_runtime_providers(state).await,
+        )),
         #[cfg(feature = "inference-plugins")]
         RpcCommand::GetTorchRuntimeOptions => {
             let vm = require_version_manager(state, "torch").await?;
@@ -1779,6 +1800,13 @@ async fn dispatch_method(
         }
         "refetch_model_metadata_from_hf" => {
             models::refetch_model_metadata_from_hf(state, params).await
+        }
+        "get_model_documents" => models::get_model_documents(state, params).await,
+        "backfill_model_companion_files" => {
+            models::backfill_model_companion_files(state, params).await
+        }
+        "backfill_library_companion_files" => {
+            models::backfill_library_companion_files(state, params).await
         }
         "adopt_orphan_models" => models::adopt_orphan_models(state, params).await,
         "import_model_in_place" => models::import_model_in_place(state, params).await,
@@ -2667,6 +2695,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_providers_rpc_is_typed_parameterless_and_feature_gated() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let call = |params: Value| {
+            let state = state.clone();
+            async move {
+                let request = Bytes::from(
+                    serde_json::to_vec(&json!({
+                        "jsonrpc":"2.0","id":"runtime-providers","method":"get_runtime_providers",
+                        "params":params,
+                    }))
+                    .unwrap(),
+                );
+                let response = handle_rpc(State(state), request).await.into_response();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = axum::body::to_bytes(response.into_body(), 65_536)
+                    .await
+                    .unwrap();
+                serde_json::from_slice::<Value>(&body).unwrap()
+            }
+        };
+
+        let wire = call(json!({})).await;
+        #[cfg(feature = "inference-plugins")]
+        {
+            assert_eq!(wire["result"]["success"], true);
+            let providers = wire["result"]["providers"].as_array().unwrap();
+            assert_eq!(providers.len(), 4);
+            assert_eq!(providers[2]["provider"], "onnx_runtime");
+            assert_eq!(providers[2]["app_id"], "onnx-runtime");
+            let rejected = call(json!({"app_id":"ollama"})).await;
+            assert_eq!(rejected["error"]["code"], -32602);
+        }
+        #[cfg(not(feature = "inference-plugins"))]
+        assert_eq!(wire["error"]["code"], -32601);
+    }
+
+    #[tokio::test]
     async fn github_cache_status_rpc_preserves_no_manager_and_feature_gate() {
         let temp = TempDir::new().unwrap();
         let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
@@ -2717,7 +2783,7 @@ mod tests {
         #[cfg(feature = "inference-plugins")]
         assert_eq!(
             wire,
-            json!({"jsonrpc":"2.0","id":"available-runtime-fixture","result":{"success":true,"versions":[]}})
+            json!({"jsonrpc":"2.0","id":"available-runtime-fixture","result":{"success":true,"versions":[],"availability_pending":false}})
         );
         #[cfg(not(feature = "inference-plugins"))]
         assert_eq!(
@@ -3277,7 +3343,7 @@ exit 9
                     };
                     format!(
                         r#"#!/bin/sh
-if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file'; then
+if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from gguf.quants import dequantize; from jinja2.sandbox import ImmutableSandboxedEnvironment; from safetensors import safe_open; from safetensors.numpy import save_file'; then
  printf 'probe\n' >> "$0.probes"
  printf 'private-probe-diagnostic\n' >&2
  {terminal}

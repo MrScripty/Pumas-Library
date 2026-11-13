@@ -51,7 +51,8 @@ export function TorchPanel({
             {' '}{gatewayUrl
               ? 'Copy the Pumas gateway URL above into Tuldok to generate images.'
               : 'The Pumas gateway URL will appear when a model is served.'}
-            {' '}Stop Torch profiles before changing runtime versions.
+            {' '}Changing the active Torch version applies to new launches; running profiles keep
+            their version. Stop the profiles running a version before removing it.
           </p>
           <RuntimeProfileSettingsSection provider="torch" />
         </>

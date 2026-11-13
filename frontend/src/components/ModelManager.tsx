@@ -29,6 +29,7 @@ import { ModelImportDialog } from './ModelImportDialog';
 import { ModelConversionDialog, formatConversionDirection } from './ModelConversionDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
 import { MigrationReportsPanel } from './MigrationReportsPanel';
+import { LibraryCompanionBackfillPanel } from './LibraryCompanionBackfillPanel';
 import { HuggingFaceAuthDialog } from './HuggingFaceAuthDialog';
 import { NetworkStatusBanner } from './NetworkStatusBanner';
 import {
@@ -39,6 +40,7 @@ import {
   sortAndFilterRemoteResults,
 } from './ModelManagerUtils';
 import { startRemoteModelDownload } from './ModelManagerRemoteDownload';
+import { modelsAPI } from '../api/models';
 
 export interface ModelManagerProps {
   modelGroups: ModelCategory[];
@@ -334,6 +336,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 diagnostics={libraryDiagnostics}
                 hasVisibleModels={modelGroups.length > 0}
                 downloadListError={downloadListError}
+                onFinishRetainedImport={async (modelId) => {
+                  await modelsAPI.finishRetainedImport(modelId);
+                  await onModelsImported?.();
+                }}
               />
               {integrityIssueCount > 0 && (
                 <div className="rounded border border-[hsl(var(--accent-warning)/0.35)] bg-[hsl(var(--accent-warning)/0.12)] px-3 py-2 text-xs text-[hsl(var(--accent-warning))]">
@@ -379,6 +385,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               {/* Migration Reports */}
               <div className="mt-4">
                 <MigrationReportsPanel />
+              </div>
+              <div className="mt-4">
+                <LibraryCompanionBackfillPanel />
               </div>
             </>
           )}

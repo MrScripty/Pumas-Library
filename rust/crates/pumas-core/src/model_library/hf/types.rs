@@ -140,6 +140,10 @@ pub(crate) struct DownloadState {
     pub pause_flag: Arc<AtomicBool>,
     /// Error message if failed
     pub error: Option<String>,
+    /// Why a download that was already in error when restored failed, read
+    /// from its durable record. Display only: it carries no recovery or
+    /// custody meaning, so lifecycle checks keep reading `error`.
+    pub restored_failure: Option<String>,
     /// Current retry attempt for the active file (1-based while retrying).
     pub retry_attempt: u32,
     /// Retry limit for the active file (`None` means unlimited).
@@ -220,6 +224,17 @@ impl DownloadState {
             ));
         }
     }
+
+    /// The reason shown for this download: the live error, or for a download
+    /// restored in error, the reason its durable record kept.
+    pub(super) fn displayed_error(&self) -> Option<String> {
+        self.error.clone().or_else(|| {
+            (self.status == DownloadStatus::Error)
+                .then(|| self.restored_failure.clone())
+                .flatten()
+        })
+    }
+
     /// Restore a download state from a persisted entry.
     ///
     /// Reconstructs in-memory state from a persistence record, including
@@ -310,6 +325,12 @@ impl DownloadState {
             ),
             pause_flag: Arc::new(AtomicBool::new(false)),
             error: None,
+            restored_failure: (restored_status == DownloadStatus::Error).then(|| {
+                entry.error.clone().unwrap_or_else(|| {
+                    "Download failed before Pumas recorded failure reasons; resume it to retry"
+                        .to_string()
+                })
+            }),
             retry_attempt: 0,
             retry_limit: None,
             retrying: false,
@@ -385,6 +406,11 @@ pub(crate) struct HfFileEntry {
     pub entry_type: Option<String>,
     #[serde(default)]
     pub lfs: Option<HfLfsInfo>,
+    /// Git blob id for regular files (the LFS pointer blob id for LFS files).
+    #[serde(default)]
+    pub oid: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
 }
 
 /// LFS information from HuggingFace.
@@ -483,4 +509,65 @@ pub(crate) fn infer_pipeline_tag_from_config(config: Option<&HfModelConfig>) -> 
     };
 
     Some(tag.to_string())
+}
+
+#[cfg(test)]
+mod restored_failure_tests {
+    use super::*;
+
+    fn persisted(status: &str, error: Option<&str>) -> PersistedDownload {
+        let mut value = serde_json::json!({
+            "download_id": "d",
+            "repo_id": "acme/model",
+            "revision": null,
+            "filename": "weights.gguf",
+            "filenames": ["weights.gguf"],
+            "dest_dir": "/models/llm/acme/model",
+            "total_bytes": 100,
+            "status": status,
+            "download_request": {
+                "repo_id": "acme/model",
+                "family": "acme",
+                "official_name": "Model",
+                "model_type": "llm",
+                "filenames": ["weights.gguf"]
+            },
+            "created_at": "2026-11-10T00:00:00Z",
+            "known_sha256": null
+        });
+        if let Some(error) = error {
+            value["error"] = error.into();
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn restored(entry: &PersistedDownload) -> DownloadState {
+        DownloadState::restore_fields(
+            entry,
+            0,
+            None,
+            DownloadRevision::from_persisted(None).unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_download_restored_in_error_shows_why_it_failed() {
+        let state = restored(&persisted("error", Some("HTTP continuation refused")));
+        assert_eq!(
+            state.error, None,
+            "lifecycle checks never see a restored reason"
+        );
+        assert_eq!(
+            state.displayed_error().as_deref(),
+            Some("HTTP continuation refused")
+        );
+
+        let legacy = restored(&persisted("error", None));
+        assert!(legacy
+            .displayed_error()
+            .is_some_and(|reason| reason.contains("resume it to retry")));
+
+        let paused = restored(&persisted("paused", None));
+        assert_eq!(paused.displayed_error(), None);
+    }
 }

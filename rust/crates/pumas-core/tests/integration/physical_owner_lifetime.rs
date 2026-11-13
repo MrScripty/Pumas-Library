@@ -250,6 +250,8 @@ async fn real_process_loss_does_not_authorize_registry_generation_replacement() 
     let registry = LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
     let generation = registry.get_instance(&root).unwrap().unwrap();
     assert!(held(&root));
+    // A live owner in another process is never reported stale.
+    assert_eq!(registry.inspect_stale_instance(&root).unwrap(), None);
     child.kill().unwrap();
     child.wait().unwrap();
     released(&root).await;
@@ -262,8 +264,22 @@ async fn real_process_loss_does_not_authorize_registry_generation_replacement() 
     assert!(owner(&root, registry.clone()).await.is_err());
     assert_eq!(
         serde_json::to_value(registry.get_instance(&root).unwrap().unwrap()).unwrap(),
-        serde_json::to_value(generation).unwrap()
+        serde_json::to_value(&generation).unwrap()
     );
+
+    // Process loss alone authorizes nothing; an operator-confirmed release of
+    // exactly that entry does, and then a new owner starts normally.
+    let stale = registry.inspect_stale_instance(&root).unwrap().unwrap();
+    assert_eq!(stale.pid, generation.pid);
+    assert!(stale.lease_checked);
+    registry.release_stale_instance(&root, &stale).unwrap();
+    assert!(registry.get_instance(&root).unwrap().is_none());
+    let successor = owner(&root, registry.clone()).await.unwrap();
+    assert_eq!(
+        registry.get_instance(&root).unwrap().unwrap().pid,
+        std::process::id()
+    );
+    successor.shutdown_instance().await.unwrap();
 }
 
 #[test]

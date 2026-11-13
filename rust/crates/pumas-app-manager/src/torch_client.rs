@@ -65,6 +65,22 @@ pub const TORCH_IMAGE_GENERATION_CAPABILITY: &str = "image_generation";
 /// Capability advertised by Torch sidecars that serve audio transcription.
 pub const TORCH_AUDIO_TRANSCRIPTION_CAPABILITY: &str = "audio_transcription";
 
+/// Capability advertised by Torch sidecars that can load text embedders.
+pub const TORCH_TEXT_EMBEDDING_CAPABILITY: &str = "text_embedding";
+
+/// Capability advertised by Torch sidecars that can load text rerankers.
+pub const TORCH_RERANK_CAPABILITY: &str = "rerank";
+
+/// Sidecar model type of a text embedder slot.
+pub const TORCH_TEXT_EMBEDDING_MODEL_TYPE: &str = "text-embedding";
+
+/// Sidecar model type of a text reranker slot.
+pub const TORCH_TEXT_RERANK_MODEL_TYPE: &str = "text-rerank";
+
+/// Upper bound for a sidecar embeddings or rerank response body, the model
+/// operations response bound.
+const MAX_TEXT_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
+
 /// Upper bound for a sidecar transcription response body.
 const MAX_TRANSCRIPTION_RESPONSE_BYTES: usize = 256 * 1024;
 
@@ -586,30 +602,31 @@ pub struct TorchTranscription {
     pub length_limited: bool,
 }
 
-/// Decoded transcription failures from the Torch sidecar.
+/// Decoded failures of a Torch sidecar operation (transcription, embeddings,
+/// rerank).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TorchAudioError {
+pub enum TorchOperationError {
     /// The sidecar is busy with another operation on the model's device.
     RuntimeBusy,
     /// No ready slot holds the requested model.
     ModelUnavailable,
-    /// The slot's model does not transcribe audio.
+    /// The slot's model does not perform the requested operation.
     UnsupportedModel,
     /// The sidecar refused the request, with its reason.
     InvalidRequest(String),
     /// The sidecar ran out of GPU memory.
     OutOfMemory,
-    /// Transcription stopped (client disconnect or cancellation).
+    /// The operation stopped (client disconnect or cancellation).
     Cancelled,
     /// The sidecar reported an unclassified failure.
     BackendFailure,
-    /// The sidecar response was not the typed transcription result.
+    /// The sidecar response was not the operation's typed result.
     InvalidBackendResult,
     /// The sidecar could not be reached or its body could not be read.
     Transport,
 }
 
-impl TorchAudioError {
+impl TorchOperationError {
     /// Stable provider error code for this failure.
     pub fn code(&self) -> &'static str {
         match self {
@@ -626,7 +643,7 @@ impl TorchAudioError {
     }
 }
 
-impl std::fmt::Display for TorchAudioError {
+impl std::fmt::Display for TorchOperationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidRequest(reason) => write!(f, "invalid_request: {reason}"),
@@ -635,12 +652,20 @@ impl std::fmt::Display for TorchAudioError {
     }
 }
 
-impl std::error::Error for TorchAudioError {}
+impl std::error::Error for TorchOperationError {}
 
-fn decode_audio_error(body: &[u8]) -> TorchAudioError {
+fn decode_operation_error(status: reqwest::StatusCode, body: &[u8]) -> TorchOperationError {
     let detail = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|value| value.get("detail").cloned());
+    // The sidecar's request models refuse caller input (an empty list, a
+    // blank query, too many items) with FastAPI's 422 list of field errors.
+    // Its own bounds stay the authority; the reasons cross, never the input.
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+        if let Some(reason) = detail.as_ref().and_then(validation_reason) {
+            return TorchOperationError::InvalidRequest(reason);
+        }
+    }
     let field = |name: &str| {
         detail
             .as_ref()
@@ -648,21 +673,53 @@ fn decode_audio_error(body: &[u8]) -> TorchAudioError {
             .and_then(serde_json::Value::as_str)
     };
     match field("code") {
-        Some("runtime_busy") => TorchAudioError::RuntimeBusy,
-        Some("model_unavailable") => TorchAudioError::ModelUnavailable,
-        Some("unsupported_model") => TorchAudioError::UnsupportedModel,
+        Some("runtime_busy") => TorchOperationError::RuntimeBusy,
+        Some("model_unavailable") => TorchOperationError::ModelUnavailable,
+        Some("unsupported_model") => TorchOperationError::UnsupportedModel,
         // The sidecar's refusal reasons name request fields, never paths.
-        Some("invalid_request") => TorchAudioError::InvalidRequest(
+        Some("invalid_request") => TorchOperationError::InvalidRequest(
             field("message")
                 .unwrap_or("audio request refused")
                 .chars()
                 .take(512)
                 .collect(),
         ),
-        Some("out_of_memory") => TorchAudioError::OutOfMemory,
-        Some("cancelled") => TorchAudioError::Cancelled,
-        _ => TorchAudioError::BackendFailure,
+        Some("out_of_memory") => TorchOperationError::OutOfMemory,
+        Some("cancelled") => TorchOperationError::Cancelled,
+        _ => TorchOperationError::BackendFailure,
     }
+}
+
+/// `field: message` for each FastAPI validation error, without the input.
+fn validation_reason(detail: &serde_json::Value) -> Option<String> {
+    let reasons: Vec<String> = detail
+        .as_array()?
+        .iter()
+        .filter_map(|error| {
+            let message = error.get("msg")?.as_str()?;
+            let message = message.strip_prefix("Value error, ").unwrap_or(message);
+            let field = error
+                .get("loc")
+                .and_then(serde_json::Value::as_array)
+                .map(|loc| {
+                    loc.iter()
+                        .skip_while(|part| part.as_str() == Some("body"))
+                        .map(|part| match part {
+                            serde_json::Value::String(name) => name.clone(),
+                            other => other.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(".")
+                })
+                .unwrap_or_default();
+            Some(if field.is_empty() {
+                message.to_string()
+            } else {
+                format!("{field}: {message}")
+            })
+        })
+        .collect();
+    (!reasons.is_empty()).then(|| reasons.join("; ").chars().take(512).collect())
 }
 
 #[derive(Debug, Deserialize)]
@@ -671,13 +728,15 @@ struct TranscriptionBody {
     finish_reason: String,
 }
 
-fn decode_transcription(body: &[u8]) -> std::result::Result<TorchTranscription, TorchAudioError> {
+fn decode_transcription(
+    body: &[u8],
+) -> std::result::Result<TorchTranscription, TorchOperationError> {
     let parsed = serde_json::from_slice::<TranscriptionBody>(body)
-        .map_err(|_| TorchAudioError::InvalidBackendResult)?;
+        .map_err(|_| TorchOperationError::InvalidBackendResult)?;
     let length_limited = match parsed.finish_reason.as_str() {
         "stop" => false,
         "length" => true,
-        _ => return Err(TorchAudioError::InvalidBackendResult),
+        _ => return Err(TorchOperationError::InvalidBackendResult),
     };
     Ok(TorchTranscription {
         text: parsed.text,
@@ -1118,7 +1177,7 @@ impl TorchClient {
         model_id: &str,
         audio: &serde_json::Value,
         language: &str,
-    ) -> std::result::Result<TorchTranscription, TorchAudioError> {
+    ) -> std::result::Result<TorchTranscription, TorchOperationError> {
         let url = format!("{}/api/audio/transcriptions", self.base_url);
         debug!("Torch transcription for model '{}' at {}", model_id, url);
         let body = serde_json::json!({
@@ -1132,21 +1191,101 @@ impl TorchClient {
             .json(&body)
             .send()
             .await
-            .map_err(|_| TorchAudioError::Transport)?;
+            .map_err(|_| TorchOperationError::Transport)?;
         let status = response.status();
         let mut bytes = Vec::new();
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|_| TorchAudioError::Transport)?;
+            let chunk = chunk.map_err(|_| TorchOperationError::Transport)?;
             if bytes.len().saturating_add(chunk.len()) > MAX_TRANSCRIPTION_RESPONSE_BYTES {
-                return Err(TorchAudioError::InvalidBackendResult);
+                return Err(TorchOperationError::InvalidBackendResult);
             }
             bytes.extend_from_slice(&chunk);
         }
         if !status.is_success() {
-            return Err(decode_audio_error(&bytes));
+            return Err(decode_operation_error(status, &bytes));
         }
         decode_transcription(&bytes)
+    }
+
+    /// Embed texts with a loaded text embedder. The result is the sidecar's
+    /// OpenAI-shaped body (`data[{index, embedding}]`, `usage`), for the
+    /// caller's typed projection to check.
+    pub async fn embed_text(
+        &self,
+        model_id: &str,
+        input: &[String],
+        dimensions: Option<u32>,
+    ) -> std::result::Result<serde_json::Value, TorchOperationError> {
+        let mut body = serde_json::json!({"model_id": model_id, "input": input});
+        if let Some(dimensions) = dimensions {
+            body["dimensions"] = dimensions.into();
+        }
+        self.text_operation("embeddings", &body).await
+    }
+
+    /// Score documents against a query with a loaded text reranker. The
+    /// result is the sidecar's llama.cpp-shaped body (`results[{index,
+    /// relevance_score}]` in document order, `usage`).
+    pub async fn rerank_text(
+        &self,
+        model_id: &str,
+        query: &str,
+        documents: &[String],
+    ) -> std::result::Result<serde_json::Value, TorchOperationError> {
+        let body =
+            serde_json::json!({"model_id": model_id, "query": query, "documents": documents});
+        self.text_operation("rerank", &body).await
+    }
+
+    async fn text_operation(
+        &self,
+        operation: &str,
+        body: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, TorchOperationError> {
+        let url = format!("{}/api/text/{operation}", self.base_url);
+        let response = self
+            .image_client
+            .post(&url)
+            .json(body)
+            .send()
+            .await
+            .map_err(|_| TorchOperationError::Transport)?;
+        let status = response.status();
+        let mut bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| TorchOperationError::Transport)?;
+            if bytes.len().saturating_add(chunk.len()) > MAX_TEXT_RESPONSE_BYTES {
+                return Err(TorchOperationError::InvalidBackendResult);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            return Err(decode_operation_error(status, &bytes));
+        }
+        serde_json::from_slice(&bytes).map_err(|_| TorchOperationError::InvalidBackendResult)
+    }
+
+    /// Load a text embedder or reranker with the model's recorded
+    /// sentence-transformers declarations, which decide what it computes.
+    pub async fn load_text_encoder(
+        &self,
+        model_path: &str,
+        model_name: &str,
+        device: &ComputeDevice,
+        model_type: &str,
+        declarations: Option<&serde_json::Value>,
+    ) -> Result<ModelSlot> {
+        self.load_request(
+            model_path,
+            model_name,
+            device,
+            Some(model_type),
+            None,
+            declarations,
+        )
+        .await
     }
 
     /// List all model slots (loaded and unloaded).
@@ -1222,6 +1361,19 @@ impl TorchClient {
         model_type: Option<&str>,
         components: Option<&ImageModelComponents<'_>>,
     ) -> Result<ModelSlot> {
+        self.load_request(model_path, model_name, device, model_type, components, None)
+            .await
+    }
+
+    async fn load_request(
+        &self,
+        model_path: &str,
+        model_name: &str,
+        device: &ComputeDevice,
+        model_type: Option<&str>,
+        components: Option<&ImageModelComponents<'_>>,
+        declarations: Option<&serde_json::Value>,
+    ) -> Result<ModelSlot> {
         let url = format!("{}/api/load", self.base_url);
         info!(
             "Loading model '{}' on {} from {}",
@@ -1244,6 +1396,9 @@ impl TorchClient {
             if let Some(path) = components.vae_path {
                 body["vae_path"] = serde_json::Value::String(path.to_string());
             }
+        }
+        if let Some(declarations) = declarations {
+            body["declarations"] = declarations.clone();
         }
 
         let response = self
@@ -2046,9 +2201,48 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_request_validation_is_a_caller_error_with_its_reasons() {
+        // FastAPI's 422 body for an empty document list and a blank query.
+        let body = serde_json::json!({"detail": [
+            {"type": "too_short", "loc": ["body", "documents"],
+             "msg": "List should have at least 1 item after validation, not 0",
+             "input": [], "ctx": {"field_type": "List", "min_length": 1}},
+            {"type": "value_error", "loc": ["body", "query"],
+             "msg": "Value error, query must be nonblank", "input": "  secret  "}
+        ]});
+        let error = decode_operation_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            body.to_string().as_bytes(),
+        );
+        let TorchOperationError::InvalidRequest(reason) = error else {
+            panic!("expected a caller error, got {error:?}");
+        };
+        assert_eq!(
+            reason,
+            "documents: List should have at least 1 item after validation, not 0; \
+             query: query must be nonblank"
+        );
+        assert!(!reason.contains("secret"));
+        // The same body on another status is not trusted as caller input.
+        assert_eq!(
+            decode_operation_error(
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                body.to_string().as_bytes()
+            ),
+            TorchOperationError::BackendFailure
+        );
+        // A 422 without field errors stays a backend failure.
+        assert_eq!(
+            decode_operation_error(reqwest::StatusCode::UNPROCESSABLE_ENTITY, b"{}"),
+            TorchOperationError::BackendFailure
+        );
+    }
+
+    #[test]
     fn transcription_refusals_keep_their_reasons() {
         let refusal = |code: &str, message: &str| {
-            decode_audio_error(
+            decode_operation_error(
+                reqwest::StatusCode::BAD_REQUEST,
                 serde_json::json!({"detail": {"code": code, "message": message}})
                     .to_string()
                     .as_bytes(),
@@ -2056,20 +2250,23 @@ mod tests {
         };
         assert_eq!(
             refusal("invalid_request", "language must be one of: en"),
-            TorchAudioError::InvalidRequest("language must be one of: en".into())
+            TorchOperationError::InvalidRequest("language must be one of: en".into())
         );
-        assert_eq!(refusal("runtime_busy", ""), TorchAudioError::RuntimeBusy);
+        assert_eq!(
+            refusal("runtime_busy", ""),
+            TorchOperationError::RuntimeBusy
+        );
         assert_eq!(
             refusal("model_unavailable", ""),
-            TorchAudioError::ModelUnavailable
+            TorchOperationError::ModelUnavailable
         );
         assert_eq!(
             refusal("Traceback", "/secret/path"),
-            TorchAudioError::BackendFailure
+            TorchOperationError::BackendFailure
         );
         assert_eq!(
             decode_transcription(br#"{"text":"x","finish_reason":"other"}"#),
-            Err(TorchAudioError::InvalidBackendResult)
+            Err(TorchOperationError::InvalidBackendResult)
         );
         let handshake = TorchHandshake {
             status: "ok".into(),

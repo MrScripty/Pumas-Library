@@ -523,7 +523,7 @@ async fn dispatch_audio(
     served: &ServedModelStatus,
     body: serde_json::Value,
 ) -> Response {
-    use pumas_app_manager::torch_client::TorchAudioError;
+    use pumas_app_manager::torch_client::TorchOperationError;
     let id = Some(request.request_id.clone());
     let unavailable = |message: &str| {
         error(
@@ -578,42 +578,44 @@ async fn dispatch_audio(
             },
         })
         .into_response(),
-        Err(TorchAudioError::InvalidRequest(reason)) => error(
+        Err(TorchOperationError::InvalidRequest(reason)) => error(
             StatusCode::BAD_REQUEST,
             id,
             Rejection::new(ErrorCode::InvalidRequest, reason),
             false,
         ),
-        Err(TorchAudioError::ModelUnavailable) => {
+        Err(TorchOperationError::ModelUnavailable) => {
             unavailable("the audio model is not loaded in its Torch runtime")
         }
-        Err(TorchAudioError::UnsupportedModel) => {
+        Err(TorchOperationError::UnsupportedModel) => {
             unavailable("the served Torch model does not transcribe audio")
         }
-        Err(TorchAudioError::RuntimeBusy) => {
+        Err(TorchOperationError::RuntimeBusy) => {
             unavailable("the Torch runtime is busy with another operation on this device; retry")
         }
-        Err(TorchAudioError::Transport | TorchAudioError::Cancelled) => {
+        Err(TorchOperationError::Transport | TorchOperationError::Cancelled) => {
             error(StatusCode::BAD_GATEWAY, id, ErrorCode::TransportLost, true)
         }
-        Err(TorchAudioError::InvalidBackendResult) => error(
+        Err(TorchOperationError::InvalidBackendResult) => error(
             StatusCode::BAD_GATEWAY,
             id,
             ErrorCode::InvalidProviderResult,
             true,
         ),
-        Err(failure @ (TorchAudioError::OutOfMemory | TorchAudioError::BackendFailure)) => error(
-            StatusCode::BAD_GATEWAY,
-            id,
-            Rejection::new(
-                ErrorCode::ProviderFailure,
-                format!(
-                    "the Torch runtime failed to transcribe ({}); inspect its runtime log",
-                    failure.code()
+        Err(failure @ (TorchOperationError::OutOfMemory | TorchOperationError::BackendFailure)) => {
+            error(
+                StatusCode::BAD_GATEWAY,
+                id,
+                Rejection::new(
+                    ErrorCode::ProviderFailure,
+                    format!(
+                        "the Torch runtime failed to transcribe ({}); inspect its runtime log",
+                        failure.code()
+                    ),
                 ),
-            ),
-            true,
-        ),
+                true,
+            )
+        }
     }
 }
 
@@ -693,6 +695,9 @@ async fn describe(
                 }),
             _ => None,
         };
+    // A loaded ONNX session computes exactly one task, chosen from the model's
+    // record when it was served.
+    let onnx_task = onnx_session.as_ref().map(|session| session.task);
     let runtime_ready = match served.provider {
         RuntimeProviderId::OnnxRuntime => onnx_session.is_some(),
         RuntimeProviderId::Torch => match served.endpoint_url.as_ref() {
@@ -851,7 +856,12 @@ async fn describe(
                     vec![InputFormat::Rerank],
                     vec![OutputFormat::RelevanceScores],
                     Some(OpenAiGatewayEndpoint::Rerank),
-                    vec![bound(OptionName::TopN, 1., u32::MAX as f64)],
+                    rerank_bounds(
+                        served.provider,
+                        onnx_session
+                            .as_ref()
+                            .and_then(|session| session.max_input_tokens),
+                    ),
                 ),
                 Capability::MultimodalEmbedding => (
                     SemanticTask::MultimodalEmbedding,
@@ -903,6 +913,16 @@ async fn describe(
             Capability::Decision if decision::candidate_task(task) && !runtime_ready => Some(true),
             Capability::Decision => Some(decision_model),
             _ if decision_model => Some(false),
+            _ if onnx_task.is_some() => Some(matches!(
+                (capability, onnx_task),
+                (
+                    Capability::TextEmbedding,
+                    Some(pumas_library::OnnxSessionTask::Embedding { .. })
+                ) | (
+                    Capability::Rerank,
+                    Some(pumas_library::OnnxSessionTask::Rerank { .. })
+                )
+            )),
             _ => semantics_of(capability),
         };
         let reason = if capability == Capability::AudioClassification {
@@ -1056,11 +1076,20 @@ fn semantic_match(
                 matches!(task, "image-to-text" | "image_to_text" | "image->text")
                     || vision_language_task(task)
             }
-            Capability::Rerank => text_ranking_task(task),
+            // Cross-encoder rerankers are published as text classifiers; the
+            // recorded type comes from their single-logit head.
+            Capability::Rerank => {
+                text_ranking_task(task)
+                    || (model_type == Some("reranker")
+                        && matches!(task, "text-classification" | "text_classification"))
+            }
             _ => false,
         });
     }
-    if provider == RuntimeProviderId::OnnxRuntime && capability == Capability::TextEmbedding {
+    if provider == RuntimeProviderId::OnnxRuntime
+        && capability == Capability::TextEmbedding
+        && model_type != Some("reranker")
+    {
         return Some(true);
     }
     if provider == RuntimeProviderId::Torch && capability == Capability::ImageGeneration {
@@ -1074,6 +1103,29 @@ fn semantic_match(
         None => None,
     }
 }
+/// The in-process ONNX runtime scores at most its fixed document and
+/// character limits, plus the model's per-pair token limit; proxied providers
+/// report their own limits when a request exceeds them.
+fn rerank_bounds(provider: RuntimeProviderId, max_pair_tokens: Option<usize>) -> Vec<OptionBound> {
+    if provider != RuntimeProviderId::OnnxRuntime {
+        return vec![bound(OptionName::TopN, 1., u32::MAX as f64)];
+    }
+    let limits = pumas_library::OnnxEmbeddingRequest::LIMITS;
+    let mut bounds = vec![
+        bound(OptionName::TopN, 1., limits.max_inputs as f64),
+        bound(OptionName::InputCount, 1., limits.max_inputs as f64),
+        bound(
+            OptionName::InputCharacters,
+            0.,
+            limits.max_input_chars as f64,
+        ),
+    ];
+    if let Some(max_pair_tokens) = max_pair_tokens {
+        bounds.push(bound(OptionName::InputTokens, 1., max_pair_tokens as f64));
+    }
+    bounds
+}
+
 /// The in-process ONNX runtime has fixed batch and tokenizer limits, plus the
 /// loaded model's own per-input token limit when its config declares one.
 /// Proxied providers enforce their own (context and batch size) and report

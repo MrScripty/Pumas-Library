@@ -600,7 +600,7 @@ fn refused(
 
 fn published_failure(model_id: &str, target: &Path, error: PumasError) -> PumasError {
     PumasError::ImportFailed { message: format!(
-        "Model {model_id} was published at {} but confirmation/indexing failed: {error}; output and publication receipt retained, do not repeat the import. Retained Pending imports currently have no supported finalization/recovery API; keep the evidence for manual diagnosis", target.display()
+        "Model {model_id} was published at {} but confirmation/indexing failed: {error}; output and publication receipt retained, do not repeat the import. If its metadata.json became Ready, finish_retained_import re-verifies and finishes it; otherwise keep the evidence for manual diagnosis", target.display()
     ) }
 }
 

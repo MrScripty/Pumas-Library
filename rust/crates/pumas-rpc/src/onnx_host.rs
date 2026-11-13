@@ -21,8 +21,8 @@ use pumas_library::onnx_runtime::host_protocol::{
 use pumas_library::onnx_runtime_distribution::execution_provider_for;
 use pumas_library::{
     OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxExecutionProvider, OnnxLoadOptions,
-    OnnxLoadRequest, OnnxModelId, OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeLibrary,
-    OnnxSessionManager, RealOnnxEmbeddingBackend,
+    OnnxLoadRequest, OnnxModelId, OnnxRerankRequest, OnnxRuntimeError, OnnxRuntimeErrorCode,
+    OnnxRuntimeLibrary, OnnxSessionManager, RealOnnxEmbeddingBackend,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -165,6 +165,7 @@ where
         .route(host_protocol::UNLOAD_PATH, post(unload::<B>))
         .route(host_protocol::SESSIONS_PATH, get(sessions::<B>))
         .route(host_protocol::EMBED_PATH, post(embed::<B>))
+        .route(host_protocol::RERANK_PATH, post(rerank::<B>))
         .with_state(state)
 }
 
@@ -224,6 +225,7 @@ async fn load<B: OnnxEmbeddingBackend>(
     // Validate the path against its root here too: the host reads the file.
     let options = OnnxLoadOptions {
         embedding_dimensions: body.embedding_dimensions,
+        task: body.task,
         ..OnnxLoadOptions::default()
     };
     let request =
@@ -286,6 +288,27 @@ async fn embed<B: OnnxEmbeddingBackend>(
             Err(error) => return error_response(error),
         };
     match manager.embed(request).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error_response(error),
+    }
+}
+
+async fn rerank<B: OnnxEmbeddingBackend>(
+    State(state): State<Arc<HostState<B>>>,
+    headers: HeaderMap,
+    Json(body): Json<OnnxRerankRequest>,
+) -> Response {
+    let manager = match admitted(&state, &headers) {
+        Ok(manager) => manager,
+        Err(response) => return *response,
+    };
+    // Re-apply the request limits; the body was decoded without them.
+    let request = match OnnxRerankRequest::parse(body.model_id.as_str(), body.query, body.documents)
+    {
+        Ok(request) => request,
+        Err(error) => return error_response(error),
+    };
+    match manager.rerank_with_admission(request, None).await {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
     }
@@ -370,6 +393,45 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(not_loaded.code, OnnxRuntimeErrorCode::NotLoaded);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_cross_encoder_loads_with_its_task_and_reranks_through_a_host() {
+        let (endpoint, server) = serve_fake_host(true).await;
+        let manager =
+            OnnxSessionManager::new(RemoteOnnxEmbeddingBackend::new().unwrap(), 2).unwrap();
+        let fixture = tempfile::tempdir().unwrap();
+        std::fs::write(fixture.path().join("model.onnx"), b"fixture").unwrap();
+        let task = pumas_library::OnnxSessionTask::Rerank {
+            activation: pumas_library::OnnxScoreActivation::Sigmoid,
+        };
+        let request = OnnxLoadRequest::parse(
+            fixture.path(),
+            "model.onnx",
+            "fixture/reranker",
+            OnnxLoadOptions {
+                task,
+                ..OnnxLoadOptions::default()
+            },
+        )
+        .unwrap();
+        let status = manager.load_on_host(request, endpoint).await.unwrap();
+        assert_eq!(status.task, task, "the host session keeps the model's task");
+        let response = manager
+            .rerank_with_admission(
+                OnnxRerankRequest::parse(
+                    "fixture/reranker",
+                    "boiling point".into(),
+                    vec!["water boiling point".into(), "unrelated".into()],
+                )
+                .unwrap(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.results.len(), 2);
+        assert!(response.results[0].relevance_score > response.results[1].relevance_score);
         server.abort();
     }
 

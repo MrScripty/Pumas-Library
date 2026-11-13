@@ -431,9 +431,26 @@ for an explicit integrity-verification request. An installed file may legitimate
 differ from the acquired artifact. Ownership checks still require regular files,
 current physical/path bindings, required-member closure, recorded lengths and
 valid receipt state; a checksum does not grant ownership. Pending or missing
-receipts cannot be promoted by observing matching files. Unknown pre-existing
-files without a supplied checksum or verified receipt remain unresolved and are
-preserved for reconciliation. An owned rewrite invalidates prior acquisition
+receipts cannot be promoted by observing matching files.
+
+An unfinished (`Transferring`) acquisition records a published-file receipt
+(path, length, SHA-256 of the verified staged bytes) durably before it renames
+each staged file into place, in a separate `acquisition_published_files` store
+partition that is pruned when the record leaves `Transferring`. A resumed
+operation admits a final file named by its own receipt through the same binding
+and length checks as a reopened `FilesReady` acquisition, without transferring
+or rehashing it; a staged file left by an interruption between recording and
+renaming is published only if it still hashes to the recorded receipt. An
+acquisition created with this ledger refuses an unreceipted final file without
+a supplied checksum as not its own, before any request. Only a transfer that
+began before receipts were recorded (no ledger, or one marked incomplete) may
+admit such a file, from an immutable revision, when it is byte-identical to a
+complete fresh transfer of that file; the duplicate staged copy is then
+discarded. Before each attempt of that transfer, a retained partial without a
+live checkpoint is discarded only when every one of its bytes is already at the
+start of the final file and the name still binds the file that was compared.
+Any difference keeps both files unresolved, preserved for reconciliation, with
+a refusal naming both lengths and SHA-256 values. An owned rewrite invalidates prior acquisition
 verification before a new download can succeed. Partial-transfer checkpoint
 checks belong to unfinished acquisition, not post-download use.
 

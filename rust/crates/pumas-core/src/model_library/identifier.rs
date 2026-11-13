@@ -413,7 +413,9 @@ fn extract_gguf_key_metadata<R: Read>(file: &mut R, metadata_count: usize) -> Re
         "general.type",
     ];
 
-    for _ in 0..std::cmp::min(metadata_count, 100) {
+    // Every model key is read: the loop ends at the first tokenizer key, at
+    // the declared count, or where the bytes end.
+    for _ in 0..metadata_count {
         // Read key
         let key = match read_gguf_string(file) {
             Ok(k) => k,
@@ -1159,18 +1161,7 @@ mod tests {
 
     /// A GGUF header carrying string keys, as llama.cpp writes them.
     fn gguf_with_string_keys(keys: &[(&str, &str)]) -> Vec<u8> {
-        let mut bytes = b"GGUF".to_vec();
-        bytes.extend_from_slice(&3_u32.to_le_bytes());
-        bytes.extend_from_slice(&0_u64.to_le_bytes());
-        bytes.extend_from_slice(&(keys.len() as u64).to_le_bytes());
-        for (key, value) in keys {
-            bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
-            bytes.extend_from_slice(key.as_bytes());
-            bytes.extend_from_slice(&8_u32.to_le_bytes());
-            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
-            bytes.extend_from_slice(value.as_bytes());
-        }
-        bytes
+        crate::model_library::test_gguf_with_string_keys(keys, 0)
     }
 
     #[test]

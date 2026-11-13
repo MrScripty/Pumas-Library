@@ -692,7 +692,7 @@ fn validate_identity_encoding(response: &Response) -> Result<()> {
     Ok(())
 }
 
-fn parse_content_range(response: &Response) -> Result<(u64, u64, u64)> {
+pub(crate) fn parse_content_range(response: &Response) -> Result<(u64, u64, u64)> {
     if response.headers().get_all(CONTENT_RANGE).iter().count() != 1 {
         return Err(invalid_response(
             "HTTP range response requires exactly one Content-Range field",

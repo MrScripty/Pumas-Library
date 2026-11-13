@@ -51,6 +51,46 @@ pub async fn refetch_model_metadata_from_hf(
     }))
 }
 
+/// The model card, license documents and code stored with a library model.
+pub async fn get_model_documents(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+    let model_id = require_str_param(params, "model_id", "modelId")?;
+    Ok(serde_json::to_value(
+        state.api.get_model_documents(&model_id).await?,
+    )?)
+}
+
+/// `dry_run` defaults to true: fetching and writing must be asked for.
+fn companion_backfill_dry_run(params: &Value) -> bool {
+    crate::handlers::get_bool_param(params, "dry_run", "dryRun").unwrap_or(true)
+}
+
+/// Fetch the companion files one library model is missing.
+pub async fn backfill_model_companion_files(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let model_id = require_str_param(params, "model_id", "modelId")?;
+    Ok(serde_json::to_value(
+        state
+            .api
+            .backfill_model_companion_files(&model_id, companion_backfill_dry_run(params))
+            .await?,
+    )?)
+}
+
+/// Fetch the companion files every library model is missing.
+pub async fn backfill_library_companion_files(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    Ok(serde_json::to_value(
+        state
+            .api
+            .backfill_library_companion_files(companion_backfill_dry_run(params))
+            .await?,
+    )?)
+}
+
 /// The caller refreshes selection explicitly after observing a replacement ID.
 pub async fn lookup_model(
     state: &AppState,

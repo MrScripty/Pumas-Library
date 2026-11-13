@@ -78,6 +78,8 @@ class EmbeddedRuntimeImportTests(unittest.TestCase):
             "audio_input.py",
             "audio_contract.py",
             "loaders/cohere_asr_loader.py",
+            "text_api.py",
+            "loaders/text_encoder_loader.py",
             "runtime_compat.py",
             "resolve_runtime.py",
             "probe_runtime.py",

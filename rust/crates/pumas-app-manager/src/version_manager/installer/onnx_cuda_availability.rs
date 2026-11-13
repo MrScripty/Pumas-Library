@@ -30,7 +30,7 @@ use std::time::Duration;
 use tokio::sync::OnceCell;
 
 /// Builds resolved at once while a listing is annotated.
-const LISTING_CONCURRENCY: usize = 4;
+pub(super) const LISTING_CONCURRENCY: usize = 4;
 /// How long a listing waits for answers. A lookup still running afterwards is
 /// listed as `checking` and keeps running; the next listing waits on it.
 const LISTING_DEADLINE: Duration = Duration::from_secs(10);

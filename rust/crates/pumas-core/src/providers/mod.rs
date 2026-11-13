@@ -298,10 +298,11 @@ impl ProviderBehavior {
                 RuntimeDeviceMode::Gpu,
             ],
             local_artifact_formats: vec![ExecutableArtifactFormat::Onnx],
-            serving_tasks: vec![ServingTask::Embedding],
+            serving_tasks: vec![ServingTask::Embedding, ServingTask::Reranking],
             openai_endpoints: vec![
                 OpenAiGatewayEndpoint::Models,
                 OpenAiGatewayEndpoint::Embeddings,
+                OpenAiGatewayEndpoint::Rerank,
             ],
             launch_kinds: vec![ProviderLaunchKind::BinaryProcess],
             managed_launch_strategies: vec![ProviderManagedLaunchStrategy {
@@ -337,10 +338,16 @@ impl ProviderBehavior {
             provider_modes: vec![RuntimeProviderMode::TorchServe],
             device_modes: vec![RuntimeDeviceMode::Gpu, RuntimeDeviceMode::Hybrid],
             local_artifact_formats: vec![ExecutableArtifactFormat::Safetensors],
-            serving_tasks: vec![ServingTask::ImageGeneration],
+            serving_tasks: vec![
+                ServingTask::ImageGeneration,
+                ServingTask::Embedding,
+                ServingTask::Reranking,
+            ],
             openai_endpoints: vec![
                 OpenAiGatewayEndpoint::Models,
                 OpenAiGatewayEndpoint::ImagesGenerations,
+                OpenAiGatewayEndpoint::Embeddings,
+                OpenAiGatewayEndpoint::Rerank,
             ],
             launch_kinds: vec![ProviderLaunchKind::BinaryProcess],
             managed_launch_strategies: vec![ProviderManagedLaunchStrategy {

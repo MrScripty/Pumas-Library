@@ -612,6 +612,9 @@ pub struct FfiReclassifyResult {
     pub reclassified: u64,
     pub changes: Vec<FfiStringPair>,
     pub errors: Vec<FfiStringPair>,
+    /// (model_id, reason) for models left for a later pass, such as while a
+    /// download holds the library root.
+    pub deferred: Vec<FfiStringPair>,
 }
 
 impl From<pumas_library::model_library::ReclassifyResult> for FfiReclassifyResult {
@@ -629,6 +632,14 @@ impl From<pumas_library::model_library::ReclassifyResult> for FfiReclassifyResul
                 .collect(),
             errors: r
                 .errors
+                .into_iter()
+                .map(|(f, s)| FfiStringPair {
+                    first: f,
+                    second: s,
+                })
+                .collect(),
+            deferred: r
+                .deferred
                 .into_iter()
                 .map(|(f, s)| FfiStringPair {
                     first: f,

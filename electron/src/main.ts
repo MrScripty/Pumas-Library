@@ -40,6 +40,7 @@ import {
 import { isIgnoredPackagedOverride, resolveBackendBinaryPath } from './backend-path';
 import { PythonBridge } from './python-bridge';
 import { LibraryUpgradeCoordinator, runLibraryMetadataUpgrade } from './library-upgrade';
+import { StaleInstanceReleaseCoordinator, runStaleInstanceRelease } from './stale-instance-release';
 import { isS3ImportMethod, receiveS3ImportRpc } from './s3-import-rpc';
 import { decodeRuntimeRunningOutcome } from './desktop-contract';
 import {
@@ -123,29 +124,51 @@ const libraryUpgrade = new LibraryUpgradeCoordinator({
     };
   },
   upgrade: runLibraryMetadataUpgrade,
-  open: async (target) => {
-    const session = libraryStartupSession;
-    if (!session || session.resolution.launcherRoot !== target.launcherRoot ||
-        session.bridge !== pythonBridge) throw new Error('Selected library changed during upgrade.');
-    launcherRootStartupState = { status: 'initializing' };
-    try { await session.bridge.start(); }
-    catch (cause) {
-      launcherRootStartupState = new BackendInitializationRecoveryRequiredError(session.resolution, cause).recoveryState;
-      throw cause;
-    }
-    const state = projectLauncherRootStartupState(session.resolution,
-      readLibraryDisplayScope(target.launcherRoot));
-    if (state.status !== 'ready') throw new Error('Library readiness unavailable.');
-    launcherRootStartupState = state;
-    startModelLibraryUpdateForwarder();
-    startModelDownloadUpdateForwarder();
-    startRuntimeProfileUpdateForwarder();
-    startServingStatusUpdateForwarder();
-    startStatusTelemetryUpdateForwarder();
-    return state;
-  },
+  open: (target) => openSelectedLibrary(target.launcherRoot, 'upgrade'),
   isClosing: () => applicationCleanupStarted,
   reportFailure: (stage, error) => logBackendInitializationFailure(`Library metadata upgrade ${stage} failed`, error),
+});
+
+/** Start the selected library's backend after a recovery step changed its state. */
+async function openSelectedLibrary(launcherRoot: string, during: string) {
+  const session = libraryStartupSession;
+  if (!session || session.resolution.launcherRoot !== launcherRoot ||
+      session.bridge !== pythonBridge) throw new Error(`Selected library changed during ${during}.`);
+  launcherRootStartupState = { status: 'initializing' };
+  try { await session.bridge.start(); }
+  catch (cause) {
+    launcherRootStartupState = new BackendInitializationRecoveryRequiredError(session.resolution, cause).recoveryState;
+    throw cause;
+  }
+  const state = projectLauncherRootStartupState(session.resolution,
+    readLibraryDisplayScope(launcherRoot));
+  if (state.status !== 'ready') throw new Error('Library readiness unavailable.');
+  launcherRootStartupState = state;
+  startModelLibraryUpdateForwarder();
+  startModelDownloadUpdateForwarder();
+  startRuntimeProfileUpdateForwarder();
+  startServingStatusUpdateForwarder();
+  startStatusTelemetryUpdateForwarder();
+  return state;
+}
+
+const staleInstanceRelease = new StaleInstanceReleaseCoordinator({
+  getTarget: () => {
+    if (backendInitializationPromise || !libraryStartupSession || libraryUpgrade.active ||
+        pythonBridge !== libraryStartupSession.bridge || pythonBridge.isRunning() ||
+        launcherRootStartupState.status !== 'recovery-required' ||
+        launcherRootStartupState.reason !== 'stale-instance' ||
+        !launcherRootStartupState.staleInstance) return null;
+    return {
+      launcherRoot: libraryStartupSession.resolution.launcherRoot,
+      rustBinaryPath: libraryStartupSession.rustBinaryPath,
+      staleInstance: launcherRootStartupState.staleInstance,
+    };
+  },
+  release: (target) => runStaleInstanceRelease(target),
+  open: (target) => openSelectedLibrary(target.launcherRoot, 'release'),
+  isClosing: () => applicationCleanupStarted,
+  reportFailure: (stage, error) => logBackendInitializationFailure(`Stale instance ${stage} failed`, error),
 });
 
 const selectLauncherRoot = createLauncherRootSelectionHandler({
@@ -678,9 +701,14 @@ function registerIPCHandlers(): void {
     return libraryUpgrade.run(confirmation);
   });
 
+  ipcMain.handle('launcher:releaseStaleInstance', (event, confirmation: unknown) => {
+    requireApplicationSender('launcher:releaseStaleInstance', event);
+    return staleInstanceRelease.run(confirmation);
+  });
+
   ipcMain.handle('launcher:chooseLibraryRoot', async (event) => {
     requireApplicationSender('launcher:chooseLibraryRoot', event);
-    if (libraryUpgrade.active || applicationCleanupStarted) {
+    if (libraryUpgrade.active || staleInstanceRelease.active || applicationCleanupStarted) {
       return { status: 'recovery-required', reason: 'chooser-unavailable', authorityState: 'unchanged' };
     }
     const result = await selectLauncherRoot(launcherRootStartupState);
@@ -943,6 +971,7 @@ async function initializeBackend(): Promise<void> {
 async function cleanup(): Promise<void> {
   log.info('Cleaning up...');
   await libraryUpgrade.settle();
+  await staleInstanceRelease.settle();
 
   if (pythonBridge) {
     await pythonBridge.stop();

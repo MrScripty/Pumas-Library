@@ -13,6 +13,8 @@ const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 pub struct OnnxTokenizedInput {
     pub input_ids: Vec<i64>,
     pub attention_mask: Vec<i64>,
+    /// Segment ids from the tokenizer: 0 for a single text, 0/1 for a pair.
+    pub type_ids: Vec<i64>,
     pub token_count: usize,
 }
 
@@ -88,11 +90,7 @@ impl OnnxTokenizer {
                 OnnxRuntimeError::backend("ONNX token count exceeds supported size")
             })?;
 
-            inputs.push(OnnxTokenizedInput {
-                input_ids: token_values(encoding.get_ids()),
-                attention_mask: attention_mask_values(encoding.get_attention_mask(), token_count)?,
-                token_count,
-            });
+            inputs.push(tokenized_input(&encoding, token_count)?);
         }
 
         Ok(OnnxTokenizedBatch {
@@ -100,6 +98,75 @@ impl OnnxTokenizer {
             total_tokens,
         })
     }
+
+    /// Tokenize `(query, document)` pairs as the tokenizer's pair template
+    /// joins them, refusing, with the document named, any pair longer than
+    /// `limit`.
+    pub fn tokenize_pairs_within(
+        &self,
+        model_id: &str,
+        query: &str,
+        documents: &[String],
+        limit: Option<&OnnxInputTokenLimit>,
+    ) -> Result<OnnxTokenizedBatch, OnnxRuntimeError> {
+        let mut inputs = Vec::with_capacity(documents.len());
+        let mut total_tokens = 0usize;
+        for (index, document) in documents.iter().enumerate() {
+            let encoding = self
+                .tokenizer
+                .encode((query, document.as_str()), true)
+                .map_err(|_| {
+                    OnnxRuntimeError::validation(
+                        "documents",
+                        "a rerank pair could not be tokenized",
+                    )
+                })?;
+            let token_count = encoding.get_ids().len();
+            validate_token_count(token_count)?;
+            if let Some(limit) = limit {
+                if token_count > limit.max_tokens {
+                    return Err(OnnxRuntimeError::validation(
+                        "documents",
+                        format!(
+                            "query and document {index} have {token_count} tokens, but model \
+                             {model_id} accepts at most {} tokens per pair (config.json {})",
+                            limit.max_tokens, limit.source
+                        ),
+                    ));
+                }
+            }
+            total_tokens = total_tokens.checked_add(token_count).ok_or_else(|| {
+                OnnxRuntimeError::backend("ONNX token count exceeds supported size")
+            })?;
+            inputs.push(tokenized_input(&encoding, token_count)?);
+        }
+        Ok(OnnxTokenizedBatch {
+            inputs,
+            total_tokens,
+        })
+    }
+}
+
+fn tokenized_input(
+    encoding: &tokenizers::Encoding,
+    token_count: usize,
+) -> Result<OnnxTokenizedInput, OnnxRuntimeError> {
+    let type_ids = encoding.get_type_ids();
+    if !type_ids.is_empty() && type_ids.len() != token_count {
+        return Err(OnnxRuntimeError::backend(
+            "ONNX tokenizer returned mismatched segment id length",
+        ));
+    }
+    Ok(OnnxTokenizedInput {
+        input_ids: token_values(encoding.get_ids()),
+        attention_mask: attention_mask_values(encoding.get_attention_mask(), token_count)?,
+        type_ids: if type_ids.is_empty() {
+            vec![0; token_count]
+        } else {
+            token_values(type_ids)
+        },
+        token_count,
+    })
 }
 
 fn validate_token_count(token_count: usize) -> Result<(), OnnxRuntimeError> {

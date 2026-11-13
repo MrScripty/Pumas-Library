@@ -86,9 +86,10 @@ pub use onnx_runtime::{
     OnnxEmbeddingLimits, OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig,
     OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxEmbeddingUsage,
     OnnxExecutionProvider, OnnxHostEndpoint, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId,
-    OnnxModelPath, OnnxOutputTensorSelection, OnnxRuntimeError, OnnxRuntimeErrorCode,
-    OnnxRuntimeLibrary, OnnxRuntimeSession, OnnxSessionManager, OnnxSessionState,
-    OnnxSessionStatus, OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer,
+    OnnxModelPath, OnnxOutputTensorSelection, OnnxRerankRequest, OnnxRerankResponse,
+    OnnxRerankScore, OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeLibrary,
+    OnnxRuntimeSession, OnnxScoreActivation, OnnxSessionManager, OnnxSessionState,
+    OnnxSessionStatus, OnnxSessionTask, OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer,
     RealOnnxEmbeddingBackend, RemoteOnnxEmbeddingBackend,
 };
 pub use plugins::{PluginConfig, PluginLoader};
@@ -111,8 +112,8 @@ pub use system::{
 
 // Re-export builder from api module
 pub use api::{
-    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
-    PumasApiBuilder,
+    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, DeclarationResolution,
+    InstanceProfile, PumasApiBuilder,
 };
 #[cfg(feature = "s3")]
 pub use api::{

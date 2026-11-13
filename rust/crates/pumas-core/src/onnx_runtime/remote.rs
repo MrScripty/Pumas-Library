@@ -16,12 +16,13 @@ use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::host_protocol::{
-    host_api_token, OnnxHostLoadRequest, OnnxHostUnloadRequest, EMBED_PATH, LOAD_PATH,
+    host_api_token, OnnxHostLoadRequest, OnnxHostUnloadRequest, EMBED_PATH, LOAD_PATH, RERANK_PATH,
     SESSIONS_PATH, TOKEN_HEADER, UNLOAD_PATH,
 };
 use super::{
     OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest,
-    OnnxModelId, OnnxOperationLease, OnnxRuntimeError, OnnxSessionStatus,
+    OnnxModelId, OnnxOperationLease, OnnxRerankRequest, OnnxRerankResponse, OnnxRuntimeError,
+    OnnxSessionStatus,
 };
 
 const HOST_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -244,6 +245,7 @@ impl RemoteOnnxEmbeddingBackend {
             model_root: request.model_path.root().to_path_buf(),
             model_path: request.model_path.path().to_path_buf(),
             embedding_dimensions: request.options.embedding_dimensions,
+            task: request.options.task,
         };
         let status: OnnxSessionStatus = self.post(&host, LOAD_PATH, &body).await?;
         self.sessions()?.insert(
@@ -334,6 +336,24 @@ impl OnnxEmbeddingBackend for RemoteOnnxEmbeddingBackend {
             marker.store(true, Ordering::Release);
         }
         self.post(&host, EMBED_PATH, &request).await
+    }
+
+    async fn rerank_leased(
+        &self,
+        request: OnnxRerankRequest,
+        admission: Option<&AtomicBool>,
+        lease: OnnxOperationLease,
+    ) -> Result<OnnxRerankResponse, OnnxRuntimeError> {
+        let result = async {
+            let host = self.host_of(&request.model_id)?;
+            if let Some(marker) = admission {
+                marker.store(true, Ordering::Release);
+            }
+            self.post(&host, RERANK_PATH, &request).await
+        }
+        .await;
+        drop(lease);
+        result
     }
 }
 

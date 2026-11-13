@@ -17,6 +17,8 @@ mod openai_gateway_images;
 #[cfg(feature = "inference-plugins")]
 mod openai_gateway_onnx;
 #[cfg(feature = "inference-plugins")]
+mod openai_gateway_torch_text;
+#[cfg(feature = "inference-plugins")]
 mod plugins;
 mod process;
 #[cfg(feature = "inference-plugins")]
@@ -898,6 +900,18 @@ async fn dispatch_admitted_command(
             .await
             .map(Box::new)
             .map(RpcOutcome::LinksForModel),
+        RpcCommand::ResolveModelDeclarations { model_id, repo_id } => state
+            .api
+            .resolve_model_declarations(&model_id, repo_id.as_deref())
+            .await
+            .map(crate::contract::ModelDeclarationsOutcome::new)
+            .map(RpcOutcome::ModelDeclarations),
+        RpcCommand::FinishRetainedImport { model_id } => state
+            .api
+            .finish_retained_import(&model_id)
+            .await
+            .map(crate::contract::FinishRetainedImportOutcome::new)
+            .map(RpcOutcome::FinishRetainedImport),
         RpcCommand::DeleteModelWithCascade { model_id } => {
             links::delete_model_with_cascade(state, &model_id)
                 .await
@@ -1786,6 +1800,13 @@ async fn dispatch_method(
         }
         "refetch_model_metadata_from_hf" => {
             models::refetch_model_metadata_from_hf(state, params).await
+        }
+        "get_model_documents" => models::get_model_documents(state, params).await,
+        "backfill_model_companion_files" => {
+            models::backfill_model_companion_files(state, params).await
+        }
+        "backfill_library_companion_files" => {
+            models::backfill_library_companion_files(state, params).await
         }
         "adopt_orphan_models" => models::adopt_orphan_models(state, params).await,
         "import_model_in_place" => models::import_model_in_place(state, params).await,
@@ -3322,7 +3343,7 @@ exit 9
                     };
                     format!(
                         r#"#!/bin/sh
-if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file'; then
+if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from gguf.quants import dequantize; from jinja2.sandbox import ImmutableSandboxedEnvironment; from safetensors import safe_open; from safetensors.numpy import save_file'; then
  printf 'probe\n' >> "$0.probes"
  printf 'private-probe-diagnostic\n' >&2
  {terminal}

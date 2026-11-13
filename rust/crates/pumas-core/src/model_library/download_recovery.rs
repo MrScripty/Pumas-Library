@@ -538,7 +538,10 @@ impl DownloadDestinationRoot {
         }
         #[cfg(windows)]
         if relative.is_none() {
-            eprintln!("DIAG resolve no root ancestor for {:?} (root {:?} {:?})", path, self.0.root_canonical_path, self.0.root_identity);
+            eprintln!(
+                "DIAG resolve no root ancestor for {:?} (root {:?} {:?})",
+                path, self.0.root_canonical_path, self.0.root_identity
+            );
         }
         let relative = relative.ok_or_else(|| invalid_capability_path())?;
         let text = relative.to_str().ok_or_else(|| invalid_capability_path())?;
@@ -658,7 +661,10 @@ impl RecoveryRoot {
         let canonical = std::fs::canonicalize(&self.root_source_path)?;
         #[cfg(windows)]
         if canonical != self.root_canonical_path {
-            eprintln!("DIAG physical canonical {:?} != {:?} (source {:?})", canonical, self.root_canonical_path, self.root_source_path);
+            eprintln!(
+                "DIAG physical canonical {:?} != {:?} (source {:?})",
+                canonical, self.root_canonical_path, self.root_source_path
+            );
         }
         if canonical != self.root_canonical_path {
             return Err(invalid_capability_path());
@@ -1795,7 +1801,9 @@ fn validate_import_descendants(
             // Readdir spelling can differ on a Unicode-normalizing filesystem.
             // The observed bindings were checked above; match their held
             // physical identities rather than guessing filename equivalence.
-            let held = known.get(&identity).ok_or_else(|| invalid_capability_path())?;
+            let held = known
+                .get(&identity)
+                .ok_or_else(|| invalid_capability_path())?;
             validate_import_descendants(&held.directory, known)?;
         }
     }

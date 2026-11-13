@@ -213,6 +213,15 @@ impl DownloadRecoveryDestination {
         self.require_import_bound()?;
         let (observed, _) = self.observe_import_payload()?;
         if !expected.same_bindings(&observed) {
+            #[cfg(windows)]
+            {
+                eprintln!(
+                    "DIAG bindings expected {expected:?}\nDIAG bindings observed {observed:?}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let again = self.observe_import_payload().map(|(o, _)| o);
+                eprintln!("DIAG bindings after 500ms {again:?}");
+            }
             return Err(invalid_capability_path().into());
         }
         Ok(())
@@ -386,7 +395,8 @@ fn observe_directory(
             if !metadata.is_file() || metadata.is_symlink() {
                 return Err(invalid_capability_path().into());
             }
-            let physical = filesystem_identity(&metadata).ok_or_else(|| invalid_capability_path())?;
+            let physical =
+                filesystem_identity(&metadata).ok_or_else(|| invalid_capability_path())?;
             identity.files.insert(
                 portable,
                 ImportFileIdentity {

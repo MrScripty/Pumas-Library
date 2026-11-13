@@ -17,7 +17,10 @@ Object.defineProperty(window, 'matchMedia', {
     matches: false,
     media: query,
     onchange: null,
+    // The MediaQueryList type still declares the legacy listener pair.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- mock of the legacy API
     addListener: vi.fn(),
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- mock of the legacy API
     removeListener: vi.fn(),
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),

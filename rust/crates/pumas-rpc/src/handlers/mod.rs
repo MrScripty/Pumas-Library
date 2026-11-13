@@ -59,7 +59,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::{
-        sse::{Event, KeepAlive, Sse},
+        sse::{Event, KeepAlive, KeepAliveStream, Sse},
         IntoResponse, Response,
     },
     Json,
@@ -163,7 +163,9 @@ pub async fn handle_health() -> impl IntoResponse {
 
 /// Tag only the five read-only update producers. Inference and retention
 /// responses retain their operation and delivery obligations.
-fn observation_response(sse: Sse<BoxStream<'static, Result<Event, Infallible>>>) -> Response {
+fn observation_response(
+    sse: Sse<KeepAliveStream<BoxStream<'static, Result<Event, Infallible>>>>,
+) -> Response {
     let mut response = sse.into_response();
     response
         .extensions_mut()

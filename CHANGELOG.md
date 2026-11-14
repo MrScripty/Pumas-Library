@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Pumas reads an optional `PUMAS_GITHUB_TOKEN` and sends it only to the
+  GitHub API (`api.github.com`) when listing or resolving runtime releases,
+  which lifts the anonymous rate limit. Pumas never stores the token, never
+  logs it, and never passes it to runtimes or other child processes. Without
+  it, requests stay anonymous as before. CI passes the job's short-lived
+  `github.token`, so no credential is committed.
+
 ### Fixed
 
 - A copied import no longer reaches the file watcher as an external change,

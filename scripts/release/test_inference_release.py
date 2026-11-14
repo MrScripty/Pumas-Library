@@ -26,6 +26,16 @@ STAGE_SPEC.loader.exec_module(desktop)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_child_environment_passes_only_the_github_api_token(self):
+        ambient = {"PUMAS_GITHUB_TOKEN": "ghs_fixture", "GITHUB_TOKEN": "x", "HF_TOKEN": "y"}
+        with patch.dict(os.environ, ambient):
+            environment = support.child_environment(tempfile.gettempdir())
+        self.assertEqual(environment["PUMAS_GITHUB_TOKEN"], "ghs_fixture")
+        self.assertNotIn("GITHUB_TOKEN", environment)
+        self.assertNotIn("HF_TOKEN", environment)
+        with patch.dict(os.environ, {"PUMAS_GITHUB_TOKEN": ""}):
+            self.assertNotIn("PUMAS_GITHUB_TOKEN", support.child_environment(tempfile.gettempdir()))
+
     def test_only_shared_libraries_count_as_a_mapped_onnx_runtime(self):
         # ONNX Runtime 1.31 maps its own cache database; it is not a library.
         for name, expected in [

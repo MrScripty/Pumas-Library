@@ -222,6 +222,7 @@ mod tests {
             "PYTHONSTARTUP",
             "HF_TOKEN",
             "PUMAS_RELEASE_API_TOKEN",
+            "PUMAS_GITHUB_TOKEN",
             "AWS_SECRET_ACCESS_KEY",
         ]
         .map(|name| (OsString::from(name), OsString::from("value")));

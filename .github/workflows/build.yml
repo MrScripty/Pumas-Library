@@ -291,6 +291,8 @@ jobs:
         run: python scripts/release/synthetic_onnx_fixture.py --output-dir "${{ runner.temp }}/native-synthetic-fixture"
       - name: Verify untrained model lifecycle on ONNX Runtime installed by the packaged Pumas
         timeout-minutes: 20
+        env:
+          PUMAS_GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/release/verify-packaged-onnx.py "${{ runner.temp }}/inference-candidate/extracted/${{ matrix.binary }}" "${{ runner.temp }}/native-synthetic-fixture" > "${{ runner.temp }}/inference-candidate/native-synthetic-lifecycle.log"
       - name: Verify required inference archive
         run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/inference-candidate" headless-inference-${{ matrix.check }}
@@ -359,6 +361,7 @@ jobs:
         timeout-minutes: 20
         env:
           EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PUMAS_GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail

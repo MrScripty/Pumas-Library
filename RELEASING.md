@@ -42,7 +42,10 @@ match source manifests exactly; the manifests identify `0.8.0`.
    against the manifests automatically.
 4. Complete local QA below, push the candidate commit, and create its version
    tag. Inspect every platform result produced for that exact tag.
-5. Review the `release-candidate` workflow artifact. It contains all sixteen
+5. Review the `release-candidate` workflow artifact. After the tag build
+   succeeds, the Draft release workflow attaches the same files to the tag's
+   draft GitHub release. Publishing that draft is the maintainer's decision.
+   The artifact contains all sixteen
    required files selected by [the artifact plan](scripts/release/artifact-plan.json):
    five full desktop installers (GUI with inference plugins), five
    no-inference desktop installers (GUI with an inference-disabled backend),
@@ -50,9 +53,11 @@ match source manifests exactly; the manifests identify `0.8.0`.
    archives for embedding. It also carries
    checksums over those final bytes.
 
-The workflow deliberately assembles **candidates**, with read-only repository
-permissions. It does not create or publish a GitHub release. Publication requires
-all the release acceptance evidence below; green compilation alone is inadequate.
+The Build workflow assembles **candidates** with read-only repository
+permissions. Only the Draft release workflow can write, and it only attaches a
+successful tag build's verified files to that tag's draft release. Nothing in CI
+publishes a release. Publication requires all the release acceptance evidence
+below; green compilation alone is inadequate.
 
 ## Local QA
 

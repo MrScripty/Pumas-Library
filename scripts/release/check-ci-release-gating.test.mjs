@@ -292,6 +292,7 @@ test('dependency audit is advisory on reviews, blocking on candidates and feeds 
 test('every checkout drops its credentials; no job pushes', () => {
   for (const file of ['build.yml', 'scorecard.yml']) {
     const text = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
+    // draft-release.yml is the single writer; it has its own contract below.
     assert.doesNotMatch(text, /git push|contents: write/, file);
     const checkouts = [...text.matchAll(/uses: actions\/checkout@[0-9a-f]{40} # \S+\n((?: {8,}.*\n)*)/g)];
     assert.ok(checkouts.length > 0, file);
@@ -327,4 +328,20 @@ test('the desktop contract has one tracked copy, checked against a fresh export'
     assert.ok(!fs.existsSync(path.join(root, consumer, 'src/generated')), `${consumer} keeps its own generated contract copy`);
   }
   assert.match(job('build-frontend'), /^      - run: pnpm --dir electron check:desktop-contract$/m);
+});
+
+test('only the draft-release workflow writes, and only to a draft of a successful tag build', () => {
+  const draft = fs.readFileSync(path.join(root, '.github/workflows/draft-release.yml'), 'utf8');
+  assert.match(draft, /^on:\n  workflow_run:\n    workflows: \[Build\]\n    types: \[completed\]\n\n/m);
+  assert.match(draft, /^permissions:\n  contents: read\n/m);
+  assert.match(draft, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(draft, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(draft, /startsWith\(github\.event\.workflow_run\.head_branch, 'v'\)/);
+  assert.equal([...draft.matchAll(/contents: write/g)].length, 1);
+  // It never runs repository code, never pushes and never publishes.
+  assert.doesNotMatch(draft, /actions\/checkout|git push|git tag|--draft=false|--latest|gh release edit|gh release delete|secrets\./);
+  assert.match(draft, /sha256sum --check --strict checksums-sha256\.txt/);
+  assert.match(draft, /gh release create "\$TAG" --draft --verify-tag/);
+  assert.match(draft, /already published; its assets are never replaced/);
+  assert.ok(draft.indexOf('[ "$tagged" = "$SOURCE" ]') < draft.indexOf('gh release upload'));
 });

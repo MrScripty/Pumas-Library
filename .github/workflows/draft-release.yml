@@ -1,0 +1,60 @@
+name: Draft release
+
+# Attach a version tag's verified release candidate to that tag's DRAFT
+# GitHub release. The Build workflow stays read-only; this workflow runs only
+# after a successful tag build, never builds or checks out code, and never
+# publishes: the maintainer publishes the draft.
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: draft-release-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  attach:
+    name: Attach release candidate to draft release
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-candidate
+          path: release-candidate
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Verify the candidate's checksums
+        working-directory: release-candidate
+        run: sha256sum --check --strict checksums-sha256.txt
+      - name: Attach to the draft release without publishing it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          SOURCE: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo "::error::not a version tag: $TAG"; exit 1; }
+          # The tag must still name the commit that was built.
+          tagged="$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)"
+          [ "$tagged" = "$SOURCE" ] || { echo "::error::$TAG now names $tagged, not the built $SOURCE"; exit 1; }
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          case "$state" in
+            missing) gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes "Release notes: see CHANGELOG.md." ;;
+            true) ;;
+            *) echo "::error::$TAG is already published; its assets are never replaced"; exit 1 ;;
+          esac
+          gh release upload "$TAG" release-candidate/* --clobber

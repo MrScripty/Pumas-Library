@@ -246,9 +246,13 @@ intended to decide a property.
 `release-candidate` runs only after every candidate-run QA job succeeds. It
 checks that the downloaded set is exactly the sixteen files in
 `scripts/release/artifact-plan.json`, then writes SPDX inventories, unsigned
-provenance, notices and SHA-256 checksums over the final files. Candidate
-assembly never publishes a GitHub release. See [Releasing](../RELEASING.md) for
-the remaining publication obligations.
+provenance, notices and SHA-256 checksums over the final files. The Build
+workflow stays read-only. After a successful version-tag build, the separate
+`draft-release.yml` workflow checks those checksums and that the tag still
+names the built commit. It then attaches the files to the tag's **draft**
+GitHub release, creating the draft if needed. It never publishes, and it
+refuses to touch a release that is already published. See
+[Releasing](../RELEASING.md) for the remaining publication obligations.
 
 ### Pending Higher-Fidelity Claims
 

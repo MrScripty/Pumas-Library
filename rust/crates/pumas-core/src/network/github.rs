@@ -36,6 +36,44 @@ use url::Url;
 // Re-export for convenience
 pub use crate::models::{GitHubAsset, GitHubRelease};
 
+/// Optional token for GitHub API requests. It raises the anonymous rate limit
+/// and is never stored by Pumas; an unset or empty variable means anonymous.
+pub const GITHUB_API_TOKEN_ENV: &str = "PUMAS_GITHUB_TOKEN";
+
+/// A GitHub API token. It is sent only to the GitHub API origin and never
+/// appears in `Debug` output, logs or errors.
+#[derive(Clone)]
+struct GitHubApiToken(String);
+
+impl std::fmt::Debug for GitHubApiToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("GitHubApiToken(<redacted>)")
+    }
+}
+
+impl GitHubApiToken {
+    /// Accept a token only for the real GitHub API origin, and only when it
+    /// is a single header-safe word. Anything else stays anonymous.
+    fn for_api_base(api_base: &str, raw: Option<std::ffi::OsString>) -> Option<Self> {
+        if api_base.trim_end_matches('/') != NetworkConfig::GITHUB_API_BASE {
+            return None;
+        }
+        let raw = raw?;
+        let Some(value) = raw.to_str().map(str::trim) else {
+            warn!("{GITHUB_API_TOKEN_ENV} is not valid UTF-8; using anonymous GitHub API requests");
+            return None;
+        };
+        if value.is_empty() {
+            return None;
+        }
+        if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
+            warn!("{GITHUB_API_TOKEN_ENV} contains whitespace or control characters; using anonymous GitHub API requests");
+            return None;
+        }
+        Some(Self(value.to_string()))
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredReleasesCache {
     #[serde(flatten)]
@@ -507,6 +545,7 @@ pub struct GitHubClient {
     loopback_fixture: bool,
     http: Arc<HttpClient>,
     api_base: String,
+    api_token: Option<GitHubApiToken>,
     cache: ReleasesCache,
     /// Whether we're currently fetching releases.
     is_fetching: AtomicBool,
@@ -608,12 +647,23 @@ impl GitHubClient {
     }
 
     fn with_config(cache_dir: PathBuf, ttl: Duration, api_base: String) -> Result<Self> {
-        Ok(Self::with_http(
-            HttpClient::new()?,
-            cache_dir,
-            ttl,
-            api_base,
-        ))
+        let api_token =
+            GitHubApiToken::for_api_base(&api_base, std::env::var_os(GITHUB_API_TOKEN_ENV));
+        let mut client = Self::with_http(HttpClient::new()?, cache_dir, ttl, api_base);
+        client.api_token = api_token;
+        Ok(client)
+    }
+
+    /// Headers for a request to the GitHub API origin.
+    fn api_headers(&self) -> Vec<(String, String)> {
+        let mut headers = vec![(
+            "Accept".to_string(),
+            "application/vnd.github.v3+json".to_string(),
+        )];
+        if let Some(GitHubApiToken(token)) = &self.api_token {
+            headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+        }
+        headers
     }
 
     fn with_http(http: HttpClient, cache_dir: PathBuf, ttl: Duration, api_base: String) -> Self {
@@ -622,6 +672,7 @@ impl GitHubClient {
             loopback_fixture: false,
             http: Arc::new(http),
             api_base: api_base.trim_end_matches('/').to_string(),
+            api_token: None,
             cache: ReleasesCache::new(cache_dir, ttl),
             is_fetching: AtomicBool::new(false),
             fetch_lock: RwLock::new(()),
@@ -1005,19 +1056,15 @@ impl GitHubClient {
             .with_base_delay(Duration::from_secs(2));
         let http = self.http.clone();
         let url_string = url.to_string();
+        let headers = self.api_headers();
 
         let (result, stats) = retry_async(
             &retry_config,
             || {
                 let http = http.clone();
                 let url = url_string.clone();
-                async move {
-                    let headers = vec![(
-                        "Accept".to_string(),
-                        "application/vnd.github.v3+json".to_string(),
-                    )];
-                    http.get_with_headers(&url, &headers).await
-                }
+                let headers = headers.clone();
+                async move { http.get_with_headers(&url, &headers).await }
             },
             |error| error.is_retryable(),
         )
@@ -1207,19 +1254,15 @@ impl GitHubClient {
 
         let http = self.http.clone();
         let url_clone = url.clone();
+        let headers = self.api_headers();
 
         let (result, stats) = retry_async(
             &retry_config,
             || {
                 let http = http.clone();
                 let url = url_clone.clone();
-                async move {
-                    let headers = vec![(
-                        "Accept".to_string(),
-                        "application/vnd.github.v3+json".to_string(),
-                    )];
-                    http.get_with_headers(&url, &headers).await
-                }
+                let headers = headers.clone();
+                async move { http.get_with_headers(&url, &headers).await }
             },
             |e| e.is_retryable(),
         )
@@ -1304,6 +1347,44 @@ impl WebSource for GitHubClient {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn api_token_applies_only_to_the_github_api_origin() {
+        use super::GitHubApiToken;
+        let token = Some(std::ffi::OsString::from("  ghs_example123  "));
+        let accepted = GitHubApiToken::for_api_base("https://api.github.com/", token.clone())
+            .expect("token for the GitHub API");
+        assert_eq!(accepted.0, "ghs_example123");
+        assert_eq!(format!("{accepted:?}"), "GitHubApiToken(<redacted>)");
+        assert!(GitHubApiToken::for_api_base("http://127.0.0.1:9/api", token).is_none());
+        for rejected in ["", "   ", "two words", "line\nbreak"] {
+            assert!(
+                GitHubApiToken::for_api_base("https://api.github.com", Some(rejected.into()))
+                    .is_none(),
+                "{rejected:?}"
+            );
+        }
+        assert!(GitHubApiToken::for_api_base("https://api.github.com", None).is_none());
+    }
+
+    #[test]
+    fn api_headers_carry_the_token_only_when_present() {
+        let root = TempDir::new().unwrap();
+        let mut client = GitHubClient::with_http(
+            HttpClient::new().unwrap(),
+            root.path().to_path_buf(),
+            Duration::from_secs(60),
+            "https://api.github.com".into(),
+        );
+        assert!(client
+            .api_headers()
+            .iter()
+            .all(|(name, _)| name != "Authorization"));
+        client.api_token = Some(super::GitHubApiToken("ghs_example".into()));
+        assert!(client
+            .api_headers()
+            .contains(&("Authorization".into(), "Bearer ghs_example".into())));
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use tempfile::TempDir;

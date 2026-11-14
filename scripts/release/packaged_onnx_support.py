@@ -115,6 +115,12 @@ def child_environment(root):
             WINDIR=buffer.value,
             PATH=str(Path(buffer.value) / "System32"),
         )
+    # The GitHub API token is the one deliberate pass-through: Pumas sends it
+    # only to the GitHub API, and it lifts the shared runner's anonymous
+    # rate limit on the ONNX Runtime release listing.
+    token = os.environ.get("PUMAS_GITHUB_TOKEN")
+    if token:
+        environment["PUMAS_GITHUB_TOKEN"] = token
     return environment
 
 

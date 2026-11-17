@@ -119,7 +119,7 @@ notify = "7"
 
 # Cross-language bindings
 uniffi = "0.28"
-rustler = "0.34"
+rustler = "0.39"
 
 # Platform-specific process management (used conditionally in crates)
 nix = { version = "0.31", features = ["signal", "process"] }

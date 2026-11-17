@@ -37,7 +37,7 @@
     "@pumas/desktop-contract": "workspace:*",
     "@types/node": "^24.13.4",
     "ajv": "8.20.0",
-    "electron": "43.8.1",
+    "electron": "45.3.2",
     "electron-builder": "26.18.0",
     "esbuild": "0.28.2",
     "eslint": "^9.39.5",

@@ -110,7 +110,7 @@ governor = "0.10"
 uuid = { version = "1", features = ["v4"] }
 
 # Directory utilities
-dirs = "5"
+dirs = "7"
 cap-std = { version = "4.0.3", default-features = false }
 cap-primitives = { version = "4.0.3", default-features = false }
 

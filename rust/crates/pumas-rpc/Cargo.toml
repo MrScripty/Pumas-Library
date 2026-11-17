@@ -37,7 +37,7 @@ tower-http = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "=0.23.1"
-crc32fast = "=1.5.4"
+crc32fast = "=1.5.5"
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 # Safe API; build the checksum-pinned bundled libjpeg-turbo statically by default.
 turbojpeg = { version = "=1.5.1", default-features = false, features = ["cmake"] }

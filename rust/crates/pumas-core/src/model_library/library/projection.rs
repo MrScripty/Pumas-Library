@@ -591,6 +591,7 @@ fn canonical_weight_format(value: &str) -> Option<&'static str> {
         "ggml" => Some("ggml"),
         "safetensors" => Some("safetensors"),
         "onnx" => Some("onnx"),
+        "basalt" => Some("basalt"),
         "pt" | "pth" | "ckpt" | "bin" | "pickle" | "pkl" => Some("pickle"),
         _ => None,
     }
@@ -639,6 +640,28 @@ fn normalize_quant_token(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn basalt_pack_projects_format_for_imported_and_preexisting_catalog_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "llm/inkling2/inkling-mini";
+        let metadata = ModelMetadata {
+            files: Some(vec![crate::models::ModelFileInfo {
+                name: "inkling-nvfp4.basalt".into(),
+                original_name: None,
+                size: Some(19_734_300_551),
+                sha256: None,
+                blake3: None,
+            }]),
+            ..Default::default()
+        };
+        let mut record = metadata_to_record(id, dir.path(), &metadata);
+        assert_eq!(record.metadata[PRIMARY_FORMAT_METADATA_KEY], "basalt");
+
+        record.metadata[PRIMARY_FORMAT_METADATA_KEY] = Value::Null;
+        project_display_fields_for_record(&mut record);
+        assert_eq!(record.metadata[PRIMARY_FORMAT_METADATA_KEY], "basalt");
+    }
 
     #[test]
     fn payload_freshness_excludes_only_the_root_publication_receipt() {

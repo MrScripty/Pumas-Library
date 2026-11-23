@@ -5,6 +5,7 @@ import type { ModelServeErrorCode } from '../types/api-serving';
 import type { RouterProfileSyncStatus } from '../types/api-serving';
 import { decodeRouterProfileSyncStatus } from '@pumas/desktop-contract';
 import { getLogger } from '../utils/logger';
+import { runtimeProviderDescriptors } from '../utils/runtimeProviderDescriptors';
 
 const logger = getLogger('useServingStatus');
 const SERVING_STATUS_SUBSCRIPTION_UNAVAILABLE =
@@ -23,7 +24,6 @@ export type ServingControlObservation =
   | { kind: 'known'; rows: ServingControlStatus[] }
   | { kind: 'unavailable'; message: string };
 
-const PROVIDERS = new Set(['ollama', 'llama_cpp', 'onnx_runtime', 'torch']);
 const LOAD_STATES = new Set(['requested', 'loading', 'loaded', 'unloading', 'unloaded', 'failed']);
 const ERROR_CODES = new Set<ModelServeErrorCode>([
   'invalid_request',
@@ -61,7 +61,7 @@ function readControlObservation(value: unknown): ServingControlStatus[] | null {
     if (
       typeof row['model_id'] !== 'string' || !row['model_id'] ||
       typeof row['profile_id'] !== 'string' || !row['profile_id'] ||
-      typeof row['provider'] !== 'string' || !PROVIDERS.has(row['provider']) ||
+      typeof row['provider'] !== 'string' || !Object.hasOwn(runtimeProviderDescriptors, row['provider']) ||
       typeof row['load_state'] !== 'string' || !LOAD_STATES.has(row['load_state']) ||
       !(
         row['model_alias'] === undefined ||

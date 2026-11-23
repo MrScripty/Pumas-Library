@@ -92,8 +92,9 @@ describe('useServingStatus', () => {
     setIntervalSpy.mockRestore();
   });
 
-  it('admits Torch alongside llama.cpp without withdrawing serving controls', async () => {
+  it('admits Basalt and Torch alongside llama.cpp without withdrawing serving controls', async () => {
     const rows = [
+      { model_id: 'llm/inkling', profile_id: 'inkling', provider: 'basalt', load_state: 'loaded' },
       { model_id: 'images/z-image', profile_id: 'image', provider: 'torch', load_state: 'loaded' },
       { model_id: 'vlm/qwen', profile_id: 'vision', provider: 'llama_cpp', load_state: 'loaded' },
     ];

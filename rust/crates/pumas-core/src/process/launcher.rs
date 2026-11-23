@@ -168,6 +168,21 @@ impl BinaryLaunchConfig {
         }
     }
 
+    pub(crate) fn basalt(tag: &str, version_dir: &Path) -> Self {
+        Self {
+            tag: tag.to_owned(),
+            version_dir: version_dir.to_path_buf(),
+            binary_path: version_dir.join(".venv/bin/python"),
+            command: None,
+            extra_args: Vec::new(),
+            env_vars: HashMap::new(),
+            pid_file: version_dir.join("basalt.pid"),
+            log_file: None,
+            ready_timeout: Duration::from_secs(120),
+            health_check_url: None,
+        }
+    }
+
     /// Create a launch config for the ONNX host of an ONNX Runtime profile:
     /// `host_executable --onnx-host`, loading the installed version at
     /// `version_dir`. The listener and device-mode arguments come from the

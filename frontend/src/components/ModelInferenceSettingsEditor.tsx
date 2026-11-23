@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import type { InferenceParamSchema } from '../types/api';
 import {
@@ -18,6 +19,7 @@ interface ModelInferenceSettingsEditorProps {
   saveError: string | null;
   saveSuccess: boolean;
   saving: boolean;
+  schemaEditable: boolean;
   onAddParam: () => void;
   onNewParamChange: (
     updater: (
@@ -45,6 +47,7 @@ export function ModelInferenceSettingsEditor({
   saveError,
   saveSuccess,
   saving,
+  schemaEditable,
   onAddParam,
   onNewParamChange,
   onParamDefaultChange,
@@ -52,6 +55,7 @@ export function ModelInferenceSettingsEditor({
   onSave,
   onSetAddingParam,
 }: ModelInferenceSettingsEditorProps) {
+  const idPrefix = useId();
   return (
     <div className="space-y-4 max-h-80 overflow-y-auto">
       {inferenceSettings.length === 0 ? (
@@ -65,10 +69,12 @@ export function ModelInferenceSettingsEditor({
               .map(normalizeAllowedOption)
               .filter((option): option is SelectAllowedOption => option !== null);
 
+            const controlId = `${idPrefix}-${param.key}`;
             return (
               <div key={param.key} className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <label
+                    htmlFor={controlId}
                     className="block text-xs text-[hsl(var(--text-muted))] truncate"
                     title={param.description || param.key}
                   >
@@ -82,6 +88,7 @@ export function ModelInferenceSettingsEditor({
                     </div>
                   ) : param.param_type === 'Boolean' ? (
                     <select
+                      id={controlId}
                       value={String(param.default)}
                       onChange={(event) => onParamDefaultChange(index, event.target.value)}
                       className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
@@ -91,10 +98,12 @@ export function ModelInferenceSettingsEditor({
                     </select>
                   ) : param.param_type === 'String' && allowedOptions.length > 0 ? (
                     <select
+                      id={controlId}
                       value={normalizeStringDefault(param.default)}
                       onChange={(event) => onParamDefaultChange(index, event.target.value)}
                       className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
                     >
+                      {param.key === 'reasoning_effort' && <option value="">Model default</option>}
                       {allowedOptions.map((option) => (
                         <option
                           key={`${option.label}:${option.value}`}
@@ -106,6 +115,7 @@ export function ModelInferenceSettingsEditor({
                     </select>
                   ) : (
                     <input
+                      id={controlId}
                       type={param.param_type === 'String' ? 'text' : 'number'}
                       value={param.default == null ? '' : String(param.default)}
                       onChange={(event) => onParamDefaultChange(index, event.target.value)}
@@ -117,20 +127,22 @@ export function ModelInferenceSettingsEditor({
                     />
                   )}
                 </div>
-                <button
-                  onClick={() => onRemoveParam(index)}
-                  className="p-1 mt-4 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.1)] rounded"
-                  title="Remove parameter"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {schemaEditable && (
+                  <button
+                    onClick={() => onRemoveParam(index)}
+                    className="p-1 mt-4 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.1)] rounded"
+                    title="Remove parameter"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {addingParam ? (
+      {schemaEditable && (addingParam ? (
         <div className="space-y-2 p-3 bg-[hsl(var(--surface-high)/0.5)] rounded border border-[hsl(var(--border-default))]">
           <div className="grid grid-cols-3 gap-2">
             <input
@@ -191,7 +203,7 @@ export function ModelInferenceSettingsEditor({
         >
           <Plus className="w-3 h-3" /> Add Parameter
         </button>
-      )}
+      ))}
 
       <div className="flex items-center gap-3 pt-2 border-t border-[hsl(var(--border-default))]">
         <button

@@ -248,7 +248,7 @@ test('release build commands never enable test-support or all-features', () => {
   const rpc = fs.readFileSync(path.join(root, 'rust/crates/pumas-rpc/Cargo.toml'), 'utf8');
   assert.match(manager, /^default = \[\]$/m);
   assert.match(rpc, /^test-support = \["pumas-app-manager\?\/test-support"\]$/m);
-  assert.match(rpc, /^default = \["inference-plugins"\]$/m);
+  assert.match(rpc, /^default = \["inference-plugins", "basalt"\]$/m);
 });
 
 

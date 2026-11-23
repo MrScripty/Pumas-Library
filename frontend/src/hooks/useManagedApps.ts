@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { DEFAULT_APPS } from '../config/apps';
+import { BASALT_APP, DEFAULT_APPS } from '../config/apps';
+import { useRuntimeProviders } from './useRuntimeProviders';
 import type { SystemResources, AppConfig, AppIconState } from '../types/apps';
 
 /** Process lifecycle of an app the shell starts and stops itself. */
@@ -76,10 +77,12 @@ export function decorateManagedApps(
 
 export function useManagedApps(options: UseManagedAppsOptions) {
   const [apps, setApps] = useState<AppConfig[]>(DEFAULT_APPS);
+  const { providers } = useRuntimeProviders();
+  const basaltAvailable = providers?.some((provider) => provider.app_id === BASALT_APP.id && provider.version_managed);
 
   useEffect(() => {
-    setApps((prevApps) => decorateManagedApps(prevApps, options));
-  }, [options]);
+    setApps(decorateManagedApps(basaltAvailable ? [...DEFAULT_APPS, BASALT_APP] : DEFAULT_APPS, options));
+  }, [basaltAvailable, options]);
 
   return {
     apps,

@@ -142,8 +142,7 @@ fn parse_model_card_json(model_card_json: Option<&str>) -> Option<HashMap<String
     }
 }
 
-/// Model file extensions to consider for hash verification.
-const MODEL_EXTENSIONS: &[&str] = &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
+use super::MODEL_FILE_EXTENSIONS as MODEL_EXTENSIONS;
 
 /// Filename for model metadata in each model directory.
 const METADATA_FILENAME: &str = "metadata.json";
@@ -8365,7 +8364,8 @@ fn collect_format_hints(metadata: &ModelMetadata) -> Vec<String> {
 
     for tag in metadata.tags.iter().flatten() {
         match tag.trim().to_lowercase().as_str() {
-            "gguf" | "ggml" | "safetensors" | "pytorch" | "onnx" | "tensorrt" | "bin" => {
+            "gguf" | "ggml" | "safetensors" | "pytorch" | "onnx" | "basalt" | "tensorrt"
+            | "bin" => {
                 formats.insert(tag.trim().to_lowercase());
             }
             _ => {}
@@ -8389,6 +8389,9 @@ fn collect_format_hints(metadata: &ModelMetadata) -> Vec<String> {
             }
             Some("onnx") => {
                 formats.insert("onnx".to_string());
+            }
+            Some("basalt") => {
+                formats.insert("basalt".to_string());
             }
             Some("bin") | Some("pt") | Some("pth") => {
                 formats.insert("pytorch".to_string());

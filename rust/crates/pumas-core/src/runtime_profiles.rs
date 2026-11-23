@@ -112,12 +112,16 @@ pub struct RuntimeProviderAdapters {
 
 impl RuntimeProviderAdapters {
     pub fn builtin() -> Self {
-        Self::from_adapters(vec![
-            Arc::new(OllamaRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
-            Arc::new(LlamaCppRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
-            Arc::new(OnnxRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
-            Arc::new(TorchRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
-        ])
+        let mut adapters: Vec<Arc<dyn RuntimeProviderAdapter>> = vec![
+            Arc::new(OllamaRuntimeProviderAdapter),
+            Arc::new(LlamaCppRuntimeProviderAdapter),
+            Arc::new(OnnxRuntimeProviderAdapter),
+            Arc::new(TorchRuntimeProviderAdapter),
+        ];
+        if crate::basalt_distribution::available() {
+            adapters.push(Arc::new(BasaltRuntimeProviderAdapter));
+        }
+        Self::from_adapters(adapters)
     }
 
     pub fn from_adapters(
@@ -489,6 +493,42 @@ impl RuntimeProviderAdapter for OnnxRuntimeProviderAdapter {
             return Err(PumasError::InvalidParams {
                 message: "ONNX Runtime profiles must use managed in-process lifecycle".to_string(),
             });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct BasaltRuntimeProviderAdapter;
+
+#[async_trait]
+impl RuntimeProviderAdapter for BasaltRuntimeProviderAdapter {
+    fn provider(&self) -> RuntimeProviderId {
+        RuntimeProviderId::Basalt
+    }
+
+    fn capabilities(&self) -> RuntimeProviderCapabilities {
+        RuntimeProviderCapabilities::from_behavior(&ProviderBehavior::basalt())
+    }
+
+    async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()> {
+        if let Some(endpoint) = &profile.endpoint_url {
+            let url =
+                url::Url::parse(endpoint.as_str()).map_err(|_| PumasError::InvalidParams {
+                    message: "Basalt requires a loopback HTTP runtime endpoint".into(),
+                })?;
+            if url.scheme() != "http"
+                || url.host_str() != Some("127.0.0.1")
+                || url.path() != "/"
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.query().is_some()
+                || url.fragment().is_some()
+            {
+                return Err(PumasError::InvalidParams {
+                    message: "Basalt requires a loopback HTTP runtime endpoint on 127.0.0.1".into(),
+                });
+            }
         }
         Ok(())
     }

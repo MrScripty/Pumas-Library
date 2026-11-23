@@ -31,6 +31,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod acquisition;
+pub mod basalt_distribution;
 pub mod build_info;
 pub mod cache;
 pub mod cancel;

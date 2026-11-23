@@ -107,6 +107,9 @@ async fn serve_validated(
         Some(ProviderServingAdapterKind::TorchRuntime) => {
             super::serving_torch::serve_torch_model(state, request, operation).await
         }
+        Some(ProviderServingAdapterKind::BasaltRuntime) => {
+            super::serving_basalt::serve_basalt_model(state, request, operation).await
+        }
         Some(ProviderServingAdapterKind::OnnxRuntime) => {
             serve_onnx_model(state, request, operation).await
         }
@@ -210,6 +213,18 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
                 model_alias,
             )
             .await
+        }
+        Some(ProviderUnloadBehavior::DedicatedProcess) => {
+            let stopped = state.api.stop_runtime_profile(profile_id).await;
+            Ok(serde_json::to_value(UnserveModelResponse {
+                success: true,
+                error: stopped
+                    .as_ref()
+                    .err()
+                    .map(|_| "The owned runtime profile could not be stopped".into()),
+                unloaded: stopped.unwrap_or(false),
+                snapshot: Some(current_serving_snapshot(state).await?),
+            })?)
         }
         Some(ProviderUnloadBehavior::SessionManager) => {
             unserve_onnx_model(state, command.request, profile_id, model_alias).await

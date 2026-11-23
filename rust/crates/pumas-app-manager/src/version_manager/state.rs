@@ -1055,6 +1055,7 @@ impl VersionState {
             }
             AppId::OnnxRuntime => vec![version_path
                 .join(pumas_library::onnx_runtime_distribution::library_relative_path())],
+            AppId::Basalt => vec![version_path.join(pumas_library::basalt_distribution::ENTRY)],
             // The sidecar comes from the running Pumas; a runtime is its
             // environment and records. Copies left by earlier installs are unused.
             AppId::Torch => vec![

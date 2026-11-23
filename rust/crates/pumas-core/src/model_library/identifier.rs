@@ -115,16 +115,20 @@ fn identify_model_reader_with_context<R: Read + Seek>(
         .read(&mut header)
         .map_err(|e| PumasError::io_with_path(e, path))?;
 
-    if bytes_read < 4 {
-        return Ok(ModelTypeInfo::default());
-    }
-
     // Check file extension as hint
     let extension = path
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
         .unwrap_or_default();
+
+    if extension == "basalt" || header[..bytes_read].starts_with(super::basalt_pack::MAGIC) {
+        return super::basalt_pack::identify(file, path);
+    }
+
+    if bytes_read < 4 {
+        return Ok(ModelTypeInfo::default());
+    }
 
     // Detect format from magic bytes
     let format = detect_format(&header[..bytes_read], &extension);

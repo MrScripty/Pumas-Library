@@ -27,20 +27,21 @@ export function RuntimeProfileSettingsActions({
 }: RuntimeProfileSettingsActionsProps) {
   const isExistingProfile = selectedProfileId !== null;
   const isRunning = selectedStatus?.state === 'running' || selectedStatus?.state === 'starting';
+  const startsFromModel =
+    draft.provider_mode === 'llama_cpp_dedicated' || draft.provider_mode === 'basalt_serve';
   const canStartFromProfile =
     isExistingProfile &&
     isManagedProfile &&
-    draft.provider_mode !== 'llama_cpp_dedicated' &&
+    !startsFromModel &&
     !isRunning;
   const canStopProfile = isExistingProfile && isManagedProfile && isRunning;
-  const showsRuntimeAction =
-    selectedProfileId && isManagedProfile && draft.provider_mode !== 'llama_cpp_dedicated';
+  const showsRuntimeAction = isExistingProfile && isManagedProfile && !startsFromModel;
 
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="text-xs text-[hsl(var(--launcher-text-muted))]">
         {`State: ${runtimeStatusLabel(selectedStatus)}`}
-        {draft.provider_mode === 'llama_cpp_dedicated' && isManagedProfile && (
+        {startsFromModel && isManagedProfile && (
           <span className="ml-2">Dedicated profiles start from a model&apos;s Serving page.</span>
         )}
       </div>

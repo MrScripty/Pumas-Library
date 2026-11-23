@@ -22,6 +22,9 @@ pub fn default_inference_settings(
     file_format: &str,
     subtype: Option<&str>,
 ) -> Option<Vec<InferenceParamSchema>> {
+    if file_format == "basalt" {
+        return Some(basalt_inference_settings());
+    }
     match model_type {
         "llm" => {
             let is_dllm = subtype == Some("dllm");
@@ -224,6 +227,161 @@ fn is_qwen_image_text_to_image(metadata: &ModelMetadata) -> bool {
         let lower = value.to_ascii_lowercase();
         lower.contains("qwen-image") && !lower.contains("edit")
     })
+}
+
+/// Basalt model defaults. A null value delegates to the model pack or server.
+pub fn basalt_inference_settings() -> Vec<InferenceParamSchema> {
+    use ParamType::{Integer, Number};
+    let mut params: Vec<_> = [
+        ("temperature", "Temperature", Number, 0.0, Some(2.0)),
+        ("top_p", "Top P", Number, 0.0, Some(1.0)),
+        ("top_k", "Top K", Integer, -1.0, Some(f64::from(i32::MAX))),
+        ("min_p", "Min P", Number, 0.0, Some(1.0)),
+        (
+            "repetition_penalty",
+            "Repetition Penalty",
+            Number,
+            0.0,
+            None,
+        ),
+        (
+            "presence_penalty",
+            "Presence Penalty",
+            Number,
+            -2.0,
+            Some(2.0),
+        ),
+        (
+            "frequency_penalty",
+            "Frequency Penalty",
+            Number,
+            -2.0,
+            Some(2.0),
+        ),
+        (
+            "seed",
+            "Seed",
+            Integer,
+            -9_007_199_254_740_991.0,
+            Some(9_007_199_254_740_991.0),
+        ),
+        (
+            "max_tokens",
+            "Maximum Output Tokens",
+            Integer,
+            1.0,
+            Some(1_048_576.0),
+        ),
+    ]
+    .into_iter()
+    .map(|(key, label, param_type, min, max)| InferenceParamSchema {
+        key: key.into(),
+        label: label.into(),
+        param_type,
+        default: serde_json::Value::Null,
+        description: Some(if matches!(key, "top_p" | "repetition_penalty") {
+            "Enter a positive value, or leave blank to use the model default".into()
+        } else {
+            "Leave blank to use the model default".into()
+        }),
+        constraints: Some(ParamConstraints {
+            min: Some(min),
+            max,
+            allowed_values: None,
+        }),
+    })
+    .collect();
+    params.insert(
+        0,
+        InferenceParamSchema {
+            key: "reasoning_effort".into(),
+            label: "Thinking Level".into(),
+            param_type: ParamType::String,
+            default: serde_json::Value::Null,
+            description: Some("Use the model's default thinking level or choose a level".into()),
+            constraints: Some(ParamConstraints {
+                min: None,
+                max: None,
+                allowed_values: Some(
+                    ["none", "minimal", "low", "medium", "high", "max"]
+                        .map(|level| json!(level))
+                        .into(),
+                ),
+            }),
+        },
+    );
+    params
+}
+
+pub(crate) fn validate_basalt_settings(
+    settings: Vec<InferenceParamSchema>,
+) -> crate::Result<Vec<InferenceParamSchema>> {
+    let mut canonical = basalt_inference_settings();
+    let mut seen = std::collections::BTreeSet::new();
+    for setting in settings {
+        if !seen.insert(setting.key.clone()) {
+            return Err(basalt_setting_error(&setting.key));
+        }
+        let entry = canonical
+            .iter_mut()
+            .find(|entry| entry.key == setting.key)
+            .ok_or_else(|| basalt_setting_error(&setting.key))?;
+        if !setting.default.is_null() {
+            validate_basalt_setting(entry, &setting.default)?;
+            entry.default =
+                if entry.key == "reasoning_effort" && setting.default.as_str() == Some("xhigh") {
+                    json!("max")
+                } else {
+                    setting.default
+                };
+        }
+    }
+    Ok(canonical)
+}
+
+/// Validate the supported sampling fields in a typed model operation.
+pub fn validate_basalt_sampling_options(
+    request: &serde_json::Map<String, serde_json::Value>,
+) -> crate::Result<()> {
+    for entry in basalt_inference_settings() {
+        if let Some(value) = request.get(&entry.key) {
+            validate_basalt_setting(&entry, value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_basalt_setting(
+    entry: &InferenceParamSchema,
+    value: &serde_json::Value,
+) -> crate::Result<()> {
+    let valid = entry.constraints.as_ref().is_some_and(|constraints| {
+        if let Some(choices) = &constraints.allowed_values {
+            // Basalt also accepts xhigh as a dialect alias for max.
+            return choices.contains(value)
+                || (entry.key == "reasoning_effort" && value.as_str() == Some("xhigh"));
+        }
+        if matches!(entry.param_type, ParamType::Integer) && !value.is_i64() {
+            return false;
+        }
+        value.as_f64().is_some_and(|number| {
+            number.is_finite()
+                && constraints.min.is_none_or(|min| number >= min)
+                && constraints.max.is_none_or(|max| number <= max)
+                && (!matches!(entry.key.as_str(), "top_p" | "repetition_penalty") || number > 0.0)
+        })
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(basalt_setting_error(&entry.key))
+    }
+}
+
+fn basalt_setting_error(key: &str) -> crate::PumasError {
+    crate::PumasError::InvalidParams {
+        message: format!("Invalid Basalt value or unsupported inference setting: {key}"),
+    }
 }
 
 /// Common LLM sampling parameters shared across all LLM formats.

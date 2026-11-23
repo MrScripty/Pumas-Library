@@ -426,6 +426,7 @@ impl ModalityRequest {
                 max_tokens: Some(512),
                 temperature: None,
                 top_p: None,
+                sampling: None,
             });
         let operation = self.operation(Capability::ImageToText, input, OutputFormat::Text, options);
         projection::validate_image_to_text_request(&operation)?;
@@ -467,6 +468,7 @@ impl ModalityRequest {
                 max_tokens: None,
                 temperature: None,
                 top_p: None,
+                sampling: None,
             });
         let operation = self.operation(
             Capability::ChatGeneration,
@@ -712,12 +714,14 @@ impl ModalityRequest {
                         max_tokens: None,
                         temperature: None,
                         top_p: None,
+                        sampling: None,
                     }
                 }
                 Capability::ImageToText => OperationOptions::TextGeneration {
                     max_tokens: Some(512),
                     temperature: None,
                     top_p: None,
+                    sampling: None,
                 },
                 Capability::TextEmbedding | Capability::MultimodalEmbedding => {
                     OperationOptions::Embeddings { dimensions: None }
@@ -1181,6 +1185,7 @@ mod image_to_text_resolver_tests {
                 max_tokens: Some(0),
                 temperature: None,
                 top_p: None,
+                sampling: None,
             },
         ] {
             let mut r = request(image());
@@ -1298,11 +1303,13 @@ mod image_to_text_resolver_tests {
                 max_tokens: Some(0),
                 temperature: None,
                 top_p: None,
+                sampling: None,
             },
             OperationOptions::TextGeneration {
                 max_tokens: None,
                 temperature: Some(f64::NAN),
                 top_p: None,
+                sampling: None,
             },
         ] {
             let mut r = request(image());

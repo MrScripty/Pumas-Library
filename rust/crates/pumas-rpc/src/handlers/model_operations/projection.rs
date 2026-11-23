@@ -1,4 +1,5 @@
 use super::types::*;
+use pumas_library::models::RuntimeProviderId;
 use serde_json::{json, Value};
 
 /// Closed typed admission precedes every provider-facing effect.
@@ -246,6 +247,7 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             max_tokens,
             temperature,
             top_p,
+            ref sampling,
         } => {
             if max_tokens == Some(0) {
                 return Err(Rejection::invalid("options.max_tokens must be at least 1"));
@@ -269,6 +271,18 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             }
             if let Some(v) = top_p {
                 body["top_p"] = json!(v);
+            }
+            if let Some(sampling) = sampling {
+                let values = serde_json::to_value(sampling)
+                    .map_err(|_| Rejection::invalid("options.sampling is not valid JSON"))?;
+                let values = values
+                    .as_object()
+                    .ok_or_else(|| Rejection::invalid("options.sampling must be an object"))?;
+                pumas_library::models::validate_basalt_sampling_options(values)
+                    .map_err(|error| Rejection::invalid(error.to_string()))?;
+                for (key, value) in values {
+                    body[key] = value.clone();
+                }
             }
             body["n"] = json!(1);
         }
@@ -306,6 +320,7 @@ pub fn validate_image_to_text_request(request: &OperationRequest) -> Result<(), 
             max_tokens,
             temperature,
             top_p,
+            ..
         } if max_tokens.is_none_or(|v| v >= 1)
             && temperature.is_none_or(|v| v.is_finite() && (0.0..=2.0).contains(&v))
             && top_p.is_none_or(|v| v.is_finite() && (0.0..=1.0).contains(&v)) =>
@@ -525,7 +540,11 @@ fn truncate_embedding(mut vector: Vec<f32>, dimensions: usize) -> Option<Vec<f32
 }
 
 /// Extract only the public typed fields, validating coherence instead of forwarding provider JSON.
-pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResult, ErrorCode> {
+pub fn result(
+    request: &OperationRequest,
+    value: Value,
+    provider: RuntimeProviderId,
+) -> Result<OperationResult, ErrorCode> {
     let invalid = ErrorCode::InvalidProviderResult;
     if value.get("error").is_some() {
         return Err(ErrorCode::ProviderFailure);
@@ -540,6 +559,9 @@ pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResul
                 return Err(invalid);
             }
             let choice = &choices[0];
+            let finish_reason: FinishReason =
+                serde_json::from_value(choice.get("finish_reason").cloned().ok_or(invalid)?)
+                    .map_err(|_| invalid)?;
             let text = if matches!(
                 request.capability,
                 Capability::ChatGeneration | Capability::ImageToText
@@ -554,16 +576,20 @@ pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResul
                 {
                     return Err(invalid);
                 }
-                message
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .ok_or(invalid)?
+                match message.get("content") {
+                    Some(Value::String(text)) => text.as_str(),
+                    // Basalt uses null when the budget expires before any answer text.
+                    Some(Value::Null)
+                        if provider == RuntimeProviderId::Basalt
+                            && finish_reason == FinishReason::Length =>
+                    {
+                        ""
+                    }
+                    _ => return Err(invalid),
+                }
             } else {
                 choice.get("text").and_then(Value::as_str).ok_or(invalid)?
             };
-            let finish_reason: FinishReason =
-                serde_json::from_value(choice.get("finish_reason").cloned().ok_or(invalid)?)
-                    .map_err(|_| invalid)?;
             Ok(OperationResult::Text {
                 text: text.to_owned(),
                 finish_reason,
@@ -659,6 +685,7 @@ mod image_to_text_projection_tests {
                 max_tokens: None,
                 temperature: None,
                 top_p: None,
+                sampling: None,
             },
             stream: false,
         }
@@ -673,6 +700,7 @@ mod image_to_text_projection_tests {
             max_tokens: Some(0),
             temperature: None,
             top_p: None,
+            sampling: None,
         };
         assert_eq!(
             provider_request(&r).map_err(|rejection| rejection.code),
@@ -682,6 +710,7 @@ mod image_to_text_projection_tests {
             max_tokens: Some(u32::MAX),
             temperature: None,
             top_p: None,
+            sampling: None,
         };
         validate_image_to_text_request(&r).unwrap();
         r = request();
@@ -704,6 +733,7 @@ mod image_to_text_projection_tests {
             max_tokens: Some(2049),
             temperature: None,
             top_p: None,
+            sampling: None,
         };
         assert_eq!(provider_request(&r).unwrap()["max_tokens"], 2049);
     }
@@ -712,11 +742,27 @@ mod image_to_text_projection_tests {
     fn vision_result_projects_finite_assistant_text_and_discards_private_fields() {
         let payload = json!({"choices":[{"index":0,"message":{"role":"assistant","content":"a small red square","private":"hidden"},"finish_reason":"stop"}],"model":"private-provider-id","usage":{"private":true}});
         assert_eq!(
-            result(&request(), payload).unwrap(),
+            result(&request(), payload, RuntimeProviderId::LlamaCpp).unwrap(),
             OperationResult::Text {
                 text: "a small red square".into(),
                 finish_reason: FinishReason::Stop
             }
+        );
+    }
+
+    #[test]
+    fn basalt_reasoning_only_at_the_token_limit_projects_an_empty_truncation() {
+        let payload = json!({"choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"thinking"},"finish_reason":"length"}]});
+        assert_eq!(
+            result(&request(), payload.clone(), RuntimeProviderId::Basalt).unwrap(),
+            OperationResult::Text {
+                text: String::new(),
+                finish_reason: FinishReason::Length,
+            }
+        );
+        assert_eq!(
+            result(&request(), payload, RuntimeProviderId::LlamaCpp),
+            Err(ErrorCode::InvalidProviderResult)
         );
     }
 
@@ -732,7 +778,8 @@ mod image_to_text_projection_tests {
             assert_eq!(
                 result(
                     &request(),
-                    json!({"choices":[{"index":0,"message":message,"finish_reason":"stop"}]})
+                    json!({"choices":[{"index":0,"message":message,"finish_reason":"stop"}]}),
+                    RuntimeProviderId::LlamaCpp
                 ),
                 Err(ErrorCode::InvalidProviderResult)
             );
@@ -740,12 +787,17 @@ mod image_to_text_projection_tests {
         assert_eq!(
             result(
                 &request(),
-                json!({"choices":[{"index":0,"message":{"role":"assistant","content":"caption"},"finish_reason":"tool_calls"}]})
+                json!({"choices":[{"index":0,"message":{"role":"assistant","content":"caption"},"finish_reason":"tool_calls"}]}),
+                RuntimeProviderId::LlamaCpp
             ),
             Err(ErrorCode::InvalidProviderResult)
         );
         assert_eq!(
-            result(&request(), json!({"error":{},"choices":[]})),
+            result(
+                &request(),
+                json!({"error":{},"choices":[]}),
+                RuntimeProviderId::LlamaCpp
+            ),
             Err(ErrorCode::ProviderFailure)
         );
     }

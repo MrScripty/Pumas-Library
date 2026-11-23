@@ -77,6 +77,8 @@ comfyui-versions/
 llama-cpp-versions/
 ollama-versions/
 torch-versions/
+basalt-versions/
+.active-version-basalt
 
 
 #misc

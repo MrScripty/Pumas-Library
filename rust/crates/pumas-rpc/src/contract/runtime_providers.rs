@@ -101,7 +101,11 @@ mod tests {
             .iter()
             .map(|provider| provider["provider"].as_str().unwrap())
             .collect();
-        assert_eq!(ids, ["ollama", "llama_cpp", "onnx_runtime", "torch"]);
+        let mut expected = vec!["ollama", "llama_cpp", "onnx_runtime", "torch"];
+        if pumas_library::basalt_distribution::available() {
+            expected.push("basalt");
+        }
+        assert_eq!(ids, expected);
 
         let onnx = &providers[2];
         assert_eq!(

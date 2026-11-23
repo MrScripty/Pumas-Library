@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::{Stream, StreamExt};
+use pumas_library::models::RuntimeProviderId;
 use serde_json::Value;
 use std::{convert::Infallible, pin::Pin};
 
@@ -131,6 +132,7 @@ struct Projection {
     output_bytes: usize,
     request_id: String,
     capability: Capability,
+    provider: RuntimeProviderId,
     first: Option<StreamEvent>,
     finish: Option<FinishReason>,
     done: bool,
@@ -171,12 +173,15 @@ impl Projection {
                 .get("delta")
                 .and_then(Value::as_object)
                 .ok_or(ErrorCode::InvalidProviderResult)?;
-            if delta
-                .keys()
-                .any(|key| !matches!(key.as_str(), "role" | "content"))
-                || delta
-                    .get("role")
-                    .is_some_and(|v| !v.is_null() && v.as_str() != Some("assistant"))
+            if delta.iter().any(|(key, value)| match key.as_str() {
+                "role" | "content" => false,
+                "reasoning_content" if self.provider == RuntimeProviderId::Basalt => {
+                    !(value.is_string() || value.is_null())
+                }
+                _ => true,
+            }) || delta
+                .get("role")
+                .is_some_and(|v| !v.is_null() && v.as_str() != Some("assistant"))
             {
                 return Err(ErrorCode::InvalidProviderResult);
             }
@@ -260,6 +265,7 @@ pub fn response(
     response: Response,
     request: &OperationRequest,
     profile: &str,
+    provider: RuntimeProviderId,
     cancellation: Option<GenerationCancellation>,
 ) -> Response {
     let projection = Projection {
@@ -270,6 +276,7 @@ pub fn response(
         output_bytes: 0,
         request_id: request.request_id.clone(),
         capability: request.capability,
+        provider,
         first: Some(StreamEvent::Started {
             contract_version: CONTRACT_VERSION,
             request_id: request.request_id.clone(),

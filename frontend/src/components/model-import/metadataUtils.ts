@@ -15,7 +15,7 @@ export function getFilename(path: string): string {
 
 export function getSecurityTier(filename: string): SecurityTier {
   const lower = filename.toLowerCase();
-  if (lower.endsWith('.safetensors') || lower.endsWith('.gguf') || lower.endsWith('.onnx')) {
+  if (lower.endsWith('.safetensors') || lower.endsWith('.gguf') || lower.endsWith('.onnx') || lower.endsWith('.basalt')) {
     return 'safe';
   }
   if (lower.endsWith('.ckpt') || lower.endsWith('.pt') || lower.endsWith('.bin') || lower.endsWith('.pth')) {

@@ -603,7 +603,7 @@ impl HuggingFaceClient {
         let formats: Vec<String> = result
             .tags
             .iter()
-            .filter(|t| ["gguf", "safetensors", "pytorch", "onnx"].contains(&t.as_str()))
+            .filter(|t| ["gguf", "safetensors", "pytorch", "onnx", "basalt"].contains(&t.as_str()))
             .cloned()
             .collect();
 

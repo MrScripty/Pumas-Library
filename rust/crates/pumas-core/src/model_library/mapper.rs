@@ -588,7 +588,7 @@ impl ModelMapper {
                 .unwrap_or("")
                 .to_lowercase();
 
-            if ["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"].contains(&ext.as_str()) {
+            if crate::model_library::MODEL_FILE_EXTENSIONS.contains(&ext.as_str()) {
                 files.push(entry.path().to_path_buf());
             }
         }

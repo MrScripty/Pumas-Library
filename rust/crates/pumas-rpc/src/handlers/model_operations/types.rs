@@ -265,6 +265,9 @@ pub enum OperationOptions {
         temperature: Option<f64>,
         #[serde(default)]
         top_p: Option<f64>,
+        /// Additional generation controls for providers that expose them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sampling: Option<TextSamplingOptions>,
     },
     Embeddings {
         #[serde(default)]
@@ -289,6 +292,38 @@ pub enum OperationOptions {
         top_n: Option<usize>,
     },
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextSamplingOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ThinkingLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_p: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetition_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+}
+
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingLevel {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Max,
+}
+
 /// Languages the Cohere ASR transcription adapter accepts.
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

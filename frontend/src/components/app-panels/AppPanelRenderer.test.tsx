@@ -23,6 +23,10 @@ vi.mock('../ModelManager', () => ({
   ModelManager: () => <div>model-manager</div>,
 }));
 
+vi.mock('./BasaltPanel', () => ({
+  BasaltPanel: () => <div>basalt-panel</div>,
+}));
+
 const modelManagerProps: ModelManagerProps = {
   libraryLoadStatus: 'ready',
   excludedModels: new Set(),
@@ -59,6 +63,10 @@ function renderPanel(selectedAppId: string | null) {
         modelGroups: [],
         modelManagerProps,
       }}
+      basalt={{
+        ...sharedVersionProps,
+        modelManagerProps,
+      }}
       onnxRuntime={{
         ...sharedVersionProps,
         modelManagerProps,
@@ -74,6 +82,12 @@ function renderPanel(selectedAppId: string | null) {
 }
 
 describe('AppPanelRenderer', () => {
+  it('routes the Basalt application to its managed runtime panel', () => {
+    renderPanel('basalt');
+
+    expect(screen.getByText('basalt-panel')).toBeInTheDocument();
+  });
+
   it('renders the first-class ONNX Runtime panel for the ONNX app id', () => {
     renderPanel('onnx-runtime');
 

@@ -1001,9 +1001,6 @@ fn infer_in_place_spec(model_dir: PathBuf, model_id: &str) -> InPlaceImportSpec 
     }
 }
 
-const IMPORTABLE_MODEL_EXTENSIONS: &[&str] =
-    &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
-
 fn has_pending_download_artifacts(model_dir: &Path) -> bool {
     WalkDir::new(model_dir)
         .min_depth(1)
@@ -1663,7 +1660,7 @@ fn has_importable_model_files(model_dir: &Path) -> bool {
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_lowercase();
-            IMPORTABLE_MODEL_EXTENSIONS.contains(&ext.as_str())
+            crate::model_library::MODEL_FILE_EXTENSIONS.contains(&ext.as_str())
         })
 }
 

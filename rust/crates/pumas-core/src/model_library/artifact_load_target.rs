@@ -676,6 +676,7 @@ fn load_path_kind(artifact_kind: PackageArtifactKind) -> PumasArtifactLoadPathKi
         PackageArtifactKind::Gguf
         | PackageArtifactKind::Safetensors
         | PackageArtifactKind::Onnx
+        | PackageArtifactKind::Basalt
         | PackageArtifactKind::Adapter
         | PackageArtifactKind::Shard
         | PackageArtifactKind::Unknown => PumasArtifactLoadPathKind::File,

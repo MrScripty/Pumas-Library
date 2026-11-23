@@ -1,5 +1,4 @@
-//! Read-only readiness of a llama.cpp session for non-text input (images,
-//! audio). This is backend declaration checking, not model-byte or semantic
+//! Read-only readiness of a provider session for non-text input (images, audio). This is backend declaration checking, not model-byte or semantic
 //! attestation.
 use super::super::openai_gateway;
 use super::types::Modality;
@@ -20,7 +19,10 @@ async fn supported_mode(
     state: &AppState,
     served: &ServedModelStatus,
 ) -> Option<RuntimeProviderMode> {
-    if served.provider != RuntimeProviderId::LlamaCpp {
+    if !matches!(
+        served.provider,
+        RuntimeProviderId::LlamaCpp | RuntimeProviderId::Basalt
+    ) {
         return None;
     }
     let snapshot = state.api.get_runtime_profiles_snapshot().await.ok()?;
@@ -30,10 +32,14 @@ async fn supported_mode(
         .iter()
         .find(|profile| {
             profile.profile_id == served.profile_id
-                && profile.provider == RuntimeProviderId::LlamaCpp
+                && profile.provider == served.provider
                 && matches!(
-                    profile.provider_mode,
-                    RuntimeProviderMode::LlamaCppDedicated | RuntimeProviderMode::LlamaCppRouter
+                    (profile.provider, profile.provider_mode),
+                    (
+                        RuntimeProviderId::LlamaCpp,
+                        RuntimeProviderMode::LlamaCppDedicated
+                            | RuntimeProviderMode::LlamaCppRouter
+                    ) | (RuntimeProviderId::Basalt, RuntimeProviderMode::BasaltServe)
                 )
                 && profile.enabled
         })

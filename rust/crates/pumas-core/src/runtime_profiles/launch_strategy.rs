@@ -17,6 +17,7 @@ pub enum RuntimeProfileBinaryLaunchKind {
     LlamaCppRouter,
     LlamaCppDedicated,
     OnnxHost,
+    BasaltServe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -79,6 +80,7 @@ impl From<ProviderBinaryLaunchTarget> for RuntimeProfileBinaryLaunchKind {
             ProviderBinaryLaunchTarget::LlamaCppRouter => Self::LlamaCppRouter,
             ProviderBinaryLaunchTarget::LlamaCppDedicated => Self::LlamaCppDedicated,
             ProviderBinaryLaunchTarget::OnnxHost => Self::OnnxHost,
+            ProviderBinaryLaunchTarget::BasaltServe => Self::BasaltServe,
         }
     }
 }

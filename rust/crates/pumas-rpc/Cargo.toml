@@ -70,7 +70,8 @@ s3 = ["pumas-library/s3", "dep:cap-std", "dep:same-file"]
 # Weak forwarding preserves the inference-disabled dependency boundary.
 test-support = ["pumas-app-manager?/test-support"]
 export-contract = ["dep:schemars", "dep:tempfile", "pumas-library/contract-schema"]
-default = ["inference-plugins"]
+default = ["inference-plugins", "basalt"]
+basalt = ["inference-plugins", "pumas-library/basalt"]
 inference-plugins = [
     "dep:pumas-app-manager",
     "pumas-library/onnx-runtime",

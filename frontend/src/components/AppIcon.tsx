@@ -53,6 +53,7 @@ const BUILTIN_APP_ICON_PATHS: Record<string, string> = {
   torch: './torch-icon.svg',
   'llama-cpp': './llama-cpp-icon.svg',
   'onnx-runtime': './onnx-runtime-icon.svg',
+  basalt: './basalt-icon.svg',
 };
 
 /**

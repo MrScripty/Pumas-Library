@@ -942,7 +942,7 @@ impl ModelImporter {
                 .unwrap_or("");
 
             // Only consider model files
-            if !["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"].contains(&ext) {
+            if !crate::model_library::MODEL_FILE_EXTENSIONS.contains(&ext) {
                 continue;
             }
 
@@ -986,8 +986,7 @@ impl ModelImporter {
                 .to_lowercase();
 
             // Only model file extensions
-            if !["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"].contains(&ext.as_str())
-            {
+            if !crate::model_library::MODEL_FILE_EXTENSIONS.contains(&ext.as_str()) {
                 continue;
             }
 

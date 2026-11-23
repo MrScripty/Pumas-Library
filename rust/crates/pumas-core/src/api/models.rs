@@ -141,7 +141,7 @@ async fn load_model_count(library: Arc<model_library::ModelLibrary>) -> Result<u
         .map_err(|err| PumasError::Other(format!("Failed to join model count task: {}", err)))?
 }
 
-async fn load_inference_settings_for_model(
+pub(super) async fn load_inference_settings_for_model(
     library: Arc<model_library::ModelLibrary>,
     model_id: String,
 ) -> Result<Vec<models::InferenceParamSchema>> {
@@ -156,11 +156,38 @@ async fn load_inference_settings_for_model(
 
     let (metadata, file_format) = load_inference_snapshot(library, model_dir, model_id).await?;
 
+    if file_format == "basalt" {
+        return models::validate_basalt_settings(metadata.inference_settings.unwrap_or_default());
+    }
     if let Some(settings) = metadata.inference_settings {
         return Ok(settings);
     }
 
     Ok(models::resolve_inference_settings(&metadata, &file_format).unwrap_or_default())
+}
+
+pub(super) async fn store_inference_settings_for_model(
+    library: Arc<model_library::ModelLibrary>,
+    model_id: String,
+    settings: Vec<models::InferenceParamSchema>,
+) -> Result<()> {
+    let model_dir = library.library_root().join(&model_id);
+    let (_, file_format) =
+        load_inference_snapshot(library.clone(), model_dir.clone(), model_id).await?;
+    let settings = if settings.is_empty() {
+        None
+    } else if file_format == "basalt" {
+        Some(models::validate_basalt_settings(settings)?)
+    } else {
+        Some(settings)
+    };
+    library
+        .update_metadata(&model_dir, move |metadata| {
+            metadata.inference_settings = settings;
+            metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+        })
+        .await?;
+    library.index_model_dir(&model_dir).await
 }
 
 impl PumasApi {
@@ -448,30 +475,12 @@ impl PumasApi {
         settings: Vec<models::InferenceParamSchema>,
     ) -> Result<()> {
         self.try_primary()?;
-        let library = self.primary().model_library.clone();
-        let model_dir = library.library_root().join(model_id);
-
-        if !path_exists(&model_dir).await? {
-            return Err(crate::error::PumasError::Other(format!(
-                "Model not found: {}",
-                model_id
-            )));
-        }
-
-        let mut metadata =
-            load_model_metadata_or_default(library.clone(), model_dir.clone()).await?;
-
-        metadata.inference_settings = if settings.is_empty() {
-            None
-        } else {
-            Some(settings)
-        };
-        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-
-        library.save_metadata(&model_dir, &metadata).await?;
-        library.index_model_dir(&model_dir).await?;
-
-        Ok(())
+        store_inference_settings_for_model(
+            self.primary().model_library.clone(),
+            model_id.to_owned(),
+            settings,
+        )
+        .await
     }
 
     /// Update user-authored markdown notes for a model.

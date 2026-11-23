@@ -6,10 +6,12 @@ const {
   getInferenceSettingsMock,
   getLibraryModelMetadataMock,
   resolveModelPackageFactsMock,
+  updateInferenceSettingsMock,
 } = vi.hoisted(() => ({
   getInferenceSettingsMock: vi.fn(),
   getLibraryModelMetadataMock: vi.fn(),
   resolveModelPackageFactsMock: vi.fn(),
+  updateInferenceSettingsMock: vi.fn(),
 }));
 
 vi.mock('../api/models', () => ({
@@ -18,7 +20,7 @@ vi.mock('../api/models', () => ({
     getLibraryModelMetadata: getLibraryModelMetadataMock,
     refetchMetadataFromHF: vi.fn(),
     resolveModelPackageFacts: resolveModelPackageFactsMock,
-    updateInferenceSettings: vi.fn(),
+    updateInferenceSettings: updateInferenceSettingsMock,
     updateModelNotes: vi.fn(),
   },
 }));
@@ -52,6 +54,40 @@ describe('ModelMetadataModal', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('saves a model thinking level and clears a sampling override back to the model default', async () => {
+    const modelId = 'llm/inkling/mini';
+    getLibraryModelMetadataMock.mockResolvedValue(metadata(modelId));
+    getInferenceSettingsMock.mockResolvedValue({
+      success: true,
+      model_id: modelId,
+      inference_settings: [
+        {
+          key: 'reasoning_effort',
+          label: 'Thinking Level',
+          param_type: 'String',
+          default: null,
+          constraints: { allowed_values: ['none', 'low', 'high'] },
+        },
+        { key: 'temperature', label: 'Temperature', param_type: 'Number', default: 0.7 },
+      ],
+    });
+    updateInferenceSettingsMock.mockResolvedValue(undefined);
+    render(<ModelMetadataModal modelId={modelId} modelName="Inkling 2 Mini" onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Inference' }));
+    const thinking = await screen.findByRole('combobox', { name: /Thinking Level/ });
+    expect(thinking).toHaveDisplayValue('Model default');
+    fireEvent.change(thinking, { target: { value: 'high' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Temperature/ }), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    await screen.findByText('Saved');
+    expect(updateInferenceSettingsMock).toHaveBeenCalledWith(modelId, [
+      expect.objectContaining({ key: 'reasoning_effort', default: 'high' }),
+      expect.objectContaining({ key: 'temperature', default: null }),
+    ]);
   });
 
   it('lazy loads read-only execution facts when the execution tab is selected', async () => {

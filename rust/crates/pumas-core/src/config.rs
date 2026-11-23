@@ -199,6 +199,7 @@ pub enum AppId {
     LlamaCpp,
     Torch,
     OnnxRuntime,
+    Basalt,
 }
 
 impl AppId {
@@ -209,6 +210,7 @@ impl AppId {
             AppId::LlamaCpp => "llama-cpp",
             AppId::Torch => "torch",
             AppId::OnnxRuntime => "onnx-runtime",
+            AppId::Basalt => "basalt",
         }
     }
 
@@ -217,13 +219,13 @@ impl AppId {
     /// Every supported runtime is an external, downloaded runtime. ONNX Runtime
     /// executes in-process, but its native library is a downloaded version.
     pub fn has_version_manager(&self) -> bool {
-        true
+        *self != AppId::Basalt || crate::basalt_distribution::available()
     }
 
     /// Return whether installed versions are publisher-verified native release
     /// archives acquired through the shared acquisition service.
     pub fn uses_native_archive_installer(&self) -> bool {
-        matches!(self, AppId::LlamaCpp | AppId::OnnxRuntime)
+        matches!(self, AppId::LlamaCpp | AppId::OnnxRuntime | AppId::Basalt)
     }
 
     /// Return the GitHub `owner/repo` path for this app's upstream repository.
@@ -233,6 +235,7 @@ impl AppId {
             AppId::LlamaCpp => "ggml-org/llama.cpp",
             AppId::Torch => "pytorch/pytorch",
             AppId::OnnxRuntime => "microsoft/onnxruntime",
+            AppId::Basalt => "jesdga95/basalt",
         }
     }
 
@@ -243,6 +246,7 @@ impl AppId {
             AppId::LlamaCpp => "llama-cpp-versions",
             AppId::Torch => "torch-versions",
             AppId::OnnxRuntime => "onnx-runtime-versions",
+            AppId::Basalt => "basalt-versions",
         }
     }
 
@@ -253,6 +257,7 @@ impl AppId {
             AppId::LlamaCpp => 18080,
             AppId::Torch => 8400,
             AppId::OnnxRuntime => 0,
+            AppId::Basalt => 18091,
         }
     }
 
@@ -263,6 +268,7 @@ impl AppId {
             AppId::LlamaCpp => "http://127.0.0.1:18080",
             AppId::Torch => "http://127.0.0.1:8400",
             AppId::OnnxRuntime => "",
+            AppId::Basalt => "http://127.0.0.1:18091",
         }
     }
 
@@ -274,6 +280,7 @@ impl AppId {
             "llama-cpp" | "llamacpp" | "llama.cpp" => Some(AppId::LlamaCpp),
             "torch" => Some(AppId::Torch),
             "onnx-runtime" | "onnxruntime" | "onnx_runtime" => Some(AppId::OnnxRuntime),
+            "basalt" => Some(AppId::Basalt),
             _ => None,
         }
     }

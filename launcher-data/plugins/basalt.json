@@ -1,0 +1,26 @@
+{
+  "id": "basalt",
+  "displayName": "Basalt",
+  "description": "Local text and vision inference on NVIDIA Blackwell GPUs",
+  "icon": "circuit-board",
+  "githubRepo": "jesdga95/basalt",
+  "installationType": "binary",
+  "capabilities": {
+    "hasVersionManagement": true,
+    "supportsShortcuts": false,
+    "hasDependencies": false,
+    "hasConnectionUrl": false,
+    "hasModelLibrary": true,
+    "hasStats": false
+  },
+  "modelCompatibility": {
+    "supportedFormats": ["basalt"]
+  },
+  "panelLayout": [
+    {"type": "version_manager"},
+    {"type": "runtime_profiles", "config": {"provider": "basalt"}},
+    {"type": "model_library", "config": {"filter": "basalt"}}
+  ],
+  "sidebarPriority": 23,
+  "enabledByDefault": true
+}

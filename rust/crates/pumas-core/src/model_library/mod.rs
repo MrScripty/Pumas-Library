@@ -42,6 +42,7 @@ mod external_assets;
 mod hashing;
 mod hf;
 pub(crate) use hf::DownloadInvocationContext;
+mod basalt_pack;
 mod hf_cache;
 mod identifier;
 mod importer;
@@ -145,3 +146,15 @@ pub use task_signature::{
 };
 pub use types::*;
 pub use watcher::{ChangeCallback, ModelLibraryWatcher};
+
+/// Model-file extensions recognized by library discovery, import and recovery.
+pub(crate) const MODEL_FILE_EXTENSIONS: &[&str] = &[
+    "gguf",
+    "safetensors",
+    "pt",
+    "pth",
+    "ckpt",
+    "bin",
+    "onnx",
+    "basalt",
+];

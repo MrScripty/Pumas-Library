@@ -491,15 +491,16 @@ mod tests {
                 )
             })
             .collect();
-        assert_eq!(
-            pairs,
-            [
-                ("ollama", "ollama"),
-                ("llama_cpp", "llama-cpp"),
-                ("onnx_runtime", "onnx-runtime"),
-                ("torch", "torch"),
-            ]
-        );
+        let mut expected = vec![
+            ("ollama", "ollama"),
+            ("llama_cpp", "llama-cpp"),
+            ("onnx_runtime", "onnx-runtime"),
+            ("torch", "torch"),
+        ];
+        if pumas_library::basalt_distribution::available() {
+            expected.push(("basalt", "basalt"));
+        }
+        assert_eq!(pairs, expected);
         assert!(providers
             .iter()
             .all(|provider| provider["version_managed"] == false));

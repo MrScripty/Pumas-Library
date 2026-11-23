@@ -68,6 +68,19 @@ pub(super) async fn observe(
     let model_type = hints.model_type;
     match served.provider {
         RuntimeProviderId::LlamaCpp => llama_cpp(state, served, hints).await,
+        RuntimeProviderId::Basalt => {
+            let Some(health) = super::super::serving_basalt::model_health(state, served).await
+            else {
+                return Observation::default();
+            };
+            let mut result = fixed([Modality::Text], [Modality::Text]);
+            result.runtime_declared = true;
+            if health.images {
+                result.declared.input.push(Modality::Image);
+                result.live.insert(Modality::Image);
+            }
+            result
+        }
         RuntimeProviderId::OnnxRuntime => fixed(
             [Modality::Text],
             [pooled_output(model_type, Modality::Vector)],

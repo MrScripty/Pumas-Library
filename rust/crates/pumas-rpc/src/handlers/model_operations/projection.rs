@@ -578,10 +578,13 @@ pub fn result(
                 }
                 match message.get("content") {
                     Some(Value::String(text)) => text.as_str(),
-                    // Basalt uses null when the budget expires before any answer text.
+                    // Basalt uses null when generation ends without answer text.
                     Some(Value::Null)
                         if provider == RuntimeProviderId::Basalt
-                            && finish_reason == FinishReason::Length =>
+                            && matches!(
+                                finish_reason,
+                                FinishReason::Stop | FinishReason::Length
+                            ) =>
                     {
                         ""
                     }
@@ -762,6 +765,27 @@ mod image_to_text_projection_tests {
         );
         assert_eq!(
             result(&request(), payload, RuntimeProviderId::LlamaCpp),
+            Err(ErrorCode::InvalidProviderResult)
+        );
+    }
+
+    #[test]
+    fn basalt_reasoning_only_at_a_normal_stop_projects_an_empty_answer() {
+        let mut request = request();
+        request.capability = Capability::ChatGeneration;
+        request.input = OperationInput::Text {
+            text: "Think silently".into(),
+        };
+        let payload = json!({"choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"thinking"},"finish_reason":"stop"}]});
+        assert_eq!(
+            result(&request, payload.clone(), RuntimeProviderId::Basalt),
+            Ok(OperationResult::Text {
+                text: String::new(),
+                finish_reason: FinishReason::Stop,
+            })
+        );
+        assert_eq!(
+            result(&request, payload, RuntimeProviderId::LlamaCpp),
             Err(ErrorCode::InvalidProviderResult)
         );
     }

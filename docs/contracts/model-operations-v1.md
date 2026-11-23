@@ -274,6 +274,10 @@ checks a single text choice, embedding count/index/dimension coherence, and
 rejects incoherent provider results. Provider envelopes and internal errors are
 not exposed.
 
+For Basalt, a normal stop or token-limit finish without visible answer text
+returns an empty `text` string with the reported finish reason. The typed
+response omits reasoning.
+
 Errors follow [Errors](#errors). A request ID is never forwarded as a provider
 idempotency key, and generation is never replayed.
 

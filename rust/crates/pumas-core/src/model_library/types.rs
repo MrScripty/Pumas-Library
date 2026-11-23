@@ -370,6 +370,8 @@ pub enum FileFormat {
     Ggml,
     /// ONNX format (safe)
     Onnx,
+    /// Basalt model-pack format
+    Basalt,
     /// PyTorch pickle format (potentially unsafe)
     Pickle,
     /// Unknown format
@@ -380,9 +382,11 @@ impl FileFormat {
     /// Get the security tier for this format.
     pub fn security_tier(&self) -> SecurityTier {
         match self {
-            FileFormat::Safetensors | FileFormat::Gguf | FileFormat::Ggml | FileFormat::Onnx => {
-                SecurityTier::Safe
-            }
+            FileFormat::Safetensors
+            | FileFormat::Gguf
+            | FileFormat::Ggml
+            | FileFormat::Onnx
+            | FileFormat::Basalt => SecurityTier::Safe,
             FileFormat::Pickle => SecurityTier::Pickle,
             FileFormat::Unknown => SecurityTier::Unknown,
         }
@@ -395,6 +399,7 @@ impl FileFormat {
             FileFormat::Gguf => "gguf",
             FileFormat::Ggml => "ggml",
             FileFormat::Onnx => "onnx",
+            FileFormat::Basalt => "basalt",
             FileFormat::Pickle => "pickle",
             FileFormat::Unknown => "unknown",
         }
@@ -408,6 +413,7 @@ impl From<FileFormat> for DetectedFileType {
             FileFormat::Gguf => DetectedFileType::Gguf,
             FileFormat::Ggml => DetectedFileType::Ggml,
             FileFormat::Onnx => DetectedFileType::Onnx,
+            FileFormat::Basalt => DetectedFileType::Basalt,
             FileFormat::Pickle => DetectedFileType::Pickle,
             FileFormat::Unknown => DetectedFileType::Unknown,
         }

@@ -34,6 +34,12 @@ pub(crate) async fn package_artifact_kind(
     }
     if selected_files
         .iter()
+        .any(|file| file.to_ascii_lowercase().ends_with(".basalt"))
+    {
+        return Ok(PackageArtifactKind::Basalt);
+    }
+    if selected_files
+        .iter()
         .any(|file| file.to_lowercase().ends_with(".safetensors"))
     {
         if tokio::fs::try_exists(model_dir.join("config.json")).await? {
@@ -379,7 +385,7 @@ fn is_transformers_shard_file(relative_path: &str) -> bool {
 }
 
 fn is_weight_file(relative_path: &str) -> bool {
-    ["safetensors", "bin", "pt", "pth", "ckpt", "gguf", "onnx"]
+    crate::model_library::MODEL_FILE_EXTENSIONS
         .iter()
         .any(|extension| relative_path.ends_with(&format!(".{extension}")))
 }

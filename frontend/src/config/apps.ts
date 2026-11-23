@@ -1,6 +1,18 @@
 import { Cpu, Flame, CircuitBoard } from 'lucide-react';
 import type { AppConfig } from '../types/apps';
 
+export const BASALT_APP: AppConfig = {
+  id: 'basalt',
+  name: 'basalt',
+  displayName: 'Basalt',
+  icon: CircuitBoard,
+  status: 'idle',
+  iconState: 'uninstalled',
+  description: 'Local inference on NVIDIA Blackwell GPUs',
+  starred: false,
+  linked: false,
+};
+
 /**
  * Default app configurations
  * This is the central registry for all supported applications

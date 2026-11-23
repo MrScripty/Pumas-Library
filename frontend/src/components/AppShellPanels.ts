@@ -55,6 +55,10 @@ export function buildAppShellPanels({
       connectionUrl,
       modelManagerProps,
     },
+    basalt: {
+      ...sharedVersionProps,
+      modelManagerProps,
+    },
     onnxRuntime: {
       ...sharedVersionProps,
       modelManagerProps,

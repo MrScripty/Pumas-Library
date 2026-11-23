@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 c8351051f726739de4a9cf5f5db576767efd05bc3e77ed55731bc92a5a4b3275. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 5c38bede2a5871b5c31fd11e74bf016df619802e49b99cb1df665e14c7f48b2a. DO NOT EDIT.
 export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
 export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
@@ -156,8 +156,8 @@ export type RuntimeProfilesSnapshotResponse = { "error"?: string | null; "snapsh
 export type RuntimeProfileStatus = { "endpoint_url"?: string | null; "last_error"?: string | null; "log_path"?: string | null; "pid"?: number | null; "profile_id": string; "runtime_version"?: string | null; "state": RuntimeLifecycleState };
 export type RuntimeProfileUpdateFeed = { "cursor": string; "events": ReadonlyArray<RuntimeProfileEvent>; "snapshot_required": boolean; "stale_cursor": boolean };
 export type RuntimeProviderDescriptor = { "app_id": string; "device_modes": ReadonlyArray<RuntimeDeviceMode>; "provider": RuntimeProviderId; "provider_modes": ReadonlyArray<RuntimeProviderMode>; "supports_external_profiles": boolean; "supports_managed_profiles": boolean; "version_managed": boolean };
-export type RuntimeProviderId = "torch" | "ollama" | "llama_cpp" | "onnx_runtime";
-export type RuntimeProviderMode = "torch_serve" | "ollama_serve" | "llama_cpp_router" | "llama_cpp_dedicated" | "onnx_serve";
+export type RuntimeProviderId = "torch" | "ollama" | "llama_cpp" | "onnx_runtime" | "basalt";
+export type RuntimeProviderMode = "torch_serve" | "ollama_serve" | "llama_cpp_router" | "llama_cpp_dedicated" | "onnx_serve" | "basalt_serve";
 export type RuntimeProvidersOutcome = { "providers": ReadonlyArray<RuntimeProviderDescriptor>; "success": true };
 export type RuntimeRunningOutcome = boolean;
 export type RuntimeSchedulerSettings = { "auto_load": boolean; "keep_alive_seconds"?: number | null; "max_concurrent_models"?: number | null };

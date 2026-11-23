@@ -702,7 +702,7 @@ fn is_transformers_weight_index_file(relative_path: &str) -> bool {
 
 fn is_package_weight_file(file_name: &str) -> bool {
     let file_name = file_name.to_lowercase();
-    ["safetensors", "bin", "pt", "pth", "ckpt", "gguf", "onnx"]
+    crate::model_library::MODEL_FILE_EXTENSIONS
         .iter()
         .any(|extension| file_name.ends_with(&format!(".{extension}")))
 }

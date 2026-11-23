@@ -168,32 +168,6 @@ async fn load_model_metadata_or_default(
         })?
 }
 
-async fn load_inference_snapshot(
-    library: Arc<model_library::ModelLibrary>,
-    model_dir: PathBuf,
-    model_id: String,
-) -> std::result::Result<(models::ModelMetadata, String), PumasError> {
-    tokio::task::spawn_blocking(move || {
-        let metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
-        let file_format = library
-            .get_primary_model_file(&model_id)
-            .and_then(|path| {
-                path.extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext.to_lowercase())
-            })
-            .unwrap_or_default();
-        Ok((metadata, file_format))
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!(
-            "Failed to join inference metadata snapshot task: {}",
-            err
-        ))
-    })?
-}
-
 async fn load_effective_model_metadata(
     library: Arc<model_library::ModelLibrary>,
     model_id: String,
@@ -1720,24 +1694,11 @@ async fn load_inference_settings(
     primary: &PrimaryState,
     model_id: &str,
 ) -> std::result::Result<Vec<models::InferenceParamSchema>, PumasError> {
-    let library = &primary.model_library;
-    let model_dir = library.library_root().join(model_id);
-
-    if !path_exists(&model_dir).await? {
-        return Err(PumasError::Other(format!("Model not found: {}", model_id)));
-    }
-
-    let (metadata, file_format) = load_inference_snapshot(
+    super::models::load_inference_settings_for_model(
         primary.model_library.clone(),
-        model_dir,
-        model_id.to_string(),
+        model_id.to_owned(),
     )
-    .await?;
-    if let Some(settings) = metadata.inference_settings {
-        return Ok(settings);
-    }
-
-    Ok(models::resolve_inference_settings(&metadata, &file_format).unwrap_or_default())
+    .await
 }
 
 async fn store_inference_settings(
@@ -1745,25 +1706,12 @@ async fn store_inference_settings(
     model_id: &str,
     settings: Vec<models::InferenceParamSchema>,
 ) -> std::result::Result<(), PumasError> {
-    let library = &primary.model_library;
-    let model_dir = library.library_root().join(model_id);
-
-    if !path_exists(&model_dir).await? {
-        return Err(PumasError::Other(format!("Model not found: {}", model_id)));
-    }
-
-    let mut metadata =
-        load_model_metadata_or_default(primary.model_library.clone(), model_dir.clone()).await?;
-    metadata.inference_settings = if settings.is_empty() {
-        None
-    } else {
-        Some(settings)
-    };
-    metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-
-    library.save_metadata(&model_dir, &metadata).await?;
-    library.index_model_dir(&model_dir).await?;
-    Ok(())
+    super::models::store_inference_settings_for_model(
+        primary.model_library.clone(),
+        model_id.to_owned(),
+        settings,
+    )
+    .await
 }
 
 async fn store_model_notes(

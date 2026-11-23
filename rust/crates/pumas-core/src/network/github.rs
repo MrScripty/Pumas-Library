@@ -760,6 +760,20 @@ impl GitHubClient {
                 std::env::consts::ARCH,
             );
         }
+        if app_id == AppId::Basalt {
+            return releases
+                .into_iter()
+                .filter_map(|mut release| {
+                    let asset = crate::basalt_distribution::select_archive(
+                        &release.tag_name,
+                        &release.assets,
+                    )?;
+                    release.archive_size = Some(asset.size);
+                    release.total_size = Some(asset.size);
+                    Some(release)
+                })
+                .collect();
+        }
         // Populate archive_size from platform-matched assets
         Self::populate_archive_sizes(&mut releases, app_id);
         releases

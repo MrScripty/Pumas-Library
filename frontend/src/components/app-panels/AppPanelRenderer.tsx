@@ -1,3 +1,4 @@
+import { BasaltPanel, type BasaltPanelProps } from './BasaltPanel';
 import { DefaultAppPanel, type DefaultAppPanelProps } from './DefaultAppPanel';
 import { LlamaCppPanel, type LlamaCppPanelProps } from './LlamaCppPanel';
 import { OnnxRuntimePanel, type OnnxRuntimePanelProps } from './OnnxRuntimePanel';
@@ -9,6 +10,7 @@ interface AppPanelRendererProps {
   selectedAppId: string | null;
   llamaCpp: LlamaCppPanelProps;
   onnxRuntime: OnnxRuntimePanelProps;
+  basalt: BasaltPanelProps;
   ollama: OllamaPanelProps;
   torch: TorchPanelProps;
   fallback: DefaultAppPanelProps;
@@ -18,6 +20,7 @@ export function AppPanelRenderer({
   selectedAppId,
   llamaCpp,
   onnxRuntime,
+  basalt,
   ollama,
   torch,
   fallback,
@@ -36,6 +39,8 @@ export function AppPanelRenderer({
       return <OllamaPanel {...ollama} />;
     case 'llama-cpp':
       return <LlamaCppPanel {...llamaCpp} />;
+    case 'basalt':
+      return <BasaltPanel {...basalt} />;
     case 'onnx-runtime':
       return <OnnxRuntimePanel {...onnxRuntime} />;
     case 'torch':

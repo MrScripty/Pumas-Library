@@ -371,6 +371,7 @@ const WEIGHT_EXTENSIONS: &[&str] = &[
     ".pt",
     ".pth",
     ".onnx",
+    ".basalt",
     ".ckpt",
     ".msgpack",
 ];

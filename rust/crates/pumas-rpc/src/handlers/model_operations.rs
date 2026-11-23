@@ -304,11 +304,32 @@ pub async fn handle_model_operations(
         Ok(declarations) => declarations,
         Err(code) => return reject(id, code),
     };
+    let explicit_output_limit = matches!(
+        request.options,
+        Some(OperationOptions::TextGeneration {
+            max_tokens: Some(_),
+            ..
+        })
+    );
     let request = match request.resolve(&declarations) {
         Ok(request) => request,
         Err(rejection) => return reject(id, rejection),
     };
-    let body = match image_body {
+    if served.provider != RuntimeProviderId::Basalt
+        && matches!(
+            request.options,
+            OperationOptions::TextGeneration {
+                sampling: Some(_),
+                ..
+            }
+        )
+    {
+        return reject(
+            id,
+            Rejection::invalid("options.sampling is unavailable for this provider"),
+        );
+    }
+    let mut body = match image_body {
         Some(body)
             if matches!(
                 request.capability,
@@ -329,6 +350,16 @@ pub async fn handle_model_operations(
             Err(rejection) => return reject(id, rejection),
         },
     };
+    if served.provider == RuntimeProviderId::Basalt
+        && request.capability == Capability::ImageToText
+        && !explicit_output_limit
+    {
+        // The generic vision projection adds a limit for other providers.
+        // Leave this field absent so Basalt can use the saved model default.
+        if let Some(body) = body.as_object_mut() {
+            body.remove("max_tokens");
+        }
+    }
     if request.capability == Capability::AudioTranscription {
         return dispatch_audio(state, disconnect, &request, &served, body).await;
     }
@@ -400,6 +431,7 @@ pub async fn handle_model_operations(
             response,
             &request,
             served.profile_id.as_str(),
+            served.provider,
             cancellation
                 .into_inner()
                 .expect("request-local cancellation mutex"),
@@ -425,7 +457,7 @@ pub async fn handle_model_operations(
             {
                 return Err(ErrorCode::InvalidProviderResult);
             }
-            projection::result(&request, value)
+            projection::result(&request, value, served.provider)
         });
     match result {
         Ok(result) => {
@@ -730,12 +762,14 @@ async fn describe(
     } else {
         runtime_modalities::observe(state, served, hints).await
     };
+    let runtime_ready =
+        runtime_ready && (served.provider != RuntimeProviderId::Basalt || observation.observed);
     // Without a recorded task, the runtime's own declaration of a generation
     // model decides what it can do (ADR 0005); it only ever adds a match.
     let task_known = task.is_some_and(|task| !matches!(task, "unknown" | ""));
     let declared_text_out = observation.declared.output.contains(&Modality::Text);
     let semantics_of = |capability: Capability| {
-        let by_runtime = !task_known
+        let by_runtime = (!task_known || served.provider == RuntimeProviderId::Basalt)
             && observation.runtime_declared
             && !observation.decisions
             && declared_text_out

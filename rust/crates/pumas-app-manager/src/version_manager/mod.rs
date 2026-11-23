@@ -297,6 +297,7 @@ fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
     root.join(match app_id {
         AppId::Torch => ".active-version-torch",
         AppId::OnnxRuntime => ".active-version-onnx-runtime",
+        AppId::Basalt => ".active-version-basalt",
         AppId::Ollama | AppId::LlamaCpp => ".active-version",
     })
 }

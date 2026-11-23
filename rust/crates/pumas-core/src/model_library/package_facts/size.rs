@@ -341,6 +341,7 @@ fn direct_selected_artifact_path(
         PackageArtifactKind::Gguf => lower.ends_with(".gguf"),
         PackageArtifactKind::Safetensors => lower.ends_with(".safetensors"),
         PackageArtifactKind::Onnx => lower.ends_with(".onnx"),
+        PackageArtifactKind::Basalt => lower.ends_with(".basalt"),
         PackageArtifactKind::Adapter => {
             lower.ends_with("adapter_model.safetensors") || lower.ends_with("adapter_model.bin")
         }
@@ -360,6 +361,7 @@ fn is_single_file_artifact_kind(artifact_kind: PackageArtifactKind) -> bool {
         PackageArtifactKind::Gguf
             | PackageArtifactKind::Safetensors
             | PackageArtifactKind::Onnx
+            | PackageArtifactKind::Basalt
             | PackageArtifactKind::Adapter
             | PackageArtifactKind::Shard
             | PackageArtifactKind::Unknown
@@ -431,7 +433,7 @@ fn is_transformers_shard_file(relative_path: &str) -> bool {
 }
 
 fn is_weight_file(relative_path: &str) -> bool {
-    ["safetensors", "bin", "pt", "pth", "ckpt", "gguf", "onnx"]
+    crate::model_library::MODEL_FILE_EXTENSIONS
         .iter()
         .any(|extension| relative_path.ends_with(&format!(".{extension}")))
 }

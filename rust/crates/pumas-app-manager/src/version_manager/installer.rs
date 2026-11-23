@@ -590,13 +590,14 @@ fn hash_native_tree(root: &Path) -> Result<String> {
 
 /// The runtimes installed from publisher-verified native release archives.
 ///
-/// Both share acquisition, custody, receipts and recovery. They differ in the
+/// They share acquisition, custody, receipts and recovery. They differ in the
 /// archive they select, how its contents are arranged, and the one regular file
 /// a receipt names as the runtime's entry point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NativeRuntime {
     LlamaCpp,
     OnnxRuntime,
+    Basalt,
 }
 
 impl NativeRuntime {
@@ -604,6 +605,7 @@ impl NativeRuntime {
         match app_id {
             AppId::LlamaCpp => Ok(Self::LlamaCpp),
             AppId::OnnxRuntime => Ok(Self::OnnxRuntime),
+            AppId::Basalt if pumas_library::basalt_distribution::available() => Ok(Self::Basalt),
             other => Err(PumasError::Config {
                 message: format!("{other} is not installed from a native release archive"),
             }),
@@ -614,6 +616,7 @@ impl NativeRuntime {
         match self {
             Self::LlamaCpp => "llama.cpp",
             Self::OnnxRuntime => "ONNX Runtime",
+            Self::Basalt => "Basalt",
         }
     }
 
@@ -623,6 +626,7 @@ impl NativeRuntime {
         match self {
             Self::LlamaCpp => "runtime.llama.cpp",
             Self::OnnxRuntime => "runtime.onnx-runtime",
+            Self::Basalt => "runtime.basalt",
         }
     }
 
@@ -630,6 +634,7 @@ impl NativeRuntime {
         match self {
             Self::LlamaCpp => "llama-cpp",
             Self::OnnxRuntime => "onnx-runtime",
+            Self::Basalt => "basalt",
         }
     }
 
@@ -641,6 +646,7 @@ impl NativeRuntime {
             Self::LlamaCpp if cfg!(windows) => "bin/llama-server.exe",
             Self::LlamaCpp => "bin/llama-server",
             Self::OnnxRuntime => pumas_library::onnx_runtime_distribution::library_relative_path(),
+            Self::Basalt => pumas_library::basalt_distribution::ENTRY,
         }
     }
 }
@@ -2146,7 +2152,7 @@ impl VersionInstaller {
     ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
-            AppId::LlamaCpp | AppId::OnnxRuntime => {
+            AppId::LlamaCpp | AppId::OnnxRuntime | AppId::Basalt => {
                 self.install_native_archive(tag, release, progress_tx).await
             }
             AppId::Torch => {
@@ -2310,6 +2316,15 @@ impl VersionInstaller {
         match runtime {
             NativeRuntime::LlamaCpp => self.select_llama_cpp_asset(assets),
             NativeRuntime::OnnxRuntime => Self::select_onnx_runtime_asset(tag, assets),
+            NativeRuntime::Basalt => {
+                pumas_library::basalt_distribution::select_archive(tag, assets).ok_or_else(|| {
+                    PumasError::InstallationFailed {
+                        message: format!(
+                            "Basalt {tag} does not publish a supported archive for this build"
+                        ),
+                    }
+                })
+            }
         }
     }
 
@@ -2654,6 +2669,21 @@ impl VersionInstaller {
             NativeRuntime::OnnxRuntime => {
                 Self::extract_onnx_runtime_from(archive, stage, asset_name)
             }
+            NativeRuntime::Basalt => {
+                Self::extract_tarball_from(archive, stage)?;
+                Self::validate_native_output(stage)?;
+                Self::hoist_single_archive_root(stage)?;
+                let launcher = stage.join(runtime.entry_relative_path());
+                let metadata = std::fs::symlink_metadata(&launcher)
+                    .map_err(|error| PumasError::io_with_path(error, &launcher))?;
+                if !metadata.is_file() || metadata.len() == 0 {
+                    return Err(PumasError::InstallationFailed {
+                        message: "Basalt archive contains no regular engine executable".into(),
+                    });
+                }
+                Self::make_binary_executable(&launcher)?;
+                Self::validate_native_output(stage)
+            }
         }
     }
 
@@ -2971,6 +3001,10 @@ impl VersionInstaller {
                     retry,
                 };
                 let cuda_for_prepare = cuda.clone();
+                let cleanup_for_prepare = self.torch_cleanup.clone();
+                let progress_for_prepare = self.progress_tracker.clone();
+                let log_for_prepare = log_path.clone();
+                let shutdown_for_prepare = self.shutdown_flag.clone();
                 consumer
                     .acquire_http(
                         request,
@@ -2987,6 +3021,14 @@ impl VersionInstaller {
                             let stage_for_extract = stage.clone();
                             let custody_for_extract = custody_for_prepare.clone();
                             let asset_name = asset_for_prepare.clone();
+                            let cancel_for_extract = cancel_for_prepare.clone();
+                            if runtime == NativeRuntime::Basalt {
+                                progress_for_prepare.write().await.update_stage(
+                                    InstallationStage::Setup,
+                                    0.0,
+                                    Some("Preparing the Basalt server environment"),
+                                );
+                            }
                             let extracted = use_set
                                 .run_blocking("extract publisher-verified native archive", move || {
                                     custody_for_extract.grant.validate()?;
@@ -3013,6 +3055,15 @@ impl VersionInstaller {
                                             cuda,
                                             &stage_for_extract,
                                             platform,
+                                        )?;
+                                    }
+                                    if runtime == NativeRuntime::Basalt {
+                                        Self::prepare_basalt_python(
+                                            &stage_for_extract,
+                                            &cleanup_for_prepare,
+                                            &log_for_prepare,
+                                            &cancel_for_extract,
+                                            &shutdown_for_prepare,
                                         )?;
                                     }
                                     sync_native_tree(&stage_for_extract)?;
@@ -3839,6 +3890,119 @@ impl VersionInstaller {
         Ok(())
     }
 
+    /// Create an archive-private environment before the native receipt is issued.
+    fn prepare_basalt_python(
+        stage: &Path,
+        cleanup: &Arc<TorchCleanupTasks>,
+        log_path: &Path,
+        cancel: &AtomicBool,
+        shutdown: &AtomicBool,
+    ) -> Result<()> {
+        use pumas_library::platform::managed_child::ManagedChild;
+        use std::{
+            process::{Command, Stdio},
+            time::{Duration, Instant},
+        };
+
+        let failure = |message: String| PumasError::InstallationFailed { message };
+        let run = |mut command: Command, label: &str, budget: Duration| -> Result<()> {
+            if cancel.load(Ordering::SeqCst) || shutdown.load(Ordering::SeqCst) {
+                return Err(Self::cancellation_error());
+            }
+            pumas_library::platform::child_environment::apply_owned_child_environment(&mut command);
+            if let Some(parent) = log_path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| PumasError::io_with_path(error, parent))?;
+            }
+            let log = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(log_path)
+                .map_err(|error| PumasError::io_with_path(error, log_path))?;
+            command
+                .current_dir(stage)
+                .stdin(Stdio::null())
+                .stdout(
+                    log.try_clone()
+                        .map_err(|error| PumasError::io_with_path(error, log_path))?,
+                )
+                .stderr(log)
+                .env("PYTHONNOUSERSITE", "1")
+                .env("PYTHONDONTWRITEBYTECODE", "1");
+            let custody = cleanup.new_child_slot()?;
+            let mut child = ManagedChild::spawn_bound_to_thread(&mut command, custody.clone())
+                .map_err(|error| failure(format!("{label}: {error}")))?;
+            let deadline = Instant::now() + budget;
+            let status = loop {
+                if cancel.load(Ordering::SeqCst)
+                    || shutdown.load(Ordering::SeqCst)
+                    || Instant::now() >= deadline
+                {
+                    break None;
+                }
+                if let Some(status) = child
+                    .observe_exit()
+                    .map_err(|error| failure(format!("{label}: {error}")))?
+                {
+                    break Some(status);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            };
+            child
+                .terminate_and_drain(Duration::from_secs(5))
+                .map_err(|error| {
+                    failure(format!("{label}: child cleanup did not finish: {error}"))
+                })?;
+            match status {
+                Some(status) if status.success() => Ok(()),
+                Some(status) => Err(failure(format!("{label} failed ({status})"))),
+                None if cancel.load(Ordering::SeqCst) || shutdown.load(Ordering::SeqCst) => {
+                    Err(Self::cancellation_error())
+                }
+                None => Err(failure(format!("{label} timed out"))),
+            }
+        };
+        let environment = stage.join(".venv");
+        let mut create = Command::new("python3");
+        create
+            .args(["-I", "-m", "venv", "--copies"])
+            .arg(&environment);
+        run(
+            create,
+            "Creating the Basalt environment (requires Python 3 with venv)",
+            Duration::from_secs(60),
+        )?;
+        // CPython creates lib64 -> lib on 64-bit Linux. Its directory alias
+        // cannot be part of a native receipt. Give pip a regular directory
+        // for either interpreter layout before installing packages.
+        let lib64 = environment.join("lib64");
+        if std::fs::read_link(&lib64).is_ok_and(|target| target == Path::new("lib")) {
+            std::fs::remove_file(&lib64)
+                .map_err(|error| PumasError::io_with_path(error, &lib64))?;
+            std::fs::create_dir(&lib64).map_err(|error| PumasError::io_with_path(error, &lib64))?;
+        }
+        let mut install = Command::new(environment.join("bin/python"));
+        install
+            .args([
+                "-I",
+                "-m",
+                "pip",
+                "--isolated",
+                "install",
+                "--disable-pip-version-check",
+                "--no-compile",
+                "--no-cache-dir",
+                "--only-binary=:all:",
+                "-r",
+            ])
+            .arg(stage.join("requirements.txt"));
+        run(
+            install,
+            "Installing Basalt server dependencies",
+            Duration::from_secs(600),
+        )
+    }
+
     /// Move the contents of an archive's single top-level directory into `stage`.
     fn hoist_single_archive_root(stage: &Path) -> Result<()> {
         let entries = std::fs::read_dir(stage)
@@ -3855,7 +4019,7 @@ impl VersionInstaller {
             return Ok(());
         }
         // A child may share the wrapper's name; move the wrapper aside first.
-        let wrapper = stage.join(".onnx-runtime-archive-root");
+        let wrapper = stage.join(".native-archive-root");
         std::fs::rename(only.path(), &wrapper)
             .map_err(|error| PumasError::io_with_path(error, &wrapper))?;
         for child in std::fs::read_dir(&wrapper)

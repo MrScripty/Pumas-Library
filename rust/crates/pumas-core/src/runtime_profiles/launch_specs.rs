@@ -58,12 +58,16 @@ pub(super) fn derive_managed_profile_launch_specs(
 
     let mut specs = Vec::with_capacity(profiles.len());
     for profile in profiles {
-        let behavior =
-            provider_registry
-                .get(profile.provider)
-                .ok_or_else(|| PumasError::InvalidParams {
+        let behavior = match provider_registry.get(profile.provider) {
+            Some(behavior) => behavior,
+            // Basalt profiles can persist when a build disables this provider.
+            None if profile.provider == crate::models::RuntimeProviderId::Basalt => continue,
+            None => {
+                return Err(PumasError::InvalidParams {
                     message: "runtime profile provider is not registered".to_string(),
-                })?;
+                })
+            }
+        };
         let port = match profile.port {
             Some(port) => {
                 if let Some(existing_profile_id) = used_ports.get(&port.value()) {
@@ -123,7 +127,10 @@ pub(super) fn derive_managed_profile_launch_specs(
             env_vars: profile_runtime_env_vars(profile, &endpoint_url, port, launch_strategy)?,
             pid_file: runtime_dir.join("runtime.pid"),
             log_file: runtime_dir.join("runtime.log"),
-            health_check_url: if profile.provider == crate::models::RuntimeProviderId::Torch {
+            health_check_url: if matches!(
+                profile.provider,
+                crate::models::RuntimeProviderId::Torch | crate::models::RuntimeProviderId::Basalt
+            ) {
                 RuntimeEndpointUrl::parse(format!(
                     "{}/health",
                     endpoint_url.as_str().trim_end_matches('/')
@@ -234,7 +241,8 @@ fn profile_runtime_env_vars(
         }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::LlamaCppRouter
-            | RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
+            | RuntimeProfileBinaryLaunchKind::LlamaCppDedicated
+            | RuntimeProfileBinaryLaunchKind::BasaltServe,
         )
         | RuntimeProfileLaunchStrategy::InProcessRuntime(_)
         | RuntimeProfileLaunchStrategy::ExternalOnly => {}
@@ -291,6 +299,19 @@ fn profile_runtime_extra_args(
             args.extend([
                 "--onnx-device-mode".to_string(),
                 onnx_device_mode_arg(profile.device.mode).to_string(),
+            ]);
+            Ok(args)
+        }
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::BasaltServe,
+        ) => {
+            let mut args = vec!["-B".into(), "-m".into(), "serve.server".into()];
+            args.extend(runtime_listener_args(endpoint_url, port)?);
+            args.extend([
+                "--gpu".into(),
+                "auto".into(),
+                "--vision".into(),
+                "dynamic".into(),
             ]);
             Ok(args)
         }
@@ -497,6 +518,30 @@ fn apply_device_visibility_env(
             }
         }
         RuntimeDeviceMode::Auto | RuntimeDeviceMode::Hybrid => {}
+    }
+}
+
+#[cfg(test)]
+mod gated_provider_tests {
+    use super::*;
+    use crate::models::{RuntimeProviderId, RuntimeProviderMode};
+
+    #[test]
+    fn an_unregistered_basalt_profile_does_not_block_other_profiles() {
+        let mut config = RuntimeProfilesConfigFile::default_seed();
+        let mut basalt = config.profiles[0].clone();
+        basalt.profile_id = RuntimeProfileId::parse("basalt-disabled").unwrap();
+        basalt.provider = RuntimeProviderId::Basalt;
+        basalt.provider_mode = RuntimeProviderMode::BasaltServe;
+        config.profiles.push(basalt);
+        let registry = ProviderRegistry::from_behaviors([ProviderBehavior::ollama()]);
+
+        let specs =
+            derive_managed_profile_launch_specs(Path::new("/fixture"), &config, &registry).unwrap();
+
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].provider, RuntimeProviderId::Ollama);
+        assert_eq!(config.profiles.len(), 2);
     }
 }
 

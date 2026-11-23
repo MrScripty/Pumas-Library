@@ -43,6 +43,8 @@ const VERSION_MANAGED_APPS: &[AppId] = &[
     AppId::Torch,
     AppId::LlamaCpp,
     AppId::OnnxRuntime,
+    #[cfg(all(feature = "basalt", target_os = "linux", target_arch = "x86_64"))]
+    AppId::Basalt,
 ];
 
 async fn finish_signal_observer(task: &mut tokio::task::JoinHandle<Result<()>>) -> Result<()> {
@@ -552,7 +554,9 @@ mod tests {
                 AppId::Ollama,
                 AppId::Torch,
                 AppId::LlamaCpp,
-                AppId::OnnxRuntime
+                AppId::OnnxRuntime,
+                #[cfg(all(feature = "basalt", target_os = "linux", target_arch = "x86_64"))]
+                AppId::Basalt,
             ]
         );
         assert!(VERSION_MANAGED_APPS.iter().all(AppId::has_version_manager));

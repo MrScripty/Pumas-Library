@@ -193,6 +193,7 @@ export function ModelMetadataModalContent({
             saveError={saveError}
             saveSuccess={saveSuccess}
             saving={saving}
+            schemaEditable={!primaryFile?.toLowerCase().endsWith('.basalt')}
             onAddParam={onAddParam}
             onNewParamChange={onNewParamChange}
             onParamDefaultChange={onParamDefaultChange}

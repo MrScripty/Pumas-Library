@@ -79,7 +79,13 @@ pub(super) async fn launch_runtime_profile_with_receipt(
         // A runtime whose packages cannot run it is refused with the reasons.
         crate::runtime_profiles::prepare_torch_sidecar(launcher_root, version_dir).await?;
     }
-    let config = runtime_profile_binary_launch_config(tag, version_dir, launcher_root, &spec)?;
+    let mut config = runtime_profile_binary_launch_config(tag, version_dir, launcher_root, &spec)?;
+    if matches!(
+        spec.launch_strategy,
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::BasaltServe)
+    ) {
+        crate::basalt_distribution::prepare_launch(&mut config).await?;
+    }
     primary
         .runtime_profile_service
         .process_owner
@@ -193,6 +199,9 @@ fn runtime_profile_binary_launch_config(
         RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::OnnxHost) => {
             onnx_host_launch_config(tag, version_dir)?
         }
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::BasaltServe,
+        ) => BinaryLaunchConfig::basalt(tag, version_dir),
         RuntimeProfileLaunchStrategy::InProcessRuntime(_) => {
             return Err(PumasError::InvalidParams {
                 message: "in-process runtime profiles are not launched as binary processes"
@@ -291,6 +300,51 @@ async fn prepare_runtime_profile_launch_spec(
                 crate::runtime_profiles::TORCH_MODEL_ROOTS_ENV.to_string(),
                 crate::runtime_profiles::torch_model_roots(&primary.model_library).await?,
             );
+        }
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::BasaltServe,
+        ) => {
+            let model_id = model_id.ok_or_else(|| PumasError::InvalidParams {
+                message: "model_id is required to launch a Basalt profile".into(),
+            })?;
+            let model_path = primary
+                .model_library
+                .get_primary_model_file(model_id)
+                .ok_or_else(|| PumasError::ModelNotFound {
+                    model_id: model_id.to_owned(),
+                })?;
+            if ExecutableArtifactFormat::from_path(&model_path)
+                != Some(ExecutableArtifactFormat::Basalt)
+            {
+                return Err(PumasError::InvalidParams {
+                    message: "Basalt profiles require a .basalt model pack".into(),
+                });
+            }
+            let path = model_path
+                .to_str()
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: "Basalt model pack path must be Unicode".into(),
+                })?;
+            launch_spec.extra_args.extend([
+                "--model".into(),
+                path.into(),
+                "--alias".into(),
+                model_id.into(),
+            ]);
+            if let Some(context) = overrides.and_then(|overrides| overrides.context_size) {
+                launch_spec
+                    .extra_args
+                    .extend(["--max-context".into(), context.to_string()]);
+            }
+            if let Some(device_id) = overrides
+                .and_then(|overrides| overrides.device.as_ref())
+                .and_then(|device| device.device_id.as_ref())
+            {
+                launch_spec
+                    .env_vars
+                    .insert("CUDA_VISIBLE_DEVICES".into(), device_id.clone());
+            }
+            selected_model_path = Some(model_path);
         }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe | RuntimeProfileBinaryLaunchKind::OnnxHost,

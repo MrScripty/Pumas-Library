@@ -38,7 +38,13 @@ async fn typed_stream(bytes: Vec<u8>) -> String {
             .into_iter()
             .map(|b| Ok::<_, io::Error>(Bytes::from(vec![b]))),
     ));
-    let response = stream::response(body.into_response(), &request, "llama-cpu", None);
+    let response = stream::response(
+        body.into_response(),
+        &request,
+        "llama-cpu",
+        RuntimeProviderId::LlamaCpp,
+        None,
+    );
     String::from_utf8(
         to_bytes(response.into_body(), MAX_BYTES)
             .await
@@ -165,7 +171,7 @@ fn request_ids_are_correlation_and_embedding_bounds_belong_to_the_provider() {
 #[test]
 fn finite_projection_accepts_typed_text_and_rejects_raw_or_incoherent_results() {
     let r = request();
-    assert_eq!(projection::result(&r,json!({"choices":[{"index":0,"message":{"role":"assistant","content":"héllo"},"finish_reason":"stop"}],"secret_provider_field":"discard"})).unwrap(),OperationResult::Text{text:"héllo".into(),finish_reason:FinishReason::Stop});
+    assert_eq!(projection::result(&r,json!({"choices":[{"index":0,"message":{"role":"assistant","content":"héllo"},"finish_reason":"stop"}],"secret_provider_field":"discard"}), RuntimeProviderId::LlamaCpp).unwrap(),OperationResult::Text{text:"héllo".into(),finish_reason:FinishReason::Stop});
     for value in [
         json!("raw text"),
         json!({"choices":[]}),
@@ -174,7 +180,7 @@ fn finite_projection_accepts_typed_text_and_rejects_raw_or_incoherent_results() 
         json!({"choices":[{"index":0,"message":{"role":"assistant","content":"x"},"finish_reason":null}]}),
     ] {
         assert_eq!(
-            projection::result(&r, value),
+            projection::result(&r, value, RuntimeProviderId::LlamaCpp),
             Err(ErrorCode::InvalidProviderResult)
         );
     }
@@ -192,7 +198,8 @@ fn embeddings_enforce_count_indices_dimensions_and_finite_float32() {
     assert_eq!(
         projection::result(
             &r,
-            json!({"data":[{"index":0,"embedding":[0.2,0.4]},{"index":1,"embedding":[0.3,0.5]}]})
+            json!({"data":[{"index":0,"embedding":[0.2,0.4]},{"index":1,"embedding":[0.3,0.5]}]}),
+            RuntimeProviderId::LlamaCpp,
         )
         .unwrap(),
         OperationResult::Embeddings {
@@ -206,7 +213,7 @@ fn embeddings_enforce_count_indices_dimensions_and_finite_float32() {
         json!({"data":[{"index":0,"embedding":[1e100,0.4]},{"index":1,"embedding":[0.3,0.5]}]}),
     ] {
         assert_eq!(
-            projection::result(&r, value),
+            projection::result(&r, value, RuntimeProviderId::LlamaCpp),
             Err(ErrorCode::InvalidProviderResult)
         );
     }
@@ -231,6 +238,27 @@ async fn stream_preserves_utf8_fragmentation_multiline_data_and_correlation() {
         );
     }
 }
+#[tokio::test]
+async fn basalt_stream_publishes_answer_text_without_private_reasoning() {
+    let mut request = request();
+    request.stream = true;
+    let reasoning = "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"private thought\"},\"finish_reason\":null}]}\n\n";
+    let source = Body::from(format!("{reasoning}{}{}", delta("ready"), finished()));
+    let response = stream::response(
+        source.into_response(),
+        &request,
+        "inkling",
+        RuntimeProviderId::Basalt,
+        None,
+    );
+    let bytes = to_bytes(response.into_body(), MAX_BYTES).await.unwrap();
+    let output = std::str::from_utf8(&bytes).unwrap();
+    assert!(output.contains("ready"));
+    assert!(output.contains("event: completed"));
+    assert!(!output.contains("private thought"));
+    assert!(!output.contains("event: failed"));
+}
+
 #[tokio::test]
 async fn incomplete_and_incoherent_streams_never_complete_successfully() {
     let sources=vec![delta("x"),"data: [DONE]\n\n".into(),format!("{}data: [DONE]\n\n",delta("x")),format!("{}data: {{}}\n\n",finished()),"data: not-json\n\n".into(),"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[]},\"finish_reason\":null}]}\n\n".into(),"data: {\"choices\":[{\"index\":1,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".into(),"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n".into(),"data: {\"error\":{\"secret\":\"backend path\"}}\n\n".into(),format!("{}data: [DONE]",finished().split("data: [DONE]").next().unwrap())];
@@ -258,7 +286,14 @@ async fn stream_event_limit_and_truncated_transport_are_failures() {
     ]));
     let output = String::from_utf8(
         to_bytes(
-            stream::response(body.into_response(), &r, "cpu", None).into_body(),
+            stream::response(
+                body.into_response(),
+                &r,
+                "cpu",
+                RuntimeProviderId::LlamaCpp,
+                None,
+            )
+            .into_body(),
             MAX_BYTES,
         )
         .await
@@ -289,9 +324,15 @@ async fn stream_progresses_without_eof_and_holds_original_body_until_completion_
     });
     let mut r = request();
     r.stream = true;
-    let mut output = stream::response(Body::from_stream(source).into_response(), &r, "cpu", None)
-        .into_body()
-        .into_data_stream();
+    let mut output = stream::response(
+        Body::from_stream(source).into_response(),
+        &r,
+        "cpu",
+        RuntimeProviderId::LlamaCpp,
+        None,
+    )
+    .into_body()
+    .into_data_stream();
     assert!(std::str::from_utf8(&output.next().await.unwrap().unwrap())
         .unwrap()
         .contains("event: started"));
@@ -332,10 +373,15 @@ async fn projection_fault_immediately_drops_provider_and_body_disposal_closes_si
             });
         let mut r = request();
         r.stream = true;
-        let mut output =
-            stream::response(Body::from_stream(source).into_response(), &r, "cpu", None)
-                .into_body()
-                .into_data_stream();
+        let mut output = stream::response(
+            Body::from_stream(source).into_response(),
+            &r,
+            "cpu",
+            RuntimeProviderId::LlamaCpp,
+            None,
+        )
+        .into_body()
+        .into_data_stream();
         output.next().await.unwrap().unwrap();
         if invalid {
             sender
@@ -1292,7 +1338,14 @@ async fn typed_event_bound_includes_added_correlation_and_framing() {
         Bytes::from(provider_frame),
     )]));
     let output = to_bytes(
-        stream::response(source.into_response(), &r, "cpu", None).into_body(),
+        stream::response(
+            source.into_response(),
+            &r,
+            "cpu",
+            RuntimeProviderId::LlamaCpp,
+            None,
+        )
+        .into_body(),
         MAX_BYTES,
     )
     .await
@@ -1340,6 +1393,7 @@ async fn stop_and_shutdown_gate_buffered_typed_events_and_release_original_permi
             Body::from_stream(source).into_response(),
             &r,
             "cpu",
+            RuntimeProviderId::LlamaCpp,
             Some(cancellation),
         )
         .into_body()
@@ -1409,7 +1463,8 @@ fn mixed_error_and_result_envelopes_cannot_be_successful_typed_results() {
     assert_eq!(
         projection::result(
             &r,
-            json!({"error":{"message":"private failure"},"choices":[{"index":0,"message":{"role":"assistant","content":"misleading"},"finish_reason":"stop"}]})
+            json!({"error":{"message":"private failure"},"choices":[{"index":0,"message":{"role":"assistant","content":"misleading"},"finish_reason":"stop"}]}),
+            RuntimeProviderId::LlamaCpp,
         ),
         Err(ErrorCode::ProviderFailure)
     );
@@ -1422,7 +1477,8 @@ fn mixed_error_and_result_envelopes_cannot_be_successful_typed_results() {
     assert_eq!(
         projection::result(
             &r,
-            json!({"error":"private failure","data":[{"index":0,"embedding":[1.,0.]}]})
+            json!({"error":"private failure","data":[{"index":0,"embedding":[1.,0.]}]}),
+            RuntimeProviderId::LlamaCpp,
         ),
         Err(ErrorCode::ProviderFailure)
     );
@@ -2247,20 +2303,22 @@ fn requested_dimensions_truncate_and_renormalize_provider_vectors() {
         dimensions: Some(2),
     };
     let provider = json!({"data":[{"index":0,"embedding":[0.6,0.0,0.8,0.0]}]});
-    let OperationResult::Embeddings { vectors } = projection::result(&r, provider).unwrap() else {
+    let OperationResult::Embeddings { vectors } =
+        projection::result(&r, provider, RuntimeProviderId::LlamaCpp).unwrap()
+    else {
         panic!("embedding result");
     };
     assert_eq!(vectors, vec![vec![1.0, 0.0]]);
     // A provider that honored the dimension is passed through.
     let exact = json!({"data":[{"index":0,"embedding":[0.6,0.8]}]});
-    assert!(projection::result(&r, exact).is_ok());
+    assert!(projection::result(&r, exact, RuntimeProviderId::LlamaCpp).is_ok());
     // More dimensions than the model produces cannot be invented.
     r.options = OperationOptions::Embeddings {
         dimensions: Some(8),
     };
     let short = json!({"data":[{"index":0,"embedding":[0.6,0.8]}]});
     assert_eq!(
-        projection::result(&r, short),
+        projection::result(&r, short, RuntimeProviderId::LlamaCpp),
         Err(ErrorCode::InvalidProviderResult)
     );
 }
@@ -2280,7 +2338,9 @@ fn requested_dimensions_truncate_every_vector_of_a_batch() {
         {"index":0,"embedding":[0.6,0.0,0.8,0.0]},
         {"index":1,"embedding":[0.0,0.6,0.0,0.8]}
     ]});
-    let OperationResult::Embeddings { vectors } = projection::result(&r, provider).unwrap() else {
+    let OperationResult::Embeddings { vectors } =
+        projection::result(&r, provider, RuntimeProviderId::LlamaCpp).unwrap()
+    else {
         panic!("embedding result");
     };
     assert_eq!(vectors, vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
@@ -2290,7 +2350,7 @@ fn requested_dimensions_truncate_every_vector_of_a_batch() {
         {"index":1,"embedding":[0.6,0.8]}
     ]});
     assert_eq!(
-        projection::result(&r, ragged),
+        projection::result(&r, ragged, RuntimeProviderId::LlamaCpp),
         Err(ErrorCode::InvalidProviderResult)
     );
 }
@@ -2339,6 +2399,7 @@ fn image_and_mixed_items_project_to_llama_cpp_multimodal_embeddings() {
     let result = projection::result(
         &prepared,
         json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.0,1.0]}]}),
+        RuntimeProviderId::LlamaCpp,
     )
     .unwrap();
     assert!(matches!(result, OperationResult::Embeddings { ref vectors } if vectors.len() == 2));

@@ -1,0 +1,41 @@
+<!-- Basalt project mark from https://github.com/jesdga95/basalt/blob/v0.5.6/assets/basalt-mark.svg
+
+MIT License
+
+Copyright (c) 2026 Jesús Gulfo
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="basalt">
+  <defs>
+    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFC566"/>
+      <stop offset="0.55" stop-color="#F2662B"/>
+      <stop offset="1" stop-color="#C9461C"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0E1114"/>
+  <polygon points="47.59,23.90 54.60,27.95 54.60,36.05 47.59,40.10 40.57,36.05 40.57,27.95" fill="#2C353E"/>
+  <polygon points="39.79,37.40 46.81,41.45 46.81,49.55 39.79,53.60 32.78,49.55 32.78,41.45" fill="#222A31"/>
+  <polygon points="24.21,37.40 31.22,41.45 31.22,49.55 24.21,53.60 17.19,49.55 17.19,41.45" fill="#2C353E"/>
+  <polygon points="16.41,23.90 23.43,27.95 23.43,36.05 16.41,40.10 9.40,36.05 9.40,27.95" fill="#222A31"/>
+  <polygon points="24.21,10.40 31.22,14.45 31.22,22.55 24.21,26.60 17.19,22.55 17.19,14.45" fill="#3A4550"/>
+  <polygon points="39.79,10.40 46.81,14.45 46.81,22.55 39.79,26.60 32.78,22.55 32.78,14.45" fill="#2C353E"/>
+  <polygon points="32.00,23.90 39.01,27.95 39.01,36.05 32.00,40.10 24.99,36.05 24.99,27.95" fill="url(#ember)"/>
+</svg>

@@ -181,7 +181,9 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
         return prev;
       }
       const updated = { ...param };
-      if (param.param_type === 'Integer') {
+      if (value === '' && (param.param_type !== 'String' || param.key === 'reasoning_effort')) {
+        updated.default = null;
+      } else if (param.param_type === 'Integer') {
         const parsed = parseInt(value, 10);
         updated.default = isNaN(parsed) ? value : parsed;
       } else if (param.param_type === 'Number') {

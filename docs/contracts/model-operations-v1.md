@@ -130,8 +130,10 @@ the same serving identity again before handing work to a provider.
 The implemented capabilities are `chat_generation`, `text_generation`,
 `text_embedding`, `image_generation`, `image_to_text`, `multimodal_embedding`,
 `decision` and `rerank`. Vision-language models (`image-text-to-text`) offer chat,
-text generation and image-to-text. Non-text input needs a llama.cpp session
-(dedicated or router) with the model's projector loaded. A model with no
+text generation and image-to-text where the provider supports each operation.
+Non-text input for llama.cpp needs an active session (dedicated or router)
+with the model's projector loaded. Basalt provides chat and reports whether
+the loaded pack supports image input. A model with no
 recorded task is described by its runtime: when llama.cpp publishes the
 model's architecture and it declares text output, the model offers chat and
 text generation, and image-to-text if it declares image input.
@@ -272,6 +274,10 @@ checks a single text choice, embedding count/index/dimension coherence, and
 rejects incoherent provider results. Provider envelopes and internal errors are
 not exposed.
 
+For Basalt, a normal stop or token-limit finish without visible answer text
+returns an empty `text` string with the reported finish reason. The typed
+response omits reasoning.
+
 Errors follow [Errors](#errors). A request ID is never forwarded as a provider
 idempotency key, and generation is never replayed.
 
@@ -351,3 +357,7 @@ ready. Every Torch runtime resolves the audio packages with the other general
 modalities (current releases, Transformers 5.4 or newer where its Torch allows)
 and loads the model from local files only, without repository code. Its
 install probe reports Cohere ASR unavailable, with the reason, when it cannot.
+
+## Basalt generation defaults
+
+A loaded Basalt profile advertises chat generation and the modalities its owned session reports. Set per-model defaults through the model inference settings JSON-RPC methods. For a single operation, `options.kind` is `text_generation`. Alongside `temperature`, `top_p`, and `max_tokens`, the optional `sampling` object accepts `reasoning_effort`, `top_k`, `min_p`, `repetition_penalty`, `presence_penalty`, `frequency_penalty`, and `seed`. Pumas rejects sampling objects for providers that have not enabled these settings. Explicit values override saved settings. See [Managed Basalt](../runtimes/basalt.md).

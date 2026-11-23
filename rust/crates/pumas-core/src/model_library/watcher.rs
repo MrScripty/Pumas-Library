@@ -11,18 +11,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-/// Model file extensions that should trigger a rebuild.
-const MODEL_EXTENSIONS: &[&str] = &[
-    "gguf",
-    "safetensors",
-    "pt",
-    "pth",
-    "ckpt",
-    "bin",
-    "onnx",
-    "json", // metadata.json changes
-];
-
 /// Callback type for when model library changes are detected.
 pub type ChangeCallback = Box<dyn Fn(Vec<PathBuf>) + Send + Sync + 'static>;
 
@@ -165,7 +153,7 @@ fn is_relevant_change(path: &Path) -> bool {
     // Check file extension
     if let Some(ext) = path.extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
-        if MODEL_EXTENSIONS.contains(&ext_str.as_str()) {
+        if ext_str == "json" || super::MODEL_FILE_EXTENSIONS.contains(&ext_str.as_str()) {
             return true;
         }
     }

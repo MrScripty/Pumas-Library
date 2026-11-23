@@ -16,7 +16,22 @@ pub(super) fn validate_provider_placement(
 ) -> Vec<ModelServeError> {
     match behavior.serving_placement_policy {
         ProviderServingPlacementPolicy::ProfileOnly => {
-            validate_profile_only_placement(model_id, request, profile)
+            validate_profile_only_placement(model_id, request, profile, false)
+        }
+        ProviderServingPlacementPolicy::BasaltDedicated => {
+            let mut errors = validate_profile_only_placement(model_id, request, profile, true);
+            if request
+                .config
+                .context_size
+                .is_some_and(|size| !(1024..=1_048_576).contains(&size))
+            {
+                errors.push(unsupported_placement(
+                    model_id,
+                    request,
+                    "Basalt context size must be between 1024 and 1048576 tokens",
+                ));
+            }
+            errors
         }
         ProviderServingPlacementPolicy::LlamaCppRuntime => {
             validate_llama_cpp_placement(model_id, request, profile, context)
@@ -102,6 +117,7 @@ fn validate_profile_only_placement(
     model_id: &str,
     request: &ServeModelRequest,
     profile: &ServingValidationProfile,
+    supports_context_override: bool,
 ) -> Vec<ModelServeError> {
     let mut errors = Vec::new();
 
@@ -141,7 +157,7 @@ fn validate_profile_only_placement(
         ));
     }
 
-    if request.config.context_size.is_some() {
+    if !supports_context_override && request.config.context_size.is_some() {
         errors.push(unsupported_placement(
             model_id,
             request,

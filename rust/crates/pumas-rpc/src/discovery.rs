@@ -47,6 +47,7 @@ pub(crate) fn build_info() -> PumasBuildInfo {
     info.package_version = env!("CARGO_PKG_VERSION").into();
     for (name, enabled) in [
         ("inference-plugins", cfg!(feature = "inference-plugins")),
+        ("basalt", pumas_library::basalt_distribution::available()),
         ("s3", cfg!(feature = "s3")),
         ("export-contract", cfg!(feature = "export-contract")),
         ("test-support", cfg!(feature = "test-support")),

@@ -22,6 +22,10 @@ On Windows, use `launcher.ps1` with the same flags. For a release build, use `--
 
 Your library root contains `launcher-data/` and `shared-resources/`; models live in `shared-resources/models/`. Set `PUMAS_LAUNCHER_ROOT` to choose a root. Read [the upgrade guide](docs/library-upgrade.md) before opening an older library.
 
+## Serve a Basalt model
+
+For Linux x64 with an NVIDIA Blackwell GPU, see [Managed Basalt setup](docs/runtimes/basalt.md) for installing the runtime, importing Inkling 2 Mini, and setting per-model generation defaults.
+
 ## Run just the backend
 
 Use Rust 1.92.0, CMake and your platform's C/C++ build tools. No Node, frontend assets or Electron are needed:

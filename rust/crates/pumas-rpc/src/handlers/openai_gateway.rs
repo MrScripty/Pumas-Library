@@ -488,6 +488,17 @@ pub(super) async fn dispatch_openai(
         );
     }
 
+    if served.provider == RuntimeProviderId::Basalt {
+        if let Err(error) =
+            super::serving_basalt::apply_inference_defaults(&state, &served, &mut body).await
+        {
+            return openai_public_error_response(
+                StatusCode::BAD_REQUEST,
+                PublicError::from(&error),
+            );
+        }
+    }
+
     let target_url = format!("{}{}", endpoint.as_str().trim_end_matches('/'), path.path());
     let mut lifetime = if policy.generation {
         let permit = match gateway_stream::try_admit() {
@@ -560,11 +571,16 @@ pub(super) async fn dispatch_openai(
                 .filter_map(|m| serde_json::to_value(m).ok()?.as_str().map(str::to_owned))
                 .collect::<Vec<_>>()
                 .join(" and ");
+            let requirement = if served.provider == RuntimeProviderId::Basalt {
+                "The selected Basalt model must report that image input is available"
+            } else {
+                "The selected llama.cpp profile must be enabled with the model's projector loaded"
+            };
             return openai_public_error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
                 PublicError {
                     message: std::borrow::Cow::Owned(format!(
-                        "{names} input for the selected model is not ready: it needs an enabled llama.cpp profile with the model's projector loaded."
+                        "{names} input for the selected model is unavailable. {requirement}."
                     )),
                     ..PublicError::unavailable()
                 },

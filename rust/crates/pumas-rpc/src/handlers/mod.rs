@@ -26,6 +26,8 @@ mod runtime_profiles;
 #[cfg(feature = "inference-plugins")]
 mod serving;
 #[cfg(feature = "inference-plugins")]
+mod serving_basalt;
+#[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp;
 #[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp_router;
@@ -2724,7 +2726,10 @@ mod tests {
         {
             assert_eq!(wire["result"]["success"], true);
             let providers = wire["result"]["providers"].as_array().unwrap();
-            assert_eq!(providers.len(), 4);
+            assert_eq!(
+                providers.len(),
+                4 + usize::from(pumas_library::basalt_distribution::available()),
+            );
             assert_eq!(providers[2]["provider"], "onnx_runtime");
             assert_eq!(providers[2]["app_id"], "onnx-runtime");
             let rejected = call(json!({"app_id":"ollama"})).await;

@@ -67,6 +67,7 @@ pub enum PackageArtifactKind {
     Safetensors,
     DiffusersBundle,
     Onnx,
+    Basalt,
     Adapter,
     Shard,
     Unknown,

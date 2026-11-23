@@ -262,7 +262,7 @@ export interface DetectShardedSetsResponse extends BaseResponse {
  */
 export interface FileTypeValidationResponse extends BaseResponse {
   valid: boolean;
-  detected_type: 'safetensors' | 'gguf' | 'ggml' | 'pickle' | 'onnx' | 'unknown' | 'error';
+  detected_type: 'safetensors' | 'gguf' | 'ggml' | 'pickle' | 'onnx' | 'basalt' | 'unknown' | 'error';
   error?: string;
 }
 

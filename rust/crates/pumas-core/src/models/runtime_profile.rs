@@ -114,6 +114,7 @@ pub enum RuntimeProviderId {
     Ollama,
     LlamaCpp,
     OnnxRuntime,
+    Basalt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -125,6 +126,7 @@ pub enum RuntimeProviderMode {
     LlamaCppRouter,
     LlamaCppDedicated,
     OnnxServe,
+    BasaltServe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

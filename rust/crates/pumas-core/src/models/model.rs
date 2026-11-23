@@ -695,6 +695,7 @@ fn default_kind() -> String {
 /// - GGUF: Ollama, llama.cpp
 /// - SafeTensors: Candle, Diffusers, transformers, vLLM, MLX
 /// - ONNX: ONNX Runtime
+/// - Basalt: Basalt
 /// - PyTorch (.bin, .pt, .pth): transformers, Diffusers, vLLM, MLX
 pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
     use std::collections::HashSet;
@@ -725,6 +726,9 @@ pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
             }
             "onnx" => {
                 engines.insert("onnx-runtime");
+            }
+            "basalt" => {
+                engines.insert("basalt");
             }
             "tensorrt" => {
                 engines.insert("tensorrt");
@@ -901,6 +905,7 @@ pub enum DetectedFileType {
     Ggml,
     Pickle,
     Onnx,
+    Basalt,
     Unknown,
     Error,
 }

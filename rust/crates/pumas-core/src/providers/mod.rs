@@ -14,6 +14,7 @@ pub enum ExecutableArtifactFormat {
     Safetensors,
     Gguf,
     Onnx,
+    Basalt,
 }
 
 impl ExecutableArtifactFormat {
@@ -22,6 +23,7 @@ impl ExecutableArtifactFormat {
             "safetensors" => Some(Self::Safetensors),
             "gguf" => Some(Self::Gguf),
             "onnx" => Some(Self::Onnx),
+            "basalt" => Some(Self::Basalt),
             _ => None,
         }
     }
@@ -77,6 +79,7 @@ pub enum ProviderBinaryLaunchTarget {
     LlamaCppDedicated,
     /// The ONNX host process (`pumas-rpc --onnx-host`) of an ONNX Runtime profile.
     OnnxHost,
+    BasaltServe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -120,6 +123,7 @@ pub enum ProviderServingAdapterKind {
     OllamaProviderApi,
     LlamaCppRuntime,
     OnnxRuntime,
+    BasaltRuntime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -127,6 +131,7 @@ pub enum ProviderServingAdapterKind {
 pub enum ProviderServingPlacementPolicy {
     ProfileOnly,
     LlamaCppRuntime,
+    BasaltDedicated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -136,6 +141,7 @@ pub enum ProviderUnloadBehavior {
     ProviderApi,
     RouterPreset,
     SessionManager,
+    DedicatedProcess,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -332,6 +338,49 @@ impl ProviderBehavior {
         }
     }
 
+    pub fn basalt() -> Self {
+        let app = crate::config::AppId::Basalt;
+        Self {
+            provider: RuntimeProviderId::Basalt,
+            provider_modes: vec![RuntimeProviderMode::BasaltServe],
+            device_modes: vec![
+                RuntimeDeviceMode::Auto,
+                RuntimeDeviceMode::Gpu,
+                RuntimeDeviceMode::SpecificDevice,
+            ],
+            local_artifact_formats: vec![ExecutableArtifactFormat::Basalt],
+            serving_tasks: vec![ServingTask::Chat, ServingTask::ImageToText],
+            openai_endpoints: vec![
+                OpenAiGatewayEndpoint::Models,
+                OpenAiGatewayEndpoint::ChatCompletions,
+            ],
+            launch_kinds: vec![ProviderLaunchKind::BinaryProcess],
+            managed_launch_strategies: vec![ProviderManagedLaunchStrategy {
+                provider_mode: RuntimeProviderMode::BasaltServe,
+                target: ProviderManagedLaunchTarget::BinaryProcess(
+                    ProviderBinaryLaunchTarget::BasaltServe,
+                ),
+            }],
+            managed_runtime_app_id: app.as_str().into(),
+            managed_runtime_uninitialized_message: "Basalt version manager is unavailable".into(),
+            managed_runtime_no_active_version_message:
+                "Install and activate a Basalt version first".into(),
+            managed_runtime_path_segment: app.as_str().into(),
+            managed_runtime_base_port: app.default_port(),
+            provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
+            gateway_alias_policy: ProviderGatewayAliasPolicy::LibraryModelId,
+            serving_adapter_kind: ProviderServingAdapterKind::BasaltRuntime,
+            serving_placement_policy: ProviderServingPlacementPolicy::BasaltDedicated,
+            unload_behavior: ProviderUnloadBehavior::DedicatedProcess,
+            supports_managed_profiles: true,
+            supports_external_profiles: false,
+            supports_model_catalog: true,
+            supports_dedicated_model_processes: true,
+            supports_launch_on_serve: true,
+            supports_default_profile_fallback: false,
+        }
+    }
+
     pub fn torch() -> Self {
         Self {
             provider: RuntimeProviderId::Torch,
@@ -444,12 +493,16 @@ pub struct ProviderRegistry {
 
 impl ProviderRegistry {
     pub fn builtin() -> Self {
-        Self::from_behaviors([
+        let mut behaviors = vec![
             ProviderBehavior::ollama(),
             ProviderBehavior::llama_cpp(),
             ProviderBehavior::onnx_runtime(),
             ProviderBehavior::torch(),
-        ])
+        ];
+        if crate::basalt_distribution::available() {
+            behaviors.push(ProviderBehavior::basalt());
+        }
+        Self::from_behaviors(behaviors)
     }
 
     pub fn from_behaviors(behaviors: impl IntoIterator<Item = ProviderBehavior>) -> Self {
@@ -475,6 +528,7 @@ impl ProviderRegistry {
             RuntimeProviderId::LlamaCpp,
             RuntimeProviderId::OnnxRuntime,
             RuntimeProviderId::Torch,
+            RuntimeProviderId::Basalt,
         ] {
             if let Some(behavior) = self.providers.get(&provider) {
                 providers.push(behavior);
@@ -502,7 +556,14 @@ mod tests {
         assert!(registry.contains(RuntimeProviderId::LlamaCpp));
         assert!(registry.contains(RuntimeProviderId::OnnxRuntime));
         assert!(registry.contains(RuntimeProviderId::Torch));
-        assert_eq!(registry.providers().len(), 4);
+        assert_eq!(
+            registry.contains(RuntimeProviderId::Basalt),
+            crate::basalt_distribution::available()
+        );
+        assert_eq!(
+            registry.providers().len(),
+            4 + usize::from(crate::basalt_distribution::available())
+        );
     }
 
     #[test]

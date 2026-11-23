@@ -655,8 +655,7 @@ fn is_model_file(name: &str) -> bool {
         .extension()
         .and_then(|value| value.to_str())
         .is_some_and(|ext| {
-            ["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"]
-                .contains(&ext.to_ascii_lowercase().as_str())
+            crate::model_library::MODEL_FILE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
         })
 }
 

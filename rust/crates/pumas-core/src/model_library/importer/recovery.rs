@@ -293,8 +293,6 @@ impl ModelImporter {
     /// Find directories with model files but no metadata.json.
     fn find_orphan_dirs(&self, library_root: &Path, stop_after_first: bool) -> Vec<PathBuf> {
         let mut orphans = Vec::new();
-        let model_extensions: &[&str] =
-            &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
 
         for entry in WalkDir::new(library_root)
             .min_depth(1)
@@ -344,7 +342,10 @@ impl ModelImporter {
                     .path()
                     .extension()
                     .and_then(|ext| ext.to_str())
-                    .map(|ext| model_extensions.contains(&ext.to_lowercase().as_str()))
+                    .map(|ext| {
+                        crate::model_library::MODEL_FILE_EXTENSIONS
+                            .contains(&ext.to_lowercase().as_str())
+                    })
                     .unwrap_or(false)
             });
 

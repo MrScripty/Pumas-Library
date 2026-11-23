@@ -60,6 +60,18 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     canLaunchOnServe: true,
     requiresSavedRouteForImplicitServe: true,
   },
+  basalt: {
+    id: 'basalt',
+    label: 'Basalt',
+    compatibleExecutableFormats: ['basalt'],
+    dedicatedPlacementModes: [],
+    supportsGpuLayers: false,
+    supportsTensorSplit: false,
+    supportsContextSize: true,
+    defaultContextSize: null,
+    canLaunchOnServe: true,
+    requiresSavedRouteForImplicitServe: true,
+  },
   onnx_runtime: {
     id: 'onnx_runtime',
     label: 'ONNX Runtime',
@@ -79,6 +91,7 @@ const modeLabels: Record<RuntimeProviderMode, string> = {
   llama_cpp_router: 'Router',
   llama_cpp_dedicated: 'Dedicated',
   onnx_serve: 'Serve',
+  basalt_serve: 'Serve',
   torch_serve: 'Serve',
 };
 
